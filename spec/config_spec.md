@@ -66,7 +66,7 @@ This prefix is removed from the beginning of the source path that matched the gl
   → Maps the source file `file1` directly to the target path `file2` (no stripping occurs).
 
 * **Literal Directory:** `"dir1" = "dir2"`  
-  → Maps the source directory `dir1` (and all its contents) directly to the target path `dir2` (no stripping occurs).
+  → Maps the source directory `dir1` recursively (including all contents and subdirs) to the target path `dir2` (no stripping occurs).
 
 * **Glob (Subdirectory):** `"src/**/*.rs" = "dist"`  
   → Path components of key: `src`, `**/*.rs`.  
@@ -85,6 +85,11 @@ This prefix is removed from the beginning of the source path that matched the gl
   → First (and only) component contains a wildcard.  
   → Stripping prefix = `""` (empty).  
   → Source file `config.ini` → after stripping → `config.ini` (full filename is kept) → final target = `settings/config.ini`.
+
+### Recursion & Multi-Match
+* Literal directories and globs like `"dir/**"` recurse into directories, mapping contents.
+* Empty directories in source are ignored (no target mapping).
+* A source file or directory can match multiple portals, mapping to multiple targets if no target path collision.
 
 ---
 
@@ -117,6 +122,7 @@ Defines the deployment method (`type`) and file permissions (`mode`), directory 
 
 ### Errors (Halts Execution)
 * **Invalid Target Directory:** If `target-dir` is provided but is not a valid absolute path.
+* **Source-Target Overlap:** Error if `source-dir` equals `target-dir` (prevents self-modification loops).
 * **Path Traversal:** If a resolved target path attempts to escape the defined `target-dir`, or if a source path escapes the source directory.
 * **Empty Patterns:** If a `[portal]` key or value is an empty string.
 * **Target Collisions:** If two different source paths resolve to the exact same target path. This inherently catches exact duplicate `[portal]` rules after path normalization.

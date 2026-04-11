@@ -21,12 +21,14 @@ This document defines the CLI structure, global behaviors, database schema, and 
 
 The local database tracks managed files. It is the single source of truth for resolving states in `diff`, `status`, `apply`, and `unapply`.
 
+**Location:** `~/.local/state/dotrift.db` (global).
+
 **Key:** `target_path` (String, absolute path)
 
 **Value:** Struct
 * `action_type`: Enum (`Symlink` | `Copy`)
 * `reference`: String (Absolute path in `source-dir`. Used to read content for copies, or verify link targets for symlinks).
-* `hash`: String (Hash of source content at last apply, null for symlinks).
+* `hash`: String (Hex digest using `ahash` crate of source content at last apply, null for symlinks).
 
 ---
 
@@ -44,9 +46,9 @@ Evaluates `dotrift.toml` and applies the defined state to the target filesystem.
 
 #### Phase 1: State Resolution
 1. Parse `dotrift.toml`, resolve target dir, normalize `./` prefixes.
-2. **Portal Resolution:** Glob `[portal]` keys against source. Calculate `target_path` via Stripping Rule. Drop matches hitting `ignore`. Store in `HashMap<TargetPath, FileIntent>`.
+2. **Portal Resolution:** Glob `[portal]` keys against source files/dirs. Calculate `target_path` via Stripping Rule. Drop matches hitting `ignore`. Store in `HashMap<TargetPath, FileIntent>`. A source file/dir can match multiple portals if no target collision.
   * *Error:* Target path collision in HashMap.
-3. **Rule Application:** Apply [rule] in order, shallow-merging properties to determine final `type` and `mode`.
+3. **Rule Application:** Apply `[rule]` in order, shallow-merging properties to determine final `type` and `mode`.
   * *Warning:* `mode` set on `type = "symlink"` (ignored during execution).
 
 #### Phase 2: Tree Construction
@@ -84,7 +86,7 @@ Iterate DB. If a path is NOT in the Phase 2 tree:
 Traverse Rose Tree top-down (Pre-order DFS).
 
 **Directory Nodes:**
-* `fs::create_dir`. If fails due to existing file -> Collision prompt (`[s]kip / [o]verwrite / [q]uit`). 
+* `fs::create_dir`. If fails due to existing file -> Collision prompt (`[s]kip / [o]verwrite / [q]uit`). Non-interactive (non-TTY): default `[s]kip`.
   * **skip:** Abort subtree.
   * **overwrite:** Delete file then creates dir, deletes DB entry to avoid stale state, continue children.
   * **quit:** Halt program.
@@ -93,7 +95,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
 **File Nodes:**
 1. **Exists?** No -> Write immediately (skip DB checks).
 2. **Exists?** Yes -> A Directory:
-  * Halt and prompt (`[s]kip / [o]verwrite / [q]uit`).
+  * Halt and prompt (`[s]kip / [o]verwrite / [q]uit`). Non-interactive (non-TTY): default `[s]kip`.
     * **skip:** Do not touch the filesystem. Continue traversal.
     * **overwrite:** Delete the directory recursively, delete DB entries under the directory. Proceed to writing.
     * **quit:** Immediately terminate the program.
@@ -101,7 +103,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
   * Unmanaged if: Not in DB, DB type differs from disk, symlink target differs, or DB hash differs from target hash.
 4. **Action:**
   * **Managed:** Overwrite silently.
-  * **Unmanaged:** Halt and prompt (`[s]kip / [o]verwrite / [q]uit`).
+  * **Unmanaged:** Halt and prompt (`[s]kip / [o]verwrite / [q]uit`). Non-interactive (non-TTY): default `[s]kip`.
     * **skip:** Do not touch the filesystem. Continue traversal.
     * **overwrite:** Delete the disk entity. Proceed to writing.
     * **quit:** Immediately terminate the program.
@@ -158,7 +160,7 @@ Reverses the `apply` process, removing managed files from the target.
 1. **Validate:** Ensure `<TARGET_FILE>` exists.
 2. **Resolve Source:** Join `source-dir` + `<SOURCE_RELATIVE_PATH>`.
 3. **Collision Check:** Error if resolved source path already exists on disk.
-4. **Clone File:** Create source parent dirs. Copy target file to source path.
+4. **Clone File:** Create source parent dirs. Recursively copy target (dirs/symlinks treated as files, copying symlink itself) to source path.
 5. **Open Editor:** Run `($VISUAL/$EDITOR) <source-dir>/dotrift.toml` to let user add a portal entry if needed, if no editor command found from the env vars, skip.
 
 ---
@@ -174,8 +176,8 @@ Prints the content differences between the source file and the target file.
 
 ### Execution Pipeline
 
-1. **Determine Scope:** Specific file (error if not exist or not in DB).
-2. **Filter:** Skip files evaluating to Managed.
+1. **Determine Scope:** Specific file (error if not exist on disk; OK if in DB but modified).
+2. **Filter:** Skip if managed.
 3. **Execute Diff:** Run `diff <source> <TARGET_FILE> [OPTIONS]`, source is `DB.reference`.
 
 ---
@@ -195,5 +197,6 @@ Reports the management status of the target filesystem.
 2. **Evaluate Status:** Use standard Management Status logic.
 3. **Output:**
   * `[MANAGED]   <path> (<type>)`
-  * `[MODIFIED]  <path> (<type>)` *(Unmanaged by user edit)*
-  * `[MISSING]   <path> (<type>)` *(In DB, deleted from disk)*
+  * `[MODIFIED]  <path> (<type>)` *(In DB but unmanaged: type/link/hash mismatch)*
+  * `[MISSING]   <path> (<type>)` *(In DB, missing on disk)*
+  * `[UNMANAGED] <path>` *(Not in DB)*
