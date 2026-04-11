@@ -26,7 +26,7 @@ pub struct Rule {
     #[serde(default, rename = "type")]
     pub r#type: DeployType,
     #[serde(default)]
-    pub mode: Option<Mode>,
+    pub mode: Option<FileMode>,
 }
 
 #[derive(Deserialize, Default, Clone, Copy, PartialEq, Eq)]
@@ -37,11 +37,11 @@ pub enum DeployType {
     Copy,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
 #[serde(try_from = "String")]
-pub struct Mode(pub u16);
+pub struct FileMode(pub u16);
 
-impl TryFrom<String> for Mode {
+impl TryFrom<String> for FileMode {
     type Error = String;
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
@@ -52,6 +52,44 @@ impl TryFrom<String> for Mode {
             return Err(format!("Mode `{}` exceeds 777", s));
         }
 
-        Ok(Mode(value))
+        Ok(FileMode(value))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mode_valid_octal() {
+        assert_eq!(
+            FileMode::try_from("000".to_string()).unwrap(),
+            FileMode(0o000)
+        );
+        assert_eq!(
+            FileMode::try_from("600".to_string()).unwrap(),
+            FileMode(0o600)
+        );
+        assert_eq!(
+            FileMode::try_from("755".to_string()).unwrap(),
+            FileMode(0o755)
+        );
+        assert_eq!(
+            FileMode::try_from("777".to_string()).unwrap(),
+            FileMode(0o777)
+        );
+    }
+
+    #[test]
+    fn mode_invalid_octal() {
+        assert!(FileMode::try_from("abc".to_string()).is_err());
+        assert!(FileMode::try_from("800".to_string()).is_err());
+        assert!(FileMode::try_from("99".to_string()).is_err());
+    }
+
+    #[test]
+    fn mode_exceeds_max() {
+        assert!(FileMode::try_from("1000".to_string()).is_err());
+        assert!(FileMode::try_from("7777".to_string()).is_err());
     }
 }
