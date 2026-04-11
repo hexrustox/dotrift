@@ -39,6 +39,7 @@
                 "-v \"$HOME/.cargo\":\"$HOME/.cargo\""
               ];
               wrappers = [
+                "cargo"
                 "codebook"
                 "rust-analyzer"
                 "nixd"
