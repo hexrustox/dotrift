@@ -54,7 +54,7 @@ If a file matches multiple keys, they will all be applied if not colliding at `t
 
 When a `[portal]` key contains a wildcard, the target path is calculated by stripping a prefix from the matched source path.  
 
-The **stripping prefix** is the portion of the key *up to but not including* the first path component that contains any wildcard character (`*`, `?`, `[]`, or `{}`). If the very first path component contains a wildcard, the stripping prefix is empty.
+The **stripping prefix** is the portion of the key *up to but not including* the first path component that contains any wildcard character (`*`, `?`, or `[]`). If the very first path component contains a wildcard, the stripping prefix is empty.
 
 This prefix is removed from the beginning of the source path that matched the glob. The remainder is then appended to the value specified in the `[portal]` table.
 
@@ -110,7 +110,7 @@ Defines the deployment method (`type`) and file permissions (`mode`), directory 
 
 ## Globbing & Path Normalization
 
-* **`[portal]` Syntax:** Supports standard **bash-like globbing** (`*`, `**`, `?`, `[]`, `{}`).
+* **`[portal]` Syntax:** Supports standard **bash-like globbing** (`*`, `**`, `?`, `[]`). Uses `glob` crate. Brace expansion (`{}`) is not supported.
 * **`ignore` Syntax:** Supports **Gitignore-style semantics**.
 * **Hidden Files:** Standard behavior applies; `*` does not match hidden files (e.g., `.hidden_file`). Users must explicitly use `.*` patterns to match them.
 * **Prefix Normalization:** The `./` prefix is purely cosmetic. `"a" = "b"` and `"./a" = "./b"` are identical.

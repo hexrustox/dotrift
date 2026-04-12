@@ -23,12 +23,23 @@ The local database tracks managed files. It is the single source of truth for re
 
 **Location:** `~/.local/state/dotrift.db` (global).
 
-**Key:** `target_path` (String, absolute path)
+**Format:** SQLite.
 
-**Value:** Struct
-* `action_type`: Enum (`Symlink` | `Copy`)
-* `reference`: String (Absolute path in `source-dir`. Used to read content for copies, or verify link targets for symlinks).
-* `hash`: String (Hex digest using `ahash` crate of source content at last apply, null for symlinks).
+**Schema:**
+```sql
+CREATE TABLE entries (
+    target_path TEXT PRIMARY KEY,
+    action_type TEXT NOT NULL CHECK(action_type IN ('symlink', 'copy')),
+    reference TEXT NOT NULL,
+    hash TEXT
+);
+```
+
+**Columns:**
+* `target_path`: Absolute path of the managed file (primary key).
+* `action_type`: Enum (`symlink` | `copy`).
+* `reference`: Absolute path in `source-dir`. Used to read content for copies, or verify link targets for symlinks.
+* `hash`: Hex digest using `xxHash` of source content at last apply. NULL for symlinks.
 
 ---
 
@@ -47,7 +58,7 @@ Evaluates `dotrift.toml` and applies the defined state to the target filesystem.
 #### Phase 1: State Resolution
 1. Parse `dotrift.toml`, resolve target dir, normalize `./` prefixes.
 2. **Portal Resolution:** Glob `[portal]` keys against source files/dirs. Calculate `target_path` via Stripping Rule. Drop matches hitting `ignore`. Store in `HashMap<TargetPath, FileIntent>`. A source file/dir can match multiple portals if no target collision.
-  * *Error:* Target path collision in HashMap.
+  * *Error:* Target path collision. Show both source paths and the collision target.
 3. **Rule Application:** Apply `[rule]` in order, shallow-merging properties to determine final `type` and `mode`.
   * *Warning:* `mode` set on `type = "symlink"` (ignored during execution).
 
@@ -110,8 +121,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
 5. **Write:** If the file is managed AND (symlink target == DB.reference OR copy hash(target) == hash(source)), skip. Else `copy` -> copy + chmod, `symlink` -> explicit `unlink` then `symlink`.
 
 #### Phase 4: Database Synchronization
-* **On Successful Write:** Insert/Update DB entry.
-* **On Quit:** Record all successful writes processed before the quit signal into the database, then terminate.
+Insert/update DB entry immediately after each successful write during Phase 3 traversal. On quit, DB already reflects all successful operations.
 
 ---
 
@@ -123,29 +133,22 @@ Reverses the `apply` process, removing managed files from the target.
 
 **Options:**
 * `--dry-run`: Print planned removals without touching the filesystem or database.
-* `--clean-up`: Remove remaining DB entries not mapped in current `dotrift.toml`.
-* `--prune-empty-dirs`: Recursively delete orphaned empty directories. Requires `--clean-up`.
+* `--prune-empty-dirs`: Recursively delete orphaned empty directories after file removal.
 
 ### Execution Pipeline
 
-1. **Phase 1 & 2 (Resolution):** Parse config, resolve target dir, and build the Phase 2 Rose Tree (same as `apply`).
-
-2. **`--dry-run` Behavior (if active):**
-   * Execute Phases 1 & 2, then simulate the remaining phases to generate a report, and finally exit without modifying the filesystem or database.
+1. **`--dry-run` Behavior (if active):**
+   * Iterate all DB entries.
    * Print to `stdout`:
-     1. **Unapply Plan:** Traverse the Rose Tree (Post-order DFS) and, for each file node that is present in the DB, print one of:
-        * `[WOULD REMOVE] <path>`: File is managed and exists on disk (would be deleted from disk and DB).
-        * `[WOULD UNTRACK] <path>`: File is unmanaged/modified or missing (would only be removed from DB).
-     2. **Clean-up Plan (if `--clean-up` is also passed):** Simulate the same clean-up logic defined in `apply`’s dry run:
-        * `[WOULD CLEAN] <path>`
-        * `[WOULD UNTRACK] <path>`
-   * **Note:** As with `apply --dry-run`, do not simulate recursive empty directory deletion for `--prune-empty-dirs`; only show the file deletions that would initiate the process.
+     * `[WOULD REMOVE] <path>`: File is managed and exists on disk (would be deleted from disk and DB).
+     * `[WOULD UNTRACK] <path>`: File is unmanaged/modified or missing (would only be removed from DB).
+   * **Note:** Do not simulate recursive empty directory deletion for `--prune-empty-dirs`; only show the file deletions that would initiate the process.
 
-3. **Reverse Traversal (Execution):** If not `--dry-run`, traverse the Rose Tree (Post-order DFS).
+2. **Execution (if not `--dry-run`):** Iterate all DB entries.
    * **Managed File:** Delete from disk. Delete from DB.
    * **Unmanaged/Missing File:** Do not touch disk. Delete from DB.
 
-4. **Clean-up Phase:** If `--clean-up` is active, run the exact same clean-up logic defined in `apply` (iterates remaining DB entries, removes unmanaged/stale entries, optionally prunes dirs).
+3. **Prune Phase:** If `--prune-empty-dirs` is active, after all file removals, recursively delete empty directories starting from leaf directories upward.
 
 ---
 
