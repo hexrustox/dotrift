@@ -16,7 +16,9 @@ fn main() -> color_eyre::Result<()> {
     let source_dir = cli.source.unwrap_or(source_path());
 
     match cli.command {
-        Commands::Apply(_flags) => {}
+        Commands::Apply(flags) => {
+            command::apply::run(source_dir, cli.target, flags)?;
+        }
         Commands::Unapply(_flags) => {}
         Commands::Add {
             target_file: _,

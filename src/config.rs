@@ -37,7 +37,7 @@ pub type Rules = IndexMap<String, Rule>;
 #[serde(deny_unknown_fields)]
 pub struct Rule {
     #[serde(default, rename = "type")]
-    pub r#type: DeployType,
+    pub r#type: Option<DeployType>,
     #[serde(default)]
     pub mode: Option<FileMode>,
 }
