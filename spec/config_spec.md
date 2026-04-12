@@ -123,7 +123,6 @@ Defines the deployment method (`type`) and file permissions (`mode`), directory 
 ### Errors (Halts Execution)
 * **Invalid Target Directory:** If `target-dir` is provided but is not a valid absolute path.
 * **Source-Target Overlap:** Error if `source-dir` equals `target-dir` (prevents self-modification loops).
-* **Path Traversal:** If a resolved target path attempts to escape the defined `target-dir`, or if a source path escapes the source directory.
 * **Empty Patterns:** If a `[portal]` key or value is an empty string.
 * **Target Collisions:** If two different source paths resolve to the exact same target path. This inherently catches exact duplicate `[portal]` rules after path normalization.
 
