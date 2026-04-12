@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Context, Result, eyre};
-use glob::{MatchOptions, glob_with};
+use glob::glob;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
@@ -11,7 +11,7 @@ use crate::cli::ApplyFlags;
 use crate::config::{Config, DeployType, FileMode, Rules};
 
 #[derive(Default, Debug, PartialEq)]
-pub struct FileIntent {
+pub struct PortalEntry {
     pub source: PathBuf,
     pub action_type: DeployType,
     pub mode: Option<FileMode>,
@@ -33,14 +33,14 @@ pub fn run(
 
     let ignore_matcher = build_ignore(&config.ignore, &target_normalized)?;
 
-    let mut intents = resolve_portals(
+    let mut portal_entries = resolve_portals(
         &source_normalized,
         &target_normalized,
         &config.portal,
         &ignore_matcher,
     )?;
 
-    apply_rules(&mut intents, &config.rule)?;
+    apply_rules(&mut portal_entries, &config.rule)?;
 
     Ok(())
 }
@@ -116,8 +116,8 @@ fn resolve_portals(
     target_dir: &Path,
     portals: &HashMap<String, PathBuf>,
     ignore_matcher: &Gitignore,
-) -> Result<HashMap<PathBuf, FileIntent>> {
-    let mut intents: HashMap<PathBuf, FileIntent> = HashMap::new();
+) -> Result<HashMap<PathBuf, PortalEntry>> {
+    let mut portal_entries: HashMap<PathBuf, PortalEntry> = HashMap::new();
 
     for (pattern, target_rel) in portals {
         let pattern_normalized = Path::new(pattern).normalize();
@@ -131,7 +131,7 @@ fn resolve_portals(
                 &pattern_str,
                 &target_rel_normalized,
                 ignore_matcher,
-                &mut intents,
+                &mut portal_entries,
             )?;
         } else {
             resolve_literal_portal(
@@ -140,12 +140,12 @@ fn resolve_portals(
                 &pattern_normalized,
                 &target_rel_normalized,
                 ignore_matcher,
-                &mut intents,
+                &mut portal_entries,
             )?;
         }
     }
 
-    Ok(intents)
+    Ok(portal_entries)
 }
 
 fn resolve_glob_portal(
@@ -154,22 +154,13 @@ fn resolve_glob_portal(
     pattern: &str,
     target_rel: &Path,
     ignore_matcher: &Gitignore,
-    intents: &mut HashMap<PathBuf, FileIntent>,
+    portal_entries: &mut HashMap<PathBuf, PortalEntry>,
 ) -> Result<()> {
     let prefix = stripping_prefix(pattern);
     let full_pattern = source_dir.join(pattern);
     let full_pattern_str = full_pattern.to_string_lossy();
 
-    for entry in glob_with(
-        &full_pattern_str,
-        MatchOptions {
-            case_sensitive: true,
-            require_literal_separator: true,
-            require_literal_leading_dot: false,
-        },
-    )
-    .wrap_err("Invalid glob pattern.")?
-    {
+    for entry in glob(&full_pattern_str).wrap_err("Invalid glob pattern.")? {
         let source_path = entry.wrap_err("Error reading glob match.")?;
 
         let source_rel = source_path.strip_prefix(source_dir).unwrap();
@@ -190,7 +181,7 @@ fn resolve_glob_portal(
             continue;
         }
 
-        insert_intent(intents, target_path, source_path)?;
+        insert_portal_entry(portal_entries, target_path, source_path)?;
     }
 
     Ok(())
@@ -202,7 +193,7 @@ fn resolve_literal_portal(
     pattern: &Path,
     target_rel: &Path,
     ignore_matcher: &Gitignore,
-    intents: &mut HashMap<PathBuf, FileIntent>,
+    portal_entries: &mut HashMap<PathBuf, PortalEntry>,
 ) -> Result<()> {
     let source_path = source_dir.join(pattern);
 
@@ -221,7 +212,7 @@ fn resolve_literal_portal(
             return Ok(());
         }
 
-        insert_intent(intents, target_path, source_path)?;
+        insert_portal_entry(portal_entries, target_path, source_path)?;
     } else {
         for entry in WalkDir::new(&source_path)
             .follow_links(false)
@@ -240,21 +231,21 @@ fn resolve_literal_portal(
                 continue;
             }
 
-            insert_intent(intents, target_path, file_source)?;
+            insert_portal_entry(portal_entries, target_path, file_source)?;
         }
     }
 
     Ok(())
 }
 
-fn insert_intent(
-    intents: &mut HashMap<PathBuf, FileIntent>,
+fn insert_portal_entry(
+    portal_entries: &mut HashMap<PathBuf, PortalEntry>,
     target_path: PathBuf,
     source_path: PathBuf,
 ) -> Result<()> {
-    if let Some(existing) = intents.insert(
+    if let Some(existing) = portal_entries.insert(
         target_path.clone(),
-        FileIntent {
+        PortalEntry {
             source: source_path.clone(),
             action_type: DeployType::default(),
             mode: None,
@@ -274,18 +265,18 @@ fn is_ignored(matcher: &Gitignore, path: &Path) -> bool {
     matcher.matched(path, false).is_ignore()
 }
 
-fn apply_rules(intents: &mut HashMap<PathBuf, FileIntent>, rules: &Rules) -> Result<()> {
-    for (pattern, rule) in rules {
+fn apply_rules(portal_entries: &mut HashMap<PathBuf, PortalEntry>, rules: &Rules) -> Result<()> {
+    for (pattern, rule) in rules.iter().rev() {
         let pattern = glob::Pattern::new(pattern).wrap_err("Invalid glob pattern.")?;
-        for (path, intent) in intents.iter_mut() {
+        for (path, portal_entry) in portal_entries.iter_mut() {
             if !pattern.matches(&path.to_string_lossy()) {
                 continue;
             }
             if let Some(rule_type) = &rule.r#type {
-                intent.action_type = *rule_type;
+                portal_entry.action_type = *rule_type;
             }
             if let Some(rule_mode) = &rule.mode {
-                intent.mode = Some(*rule_mode);
+                portal_entry.mode = Some(*rule_mode);
             }
         }
     }
@@ -300,110 +291,85 @@ mod tests {
     use tempfile::tempdir;
     use test_case::test_case;
 
-    macro_rules! mk_intent {
+    macro_rules! mk_portal_entry {
         ($(($s:literal, $t:literal)),*) => {
-            HashMap::from_iter([$((PathBuf::from("target").join($t).into(), FileIntent { source: PathBuf::from("source").join($s).into(), ..Default::default() })),*])
+            HashMap::from_iter([$((PathBuf::from("target").join($t).into(), PortalEntry { source: PathBuf::from("source").join($s).into(), ..Default::default() })),*])
+        };
+        ($(($s:literal, $t:literal, $a:ident, $m:expr)),*) => {
+            HashMap::from_iter([$((PathBuf::from("target").join($t).into(), PortalEntry { source: PathBuf::from("source").join($s).into(), action_type: DeployType::$a, mode: $m })),*])
         };
     }
 
-    #[test_case("" => HashMap::new(); "empty")]
-    #[test_case(r#""a.txt" = "A.txt""# => mk_intent!(("a.txt", "A.txt")); "literal_file")]
-    #[test_case(r#""subdir" = "dir""# => mk_intent!(("subdir/c.txt", "dir/c.txt"), ("subdir/d.txt", "dir/d.txt")); "subdir_to_dir")]
-    #[test_case(r#""**/*.txt" = "files""# => mk_intent!(("a.txt", "files/a.txt"), ("b.txt", "files/b.txt"), ("subdir/c.txt", "files/subdir/c.txt"), ("subdir/d.txt", "files/subdir/d.txt")); "glob_deep")]
-    #[test_case(r#""" = """# => mk_intent!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "all_files")]
-    #[test_case(r#""*.txt" = "root""# => mk_intent!(("a.txt", "root/a.txt"), ("b.txt", "root/b.txt")); "glob_root_only")]
-    #[test_case(r#""./dir/../a.txt" = "./dir/../a.txt""# => mk_intent!(("a.txt", "a.txt")); "normalized_path")]
-    #[test_case(r#""../../a.txt" = "../../a.txt""# => mk_intent!(("a.txt", "a.txt")); "parent_dir_ref")]
-    #[test_case(r#""a.txt" = "A.txt"
-"a.*" = """# => mk_intent!(("a.txt", "a.txt"), ("a.txt", "A.txt")); "multiple_portals_same_source")]
-    fn test_resolve_portals(s: &str) -> HashMap<PathBuf, FileIntent> {
+    fn test_setup(
+        portal: &str,
+        ignore: Option<&str>,
+        rule: Option<&str>,
+    ) -> (tempfile::TempDir, PathBuf, PathBuf) {
         let temp_dir = tempdir().unwrap();
         let source_dir = temp_dir.path().join("source");
         let target_dir = temp_dir.path().join("target");
         fs::create_dir(&source_dir).unwrap();
         fs::create_dir(&target_dir).unwrap();
-
         fs::write(source_dir.join("a.txt"), "").unwrap();
         fs::write(source_dir.join("b.txt"), "").unwrap();
         fs::create_dir(source_dir.join("subdir")).unwrap();
         fs::write(source_dir.join("subdir").join("c.txt"), "").unwrap();
         fs::write(source_dir.join("subdir").join("d.txt"), "").unwrap();
-
-        fs::write(source_dir.join("dotrift.toml"), format!("[portal]\n{s}")).unwrap();
-
-        let config = Config::read(source_dir.clone()).unwrap();
-        let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
-
-        let intent =
-            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
-
-        let mut map = HashMap::new();
-        for (p, f) in intent {
-            map.insert(
-                p.strip_prefix(temp_dir.path()).unwrap().to_path_buf(),
-                FileIntent {
-                    source: f
-                        .source
-                        .strip_prefix(temp_dir.path())
-                        .unwrap()
-                        .to_path_buf(),
-                    ..f
-                },
-            );
-        }
-
-        map
+        let config = format!(
+            "ignore = [{}]\n[portal]\n{portal}\n[rule]\n{}",
+            ignore.unwrap_or(""),
+            rule.unwrap_or("")
+        );
+        fs::write(source_dir.join("dotrift.toml"), config).unwrap();
+        (temp_dir, source_dir, target_dir)
     }
 
-    #[test_case(r#""*.txt""# => mk_intent!(); "glob_no_match")]
-    #[test_case(r#""subdir/*""# => mk_intent!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "glob_subdir_only")]
-    #[test_case(r#""**""# => mk_intent!(); "glob_all_empty")]
-    #[test_case(r#""*.txt", "!dotrift.toml""# => mk_intent!(("dotrift.toml", "dotrift.toml")); "negate_ignore")]
-    fn test_ignore(s: &str) -> HashMap<PathBuf, FileIntent> {
-        let temp_dir = tempdir().unwrap();
-        let source_dir = temp_dir.path().join("source");
-        let target_dir = temp_dir.path().join("target");
-        fs::create_dir(&source_dir).unwrap();
-        fs::create_dir(&target_dir).unwrap();
+    fn flatten(
+        map: HashMap<PathBuf, PortalEntry>,
+        temp_dir: &Path,
+    ) -> HashMap<PathBuf, PortalEntry> {
+        map.into_iter()
+            .map(|(p, f)| {
+                (
+                    p.strip_prefix(temp_dir).unwrap().to_path_buf(),
+                    PortalEntry {
+                        source: f.source.strip_prefix(temp_dir).unwrap().to_path_buf(),
+                        ..f
+                    },
+                )
+            })
+            .collect()
+    }
 
-        fs::write(source_dir.join("a.txt"), "").unwrap();
-        fs::write(source_dir.join("b.txt"), "").unwrap();
-        fs::create_dir(source_dir.join("subdir")).unwrap();
-        fs::write(source_dir.join("subdir").join("c.txt"), "").unwrap();
-        fs::write(source_dir.join("subdir").join("d.txt"), "").unwrap();
-
-        fs::write(
-            source_dir.join("dotrift.toml"),
-            format!(
-                r#"ignore = [{s}]
-[portal]
-"" = """#
-            ),
-        )
-        .unwrap();
-
+    #[test_case("" => HashMap::new(); "empty")]
+    #[test_case(r#""a.txt" = "A.txt""# => mk_portal_entry!(("a.txt", "A.txt")); "literal_file")]
+    #[test_case(r#""subdir" = "dir""# => mk_portal_entry!(("subdir/c.txt", "dir/c.txt"), ("subdir/d.txt", "dir/d.txt")); "subdir_to_dir")]
+    #[test_case(r#""**/*.txt" = "files""# => mk_portal_entry!(("a.txt", "files/a.txt"), ("b.txt", "files/b.txt"), ("subdir/c.txt", "files/subdir/c.txt"), ("subdir/d.txt", "files/subdir/d.txt")); "glob_deep")]
+    #[test_case(r#""" = """# => mk_portal_entry!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "all_files")]
+    #[test_case(r#""*.txt" = "root""# => mk_portal_entry!(("a.txt", "root/a.txt"), ("b.txt", "root/b.txt")); "glob_root_only")]
+    #[test_case(r#""../../a.txt" = "../../a.txt""# => mk_portal_entry!(("a.txt", "a.txt")); "parent_dir_ref")]
+    #[test_case(r#""a.txt" = "A.txt"
+"a.*" = """# => mk_portal_entry!(("a.txt", "a.txt"), ("a.txt", "A.txt")); "multiple_portals_same_source")]
+    fn test_resolve_portals(portal: &str) -> HashMap<PathBuf, PortalEntry> {
+        let (temp_dir, source_dir, target_dir) = test_setup(portal, None, None);
         let config = Config::read(source_dir.clone()).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
-
-        let intent =
+        let portal_entries =
             resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
+        flatten(portal_entries, temp_dir.path())
+    }
 
-        let mut map = HashMap::new();
-        for (p, f) in intent {
-            map.insert(
-                p.strip_prefix(temp_dir.path()).unwrap().to_path_buf(),
-                FileIntent {
-                    source: f
-                        .source
-                        .strip_prefix(temp_dir.path())
-                        .unwrap()
-                        .to_path_buf(),
-                    ..f
-                },
-            );
-        }
-
-        map
+    #[test_case(r#""*.txt""# => mk_portal_entry!(); "glob_no_match")]
+    #[test_case(r#""subdir/*""# => mk_portal_entry!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "glob_subdir_only")]
+    #[test_case(r#""**""# => mk_portal_entry!(); "glob_all_empty")]
+    #[test_case(r#""*.txt", "!dotrift.toml""# => mk_portal_entry!(("dotrift.toml", "dotrift.toml")); "negate_ignore")]
+    fn test_ignore(ignore: &str) -> HashMap<PathBuf, PortalEntry> {
+        let (temp_dir, source_dir, target_dir) = test_setup("\"\" = \"\"", Some(ignore), None);
+        let config = Config::read(source_dir.clone()).unwrap();
+        let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
+        let portal_entries =
+            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
+        flatten(portal_entries, temp_dir.path())
     }
 
     #[test]
@@ -438,5 +404,22 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("collision"));
+    }
+
+    #[test_case(r#""*.txt" = { mode = "600" }"# => mk_portal_entry!(("a.txt", "a.txt", Symlink, Some(FileMode(0o600)))); "rule_mode")]
+    #[test_case(r#""*.txt" = { type = "copy" }"# => mk_portal_entry!(("a.txt", "a.txt", Copy, None)); "rule_type")]
+    #[test_case(r#""*.txt" = { mode = "600" }
+"**/a.txt" = { type = "copy" }"# => mk_portal_entry!(("a.txt", "a.txt", Copy, Some(FileMode(0o600)))); "rule_merge")]
+    #[test_case(r#""*.txt" = { type = "symlink", mode = "600" }
+"**/a.txt" = { type = "copy", mode = "700" }"# => mk_portal_entry!(("a.txt", "a.txt", Copy, Some(FileMode(0o700)))); "rule_override")]
+    fn test_apply_rules(rule: &str) -> HashMap<PathBuf, PortalEntry> {
+        let (temp_dir, source_dir, target_dir) =
+            test_setup(r#""a.txt" = "a.txt""#, None, Some(rule));
+        let config = Config::read(source_dir.clone()).unwrap();
+        let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
+        let mut portal_entries =
+            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
+        apply_rules(&mut portal_entries, &config.rule).unwrap();
+        flatten(portal_entries, temp_dir.path())
     }
 }
