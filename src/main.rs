@@ -1,11 +1,19 @@
 mod cli;
+mod command;
 mod config;
+mod path;
 
 use clap::Parser;
 use cli::{Cli, Commands};
 
-fn main() {
+use crate::path::source_path;
+
+fn main() -> color_eyre::Result<()> {
+    color_eyre::install()?;
+
     let cli = Cli::parse();
+
+    let source_dir = cli.source.unwrap_or(source_path());
 
     match cli.command {
         Commands::Apply(_flags) => {}
@@ -20,4 +28,6 @@ fn main() {
         } => {}
         Commands::Status { target_file: _ } => {}
     }
+
+    Ok(())
 }

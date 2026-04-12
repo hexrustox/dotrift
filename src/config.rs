@@ -1,8 +1,12 @@
 use std::collections::HashMap;
+use std::fs::read_to_string;
 use std::path::PathBuf;
 
+use color_eyre::eyre::Context;
 use indexmap::IndexMap;
 use serde::Deserialize;
+
+use crate::path::config_path;
 
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -17,10 +21,19 @@ pub struct Config {
     pub rule: Rules,
 }
 
-pub type Portal = HashMap<String, String>;
+impl Config {
+    pub fn read(source_dir: PathBuf) -> color_eyre::Result<Self> {
+        let path = config_path(source_dir);
+        let s = read_to_string(&path)
+            .wrap_err(format!("Failed to read config file {}", path.display()))?;
+        toml::from_str(&s).wrap_err("Failed to parse config file")
+    }
+}
+
+pub type Portal = HashMap<String, PathBuf>;
 pub type Rules = IndexMap<String, Rule>;
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
     #[serde(default, rename = "type")]
@@ -29,7 +42,7 @@ pub struct Rule {
     pub mode: Option<FileMode>,
 }
 
-#[derive(Deserialize, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Deserialize, Default, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum DeployType {
     #[default]

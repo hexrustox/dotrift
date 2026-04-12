@@ -9,8 +9,8 @@ use std::path::PathBuf;
 )]
 pub struct Cli {
     /// Path to the source directory containing dotrift.toml and dotfiles. Default: ~/.local/share/dotrift.
-    #[arg(short = 's', long, default_value = "~/.local/share/dotrift")]
-    pub source: PathBuf,
+    #[arg(short = 's', long)]
+    pub source: Option<PathBuf>,
 
     /// Override the target directory.
     #[arg(short = 't', long)]
@@ -22,7 +22,7 @@ pub struct Cli {
 
 /// Common options for apply and unapply commands.
 #[derive(Args, Clone, Copy, Debug)]
-pub struct CommonFlags {
+pub struct ApplyFlags {
     /// Print planned operations without touching the filesystem or database.
     #[arg(short = 'd', long)]
     pub dry_run: bool,
@@ -39,10 +39,10 @@ pub struct CommonFlags {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Evaluates dotrift.toml and applies the defined state to the target filesystem.
-    Apply(CommonFlags),
+    Apply(ApplyFlags),
 
     /// Reverses the apply process, removing managed files from the target.
-    Unapply(CommonFlags),
+    Unapply(ApplyFlags),
 
     /// Adds existing target file to source directory.
     Add {
