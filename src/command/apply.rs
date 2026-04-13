@@ -176,8 +176,7 @@ fn resolve_glob_portal(
 
         let target_path = target_dir.join(target_rel).join(stripped);
 
-        let target_rel_for_ignore = target_path.strip_prefix(target_dir).unwrap();
-        if is_ignored(ignore_matcher, target_rel_for_ignore) {
+        if is_ignored(ignore_matcher, &target_path) {
             continue;
         }
 
@@ -207,8 +206,7 @@ fn resolve_literal_portal(
     if source_path.is_file() {
         let target_path = target_dir.join(target_rel);
 
-        let target_rel_for_ignore = target_path.strip_prefix(target_dir).unwrap();
-        if is_ignored(ignore_matcher, target_rel_for_ignore) {
+        if is_ignored(ignore_matcher, &target_path) {
             return Ok(());
         }
 
@@ -226,8 +224,7 @@ fn resolve_literal_portal(
 
             let target_path = target_dir.join(target_rel).join(rel_to_pattern);
 
-            let target_rel_for_ignore = target_path.strip_prefix(target_dir).unwrap();
-            if is_ignored(ignore_matcher, target_rel_for_ignore) {
+            if is_ignored(ignore_matcher, &target_path) {
                 continue;
             }
 

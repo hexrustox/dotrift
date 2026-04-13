@@ -1,6 +1,7 @@
 mod cli;
 mod command;
 mod config;
+mod db;
 mod path;
 
 use clap::Parser;
