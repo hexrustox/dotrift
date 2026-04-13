@@ -64,7 +64,7 @@ fn insert_entry(
                     if let Some(existing) = children.get(&name) {
                         match existing {
                             Node::File { .. } => {
-                                return Err(TreeError::FileAtDir(target_path));
+                                todo!()
                             }
                             Node::Dir(_) => {
                                 return Err(TreeError::DirAtFile(target_path));
