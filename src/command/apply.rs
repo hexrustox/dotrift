@@ -291,12 +291,13 @@ mod tests {
     use tempfile::tempdir;
     use test_case::test_case;
 
-    macro_rules! mk_portal_entry {
+    #[macro_export]
+    macro_rules! portal_entries {
         ($(($s:literal, $t:literal)),*) => {
-            HashMap::from_iter([$((PathBuf::from("target").join($t).into(), PortalEntry { source: PathBuf::from("source").join($s).into(), ..Default::default() })),*])
+            HashMap::from_iter([$(($t.into(), PortalEntry { source: $s.into(), ..Default::default() })),*])
         };
         ($(($s:literal, $t:literal, $a:ident, $m:expr)),*) => {
-            HashMap::from_iter([$((PathBuf::from("target").join($t).into(), PortalEntry { source: PathBuf::from("source").join($s).into(), action_type: DeployType::$a, mode: $m })),*])
+            HashMap::from_iter([$(($t.into(), PortalEntry { source: $s.into(), action_type: DeployType::$a, mode: $m })),*])
         };
     }
 
@@ -331,9 +332,15 @@ mod tests {
         map.into_iter()
             .map(|(p, f)| {
                 (
-                    p.strip_prefix(temp_dir).unwrap().to_path_buf(),
+                    p.strip_prefix(temp_dir.join("target"))
+                        .unwrap()
+                        .to_path_buf(),
                     PortalEntry {
-                        source: f.source.strip_prefix(temp_dir).unwrap().to_path_buf(),
+                        source: f
+                            .source
+                            .strip_prefix(temp_dir.join("source"))
+                            .unwrap()
+                            .to_path_buf(),
                         ..f
                     },
                 )
@@ -342,14 +349,14 @@ mod tests {
     }
 
     #[test_case("" => HashMap::new(); "empty")]
-    #[test_case(r#""a.txt" = "A.txt""# => mk_portal_entry!(("a.txt", "A.txt")); "literal_file")]
-    #[test_case(r#""subdir" = "dir""# => mk_portal_entry!(("subdir/c.txt", "dir/c.txt"), ("subdir/d.txt", "dir/d.txt")); "subdir_to_dir")]
-    #[test_case(r#""**/*.txt" = "files""# => mk_portal_entry!(("a.txt", "files/a.txt"), ("b.txt", "files/b.txt"), ("subdir/c.txt", "files/subdir/c.txt"), ("subdir/d.txt", "files/subdir/d.txt")); "glob_deep")]
-    #[test_case(r#""" = """# => mk_portal_entry!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "all_files")]
-    #[test_case(r#""*.txt" = "root""# => mk_portal_entry!(("a.txt", "root/a.txt"), ("b.txt", "root/b.txt")); "glob_root_only")]
-    #[test_case(r#""../../a.txt" = "../../a.txt""# => mk_portal_entry!(("a.txt", "a.txt")); "parent_dir_ref")]
+    #[test_case(r#""a.txt" = "A.txt""# => portal_entries!(("a.txt", "A.txt")); "literal_file")]
+    #[test_case(r#""subdir" = "dir""# => portal_entries!(("subdir/c.txt", "dir/c.txt"), ("subdir/d.txt", "dir/d.txt")); "subdir_to_dir")]
+    #[test_case(r#""**/*.txt" = "files""# => portal_entries!(("a.txt", "files/a.txt"), ("b.txt", "files/b.txt"), ("subdir/c.txt", "files/subdir/c.txt"), ("subdir/d.txt", "files/subdir/d.txt")); "glob_deep")]
+    #[test_case(r#""" = """# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "all_files")]
+    #[test_case(r#""*.txt" = "root""# => portal_entries!(("a.txt", "root/a.txt"), ("b.txt", "root/b.txt")); "glob_root_only")]
+    #[test_case(r#""../../a.txt" = "../../a.txt""# => portal_entries!(("a.txt", "a.txt")); "parent_dir_ref")]
     #[test_case(r#""a.txt" = "A.txt"
-"a.*" = """# => mk_portal_entry!(("a.txt", "a.txt"), ("a.txt", "A.txt")); "multiple_portals_same_source")]
+"a.*" = """# => portal_entries!(("a.txt", "a.txt"), ("a.txt", "A.txt")); "multiple_portals_same_source")]
     fn test_resolve_portals(portal: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = test_setup(portal, None, None);
         let config = Config::read(source_dir.clone()).unwrap();
@@ -359,10 +366,10 @@ mod tests {
         flatten(portal_entries, temp_dir.path())
     }
 
-    #[test_case(r#""*.txt""# => mk_portal_entry!(); "glob_no_match")]
-    #[test_case(r#""subdir/*""# => mk_portal_entry!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "glob_subdir_only")]
-    #[test_case(r#""**""# => mk_portal_entry!(); "glob_all_empty")]
-    #[test_case(r#""*.txt", "!dotrift.toml""# => mk_portal_entry!(("dotrift.toml", "dotrift.toml")); "negate_ignore")]
+    #[test_case(r#""*.txt""# => portal_entries!(); "glob_no_match")]
+    #[test_case(r#""subdir/*""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "glob_subdir_only")]
+    #[test_case(r#""**""# => portal_entries!(); "glob_all_empty")]
+    #[test_case(r#""*.txt", "!dotrift.toml""# => portal_entries!(("dotrift.toml", "dotrift.toml")); "negate_ignore")]
     fn test_ignore(ignore: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = test_setup("\"\" = \"\"", Some(ignore), None);
         let config = Config::read(source_dir.clone()).unwrap();
@@ -406,12 +413,12 @@ mod tests {
         assert!(err.to_string().contains("collision"));
     }
 
-    #[test_case(r#""*.txt" = { mode = "600" }"# => mk_portal_entry!(("a.txt", "a.txt", Symlink, Some(FileMode(0o600)))); "rule_mode")]
-    #[test_case(r#""*.txt" = { type = "copy" }"# => mk_portal_entry!(("a.txt", "a.txt", Copy, None)); "rule_type")]
+    #[test_case(r#""*.txt" = { mode = "600" }"# => portal_entries!(("a.txt", "a.txt", Symlink, Some(FileMode(0o600)))); "rule_mode")]
+    #[test_case(r#""*.txt" = { type = "copy" }"# => portal_entries!(("a.txt", "a.txt", Copy, None)); "rule_type")]
     #[test_case(r#""*.txt" = { mode = "600" }
-"**/a.txt" = { type = "copy" }"# => mk_portal_entry!(("a.txt", "a.txt", Copy, Some(FileMode(0o600)))); "rule_merge")]
+"**/a.txt" = { type = "copy" }"# => portal_entries!(("a.txt", "a.txt", Copy, Some(FileMode(0o600)))); "rule_merge")]
     #[test_case(r#""*.txt" = { type = "symlink", mode = "600" }
-"**/a.txt" = { type = "copy", mode = "700" }"# => mk_portal_entry!(("a.txt", "a.txt", Copy, Some(FileMode(0o700)))); "rule_override")]
+"**/a.txt" = { type = "copy", mode = "700" }"# => portal_entries!(("a.txt", "a.txt", Copy, Some(FileMode(0o700)))); "rule_override")]
     fn test_apply_rules(rule: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) =
             test_setup(r#""a.txt" = "a.txt""#, None, Some(rule));
