@@ -10,14 +10,14 @@ pub struct Db {
 }
 
 #[derive(Default, Debug, PartialEq)]
-pub struct Entry {
+pub struct DbEntry {
     pub target_path: PathBuf,
     pub action_type: DeployType,
     pub reference: PathBuf,
     pub hash: Option<u64>,
 }
 
-fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<Entry> {
+fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
     let target_str: String = row.get(0)?;
     let action_str: String = row.get(1)?;
     let reference_str: String = row.get(2)?;
@@ -37,7 +37,7 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<Entry> {
 
     let hash = hash_str.and_then(|s| u64::from_str_radix(&s, 16).ok());
 
-    Ok(Entry {
+    Ok(DbEntry {
         target_path: PathBuf::from(target_str),
         action_type,
         reference: PathBuf::from(reference_str),
@@ -73,7 +73,7 @@ impl Db {
         Ok(Self { conn })
     }
 
-    pub fn insert_or_update(&self, entry: &Entry) -> Result<()> {
+    pub fn insert_or_update(&self, entry: &DbEntry) -> Result<()> {
         let hash_str = entry.hash.map(|h| format!("{:x}", h));
 
         self.conn.execute(
@@ -101,7 +101,15 @@ impl Db {
         Ok(())
     }
 
-    pub fn get_entry(&self, target: &Path) -> Result<Option<Entry>> {
+    pub fn delete_entry_with_prefix(&self, target: &Path) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM entries WHERE target_path like ?1",
+            params![target.to_string_lossy() + "%"],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_entry(&self, target: &Path) -> Result<Option<DbEntry>> {
         let mut stmt = self
         .conn
         .prepare("SELECT target_path, action_type, reference, hash FROM entries WHERE target_path = ?1")
@@ -116,7 +124,7 @@ impl Db {
         }
     }
 
-    pub fn get_all_entries(&self) -> Result<Vec<Entry>> {
+    pub fn get_all_entries(&self) -> Result<Vec<DbEntry>> {
         let mut stmt = self
             .conn
             .prepare("SELECT target_path, action_type, reference, hash FROM entries")
@@ -154,7 +162,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db = Db::init(&temp_dir.path().join("db")).unwrap();
 
-        let entry = Entry::default();
+        let entry = DbEntry::default();
 
         assert!(db.get_entry(&entry.target_path).unwrap().is_none());
         db.insert_or_update(&entry).unwrap();
@@ -167,7 +175,7 @@ mod tests {
         let db = Db::init(&temp_dir.path().join("db")).unwrap();
 
         for p in 'a'..='z' {
-            db.insert_or_update(&Entry {
+            db.insert_or_update(&DbEntry {
                 target_path: PathBuf::from(p.to_string()),
                 ..Default::default()
             })
@@ -182,11 +190,27 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db = Db::init(&temp_dir.path().join("db")).unwrap();
 
-        let entry = Entry::default();
+        let entry = DbEntry::default();
 
         db.insert_or_update(&entry).unwrap();
         assert!(db.get_entry(&entry.target_path).unwrap().is_some());
         db.delete_entry(&entry.target_path).unwrap();
+        assert!(db.get_entry(&entry.target_path).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_db_delete_with_prefix() {
+        let temp_dir = tempdir().unwrap();
+        let db = Db::init(&temp_dir.path().join("db")).unwrap();
+
+        let entry = DbEntry {
+            target_path: PathBuf::from("/a/b"),
+            ..Default::default()
+        };
+
+        db.insert_or_update(&entry).unwrap();
+        assert!(db.get_entry(&entry.target_path).unwrap().is_some());
+        db.delete_entry_with_prefix(&PathBuf::from("/a")).unwrap();
         assert!(db.get_entry(&entry.target_path).unwrap().is_none());
     }
 }

@@ -17,6 +17,7 @@ normalize-path = "0.2"
 walkdir = "2"
 twox-hash = "2.1"
 rusqlite = { version = "0.39", features = ["bundled"] }
+dialoguer = "0.12"
 
 [dev-dependencies]
 tempfile = "3"

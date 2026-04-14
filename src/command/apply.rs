@@ -1,14 +1,21 @@
 use std::collections::HashMap;
+use std::fs::{self, remove_file};
+use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Context, Result, eyre};
+use dialoguer::Select;
 use glob::glob;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 
 use crate::cli::ApplyFlags;
+use crate::command::tree::{Node, build_tree};
+use crate::command::util::hash_file;
 use crate::config::{Config, DeployType, FileMode, Rules};
+use crate::db::{Db, DbEntry};
+use crate::path::db_path;
 
 #[derive(Default, Debug, PartialEq)]
 pub struct PortalEntry {
@@ -17,11 +24,7 @@ pub struct PortalEntry {
     pub mode: Option<FileMode>,
 }
 
-pub fn run(
-    source_dir: PathBuf,
-    target_override: Option<PathBuf>,
-    _flags: ApplyFlags,
-) -> Result<()> {
+pub fn run(source_dir: PathBuf, target_override: Option<PathBuf>, flags: ApplyFlags) -> Result<()> {
     let source_normalized = source_dir.normalize();
 
     let config = Config::read(source_dir.clone())?;
@@ -42,7 +45,162 @@ pub fn run(
 
     apply_rules(&mut portal_entries, &config.rule)?;
 
+    let tree = build_tree(portal_entries)?;
+
+    let db = Db::init(&db_path())?;
+    execute_node(Path::new("/"), &tree, &db)?;
+
     Ok(())
+}
+
+fn execute_node(target: &Path, node: &Node, db: &Db) -> Result<()> {
+    match node {
+        Node::Dir(children) => {
+            execute_dir(target, db)?;
+            for (name, child) in children {
+                execute_node(&target.join(name), child, db)?;
+            }
+        }
+        Node::File(entry) => {
+            write_file(target, entry, db)?;
+        }
+    }
+    Ok(())
+}
+
+fn execute_dir(path: &Path, db: &Db) -> Result<()> {
+    if path.exists() {
+        if path.is_dir() {
+            return Ok(());
+        }
+        let choice = prompt_collision(path, true)?;
+        match choice {
+            0 => return Ok(()),
+            1 => {
+                fs::remove_file(path)
+                    .wrap_err_with(|| format!("Failed to remove `{}`.", path.display()))?;
+                db.delete_entry(path)?;
+            }
+            2 => {
+                return Err(eyre!("Aborted."));
+            }
+            _ => unreachable!(),
+        }
+    }
+    fs::create_dir_all(path)
+        .wrap_err_with(|| format!("Failed to create directory `{}`.", path.display()))?;
+    Ok(())
+}
+
+fn write_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
+    if target.exists() {
+        if target.is_dir() {
+            let choice = prompt_collision(target, false)?;
+            match choice {
+                0 => return Ok(()),
+                1 => {
+                    fs::remove_dir_all(target).wrap_err_with(|| {
+                        format!("Failed to remove directory `{}`.", target.display())
+                    })?;
+                    db.delete_entry_with_prefix(target)?;
+                }
+                2 => {
+                    return Err(eyre!("Aborted."));
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            let managed = is_managed(target, db);
+            if !managed {
+                let choice = prompt_collision(target, false)?;
+                match choice {
+                    0 => return Ok(()),
+                    1 => {}
+                    2 => {
+                        return Err(eyre!("Aborted."));
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    deploy_file(target, entry, db)?;
+    Ok(())
+}
+
+fn is_managed(target: &Path, db: &Db) -> bool {
+    let db_entry = match db.get_entry(target).ok() {
+        Some(Some(e)) => e,
+        _ => return false,
+    };
+
+    match db_entry.action_type {
+        DeployType::Symlink => match std::fs::read_link(target) {
+            Ok(p) => p == db_entry.reference,
+            Err(_) => false,
+        },
+        DeployType::Copy => match hash_file(target) {
+            Ok(h) => Some(h) == db_entry.hash,
+            Err(_) => false,
+        },
+    }
+}
+
+fn deploy_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
+    match entry.action_type {
+        DeployType::Symlink => {
+            let _ = remove_file(target);
+            unix_fs::symlink(&entry.source, target)
+                .wrap_err_with(|| format!("Failed to create symlink `{}`.", target.display()))?;
+        }
+        DeployType::Copy => {
+            fs::copy(&entry.source, target).wrap_err_with(|| {
+                format!(
+                    "Failed to copy `{}` to `{}`.",
+                    entry.source.display(),
+                    target.display()
+                )
+            })?;
+            if let Some(mode) = entry.mode {
+                let mode_val = mode.0 as u32;
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(target, fs::Permissions::from_mode(mode_val)).wrap_err_with(
+                    || format!("Failed to set permissions on `{}`.", target.display()),
+                )?;
+            }
+        }
+    }
+
+    db.insert_or_update(&DbEntry {
+        target_path: target.to_path_buf(),
+        action_type: entry.action_type,
+        reference: entry.source.clone(),
+        hash: if entry.action_type == DeployType::Copy {
+            Some(hash_file(&entry.source)?)
+        } else {
+            None
+        },
+    })?;
+
+    Ok(())
+}
+
+fn prompt_collision(path: &Path, is_dir: bool) -> Result<usize> {
+    let type_str = if is_dir { "directory" } else { "file" };
+    let selection = Select::new()
+        .with_prompt(format!(
+            "`{}` is an existing {}, skip/overwrite/quit?",
+            path.display(),
+            type_str
+        ))
+        .items(["skip", "overwrite", "quit"])
+        .default(0)
+        .interact()
+        .wrap_err("Failed to get user input.")?;
+
+    println!();
+    Ok(selection)
 }
 
 fn resolve_target(target_override: Option<PathBuf>, config: &Config) -> Result<PathBuf> {
@@ -425,5 +583,80 @@ mod tests {
             resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
         apply_rules(&mut portal_entries, &config.rule).unwrap();
         flatten(portal_entries, temp_dir.path())
+    }
+
+    #[test_case(|s, t| {
+        unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
+    },
+    |t| t.join("link"),
+    |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Symlink, reference: s.join("file"), hash: None })
+    => true; "symlink_matching_source")]
+    #[test_case(|s, t| {
+        fs::write(s.join("file"), "").unwrap();
+        fs::write(t.join("file"), "").unwrap();
+    },
+    |t| t.join("file"),
+    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Copy, reference: PathBuf::new(), hash: Some(hash_file(&s.join("file")).unwrap()) })
+    => true; "copy_matching_hash")]
+    #[test_case(|s, t| {
+        fs::write(s.join("file"), "").unwrap();
+        unix_fs::symlink(s.join("file"), s.join("link")).unwrap();
+        unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
+    },
+    |t| t.join("link"),
+    |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Copy, reference: PathBuf::new(), hash: Some(hash_file(&s.join("link")).unwrap()) })
+    => true; "copy_symlink")]
+    #[test_case(|s, t| {
+        unix_fs::symlink(s.join("file1"), t.join("link")).unwrap();
+    },
+    |t| t.join("link"),
+    |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Symlink, reference: s.join("file2"), hash: None })
+    => false; "symlink_different_source")]
+    #[test_case(|s, t| {
+        fs::write(s.join("file"), "a").unwrap();
+        fs::write(t.join("file"), "b").unwrap();
+    },
+    |t| t.join("file"),
+    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Copy, reference: PathBuf::new(), hash: Some(hash_file(&s.join("file")).unwrap()) })
+    => false; "copy_different_hash")]
+    #[test_case(|s, t| {
+        unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
+    },
+    |t| t.join("link"),
+    |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Copy, reference: s.join("file"), hash: None })
+    => false; "symlink_db_is_copy")]
+    #[test_case(|s, t| {
+        fs::write(s.join("file"), "").unwrap();
+        fs::write(t.join("file"), "").unwrap();
+    },
+    |t| t.join("file"),
+    |_, _| None
+    => false; "no_db_entry")]
+    #[test_case(|s, t| {
+        fs::write(s.join("file"), "").unwrap();
+        fs::write(t.join("file"), "").unwrap();
+    },
+    |t| t.join("file"),
+    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Symlink, reference: s.join("file"), hash: None })
+    => false; "target_is_file_not_symlink")]
+    fn test_is_managed(
+        cb: impl FnOnce(&PathBuf, &PathBuf),
+        target_path: impl FnOnce(&PathBuf) -> PathBuf,
+        db_entry: impl FnOnce(&PathBuf, &PathBuf) -> Option<DbEntry>,
+    ) -> bool {
+        let temp_dir = tempdir().unwrap();
+        let source = temp_dir.path().join("source");
+        let target = temp_dir.path().join("target");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&target).unwrap();
+
+        cb(&source, &target);
+
+        let db = Db::init(&temp_dir.path().join("db")).unwrap();
+        if let Some(e) = db_entry(&source, &target) {
+            db.insert_or_update(&e).unwrap();
+        }
+
+        is_managed(&target_path(&target), &db)
     }
 }
