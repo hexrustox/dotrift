@@ -7,7 +7,7 @@ mod path;
 use clap::Parser;
 use cli::{Cli, Commands};
 
-use crate::path::source_path;
+use crate::path::{db_path, source_path};
 
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
@@ -18,7 +18,7 @@ fn main() -> color_eyre::Result<()> {
 
     match cli.command {
         Commands::Apply(flags) => {
-            command::apply::run(source_dir, cli.target, flags)?;
+            command::apply::run(source_dir, cli.target, &db_path(), flags)?;
         }
         Commands::Unapply(_flags) => {}
         Commands::Add {

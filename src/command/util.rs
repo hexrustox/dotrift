@@ -8,6 +8,7 @@ use twox_hash::XxHash64;
 
 const BUFFER_SIZE: usize = 8192;
 
+// FIXME
 pub fn hash_file(path: &Path) -> Result<u64> {
     let file =
         File::open(path).wrap_err_with(|| format!("Failed to open `{}`.", path.display()))?;
