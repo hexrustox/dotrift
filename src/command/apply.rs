@@ -1,7 +1,12 @@
-use std::collections::HashMap;
-use std::fs::{self, remove_file};
-use std::os::unix::fs as unix_fs;
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::cell::RefCell;
+
+use std::{
+    collections::HashMap,
+    fs::{self, remove_file},
+    os::unix::fs as unix_fs,
+    path::{Path, PathBuf},
+};
 
 use color_eyre::eyre::{Context, Result, eyre};
 use dialoguer::Select;
@@ -11,11 +16,18 @@ use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 
 use crate::cli::ApplyFlags;
-use crate::command::tree::{Node, build_tree};
-use crate::command::util::hash_file;
+use crate::command::{
+    tree::{Node, build_tree},
+    util::hash_file,
+};
 use crate::config::{Config, DeployType, FileMode, Rules};
 use crate::db::{Db, DbEntry};
 use crate::path::db_path;
+
+#[cfg(test)]
+thread_local! {
+    pub static PROMPT_SELECTION: RefCell<usize> = const { RefCell::new(0) };
+}
 
 #[derive(Default, Debug, PartialEq)]
 pub struct PortalEntry {
@@ -48,17 +60,19 @@ pub fn run(source_dir: PathBuf, target_override: Option<PathBuf>, flags: ApplyFl
     let tree = build_tree(portal_entries)?;
 
     let db = Db::init(&db_path())?;
-    execute_node(Path::new("/"), &tree, &db)?;
+    traverse_tree(Path::new("/"), &tree, &db)?;
 
     Ok(())
 }
 
-fn execute_node(target: &Path, node: &Node, db: &Db) -> Result<()> {
+fn traverse_tree(target: &Path, node: &Node, db: &Db) -> Result<()> {
     match node {
         Node::Dir(children) => {
-            execute_dir(target, db)?;
+            if create_dir(target, db)? {
+                return Ok(());
+            }
             for (name, child) in children {
-                execute_node(&target.join(name), child, db)?;
+                traverse_tree(&target.join(name), child, db)?;
             }
         }
         Node::File(entry) => {
@@ -68,14 +82,14 @@ fn execute_node(target: &Path, node: &Node, db: &Db) -> Result<()> {
     Ok(())
 }
 
-fn execute_dir(path: &Path, db: &Db) -> Result<()> {
+fn create_dir(path: &Path, db: &Db) -> Result<bool> {
     if path.exists() {
         if path.is_dir() {
-            return Ok(());
+            return Ok(false);
         }
         let choice = prompt_collision(path, true)?;
         match choice {
-            0 => return Ok(()),
+            0 => return Ok(true),
             1 => {
                 fs::remove_file(path)
                     .wrap_err_with(|| format!("Failed to remove `{}`.", path.display()))?;
@@ -89,7 +103,7 @@ fn execute_dir(path: &Path, db: &Db) -> Result<()> {
     }
     fs::create_dir_all(path)
         .wrap_err_with(|| format!("Failed to create directory `{}`.", path.display()))?;
-    Ok(())
+    Ok(false)
 }
 
 fn write_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
@@ -186,7 +200,14 @@ fn deploy_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
     Ok(())
 }
 
+#[allow(unused_variables)]
 fn prompt_collision(path: &Path, is_dir: bool) -> Result<usize> {
+    #[cfg(test)]
+    {
+        return Ok(PROMPT_SELECTION.with_borrow(|n| *n));
+    }
+
+    #[allow(unreachable_code)]
     let type_str = if is_dir { "directory" } else { "file" };
     let selection = Select::new()
         .with_prompt(format!(
@@ -361,15 +382,7 @@ fn resolve_literal_portal(
         ));
     }
 
-    if source_path.is_file() {
-        let target_path = target_dir.join(target_rel);
-
-        if is_ignored(ignore_matcher, &target_path) {
-            return Ok(());
-        }
-
-        insert_portal_entry(portal_entries, target_path, source_path)?;
-    } else {
+    if source_path.is_dir() {
         for entry in WalkDir::new(&source_path)
             .follow_links(false)
             .into_iter()
@@ -388,6 +401,14 @@ fn resolve_literal_portal(
 
             insert_portal_entry(portal_entries, target_path, file_source)?;
         }
+    } else {
+        let target_path = target_dir.join(target_rel);
+
+        if is_ignored(ignore_matcher, &target_path) {
+            return Ok(());
+        }
+
+        insert_portal_entry(portal_entries, target_path, source_path)?;
     }
 
     Ok(())
