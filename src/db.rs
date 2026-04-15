@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Context, Result, eyre};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::config::DeployType;
 
@@ -115,13 +115,9 @@ impl Db {
         .prepare("SELECT target_path, action_type, reference, hash FROM entries WHERE target_path = ?1")
         .wrap_err("Failed to prepare statement.")?;
 
-        let result = stmt.query_row(params![target.to_string_lossy()], row_to_entry);
-
-        match result {
-            Ok(entry) => Ok(Some(entry)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e).wrap_err("Failed to query entry."),
-        }
+        stmt.query_row(params![target.to_string_lossy()], row_to_entry)
+            .optional()
+            .wrap_err("Failed to query entry.")
     }
 
     pub fn get_all_entries(&self) -> Result<Vec<DbEntry>> {
@@ -203,14 +199,23 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db = Db::init(&temp_dir.path().join("db")).unwrap();
 
-        let entry = DbEntry {
+        db.insert_or_update(&DbEntry {
             target_path: PathBuf::from("/a/b"),
             ..Default::default()
-        };
+        })
+        .unwrap();
+        db.insert_or_update(&DbEntry {
+            target_path: PathBuf::from("/a/c"),
+            ..Default::default()
+        })
+        .unwrap();
+        db.insert_or_update(&DbEntry {
+            target_path: PathBuf::from("/b/a"),
+            ..Default::default()
+        })
+        .unwrap();
 
-        db.insert_or_update(&entry).unwrap();
-        assert!(db.get_entry(&entry.target_path).unwrap().is_some());
         db.delete_entry_with_prefix(&PathBuf::from("/a")).unwrap();
-        assert!(db.get_entry(&entry.target_path).unwrap().is_none());
+        assert_eq!(db.get_all_entries().unwrap().len(), 1);
     }
 }

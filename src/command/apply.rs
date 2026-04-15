@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::{
     collections::HashMap,
     fs::{self, remove_file},
+    io::{self, IsTerminal},
     os::unix::fs as unix_fs,
     path::{Path, PathBuf},
 };
@@ -454,6 +455,11 @@ fn prompt_collision(path: &Path, is_dir: bool) -> Result<usize> {
     }
 
     #[allow(unreachable_code)]
+    let stdin = io::stdin();
+    if !stdin.is_terminal() {
+        return Ok(0);
+    }
+
     let type_str = if is_dir { "directory" } else { "file" };
     let selection = Select::new()
         .with_prompt(format!(
