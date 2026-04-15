@@ -8,9 +8,9 @@ use crate::command::apply::PortalEntry;
 
 #[derive(Debug, Error)]
 pub enum TreeError {
-    #[error("Path conflict: file exists where directory needed at `{0}`.")]
+    #[error("File exists when creating directory at `{0}`.")]
     FileAtDir(PathBuf),
-    #[error("Path conflict: directory exists where file needed at `{0}`.")]
+    #[error("Directory exists when creating file at `{0}`.")]
     DirAtFile(PathBuf),
 }
 
@@ -44,7 +44,7 @@ fn insert_entry(
     let mut components: Vec<_> = target_path.components().collect();
 
     if components.is_empty() {
-        panic!("")
+        panic!("Cannot insert empty target path")
     }
 
     if let Some(Component::RootDir) = components.first() {

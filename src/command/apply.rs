@@ -24,6 +24,7 @@ use crate::{
     },
     config::{Config, DeployType, FileMode, Rules},
     db::{Db, DbEntry},
+    error::IoError,
 };
 
 #[cfg(test)]
@@ -53,18 +54,20 @@ pub fn run(
 
     validate_paths(&source_normalized, &target_normalized)?;
 
-    let ignore_matcher = build_ignore(&config.ignore, &target_normalized)?;
+    let ignore_matcher = build_ignore(&config.ignore, &target_normalized)
+        .wrap_err("Failed to build ignore matcher.")?;
 
     let mut portal_entries = resolve_portals(
         &source_normalized,
         &target_normalized,
         &config.portal,
         &ignore_matcher,
-    )?;
+    )
+    .wrap_err("Failed to resolve portals.")?;
 
-    apply_rules(&mut portal_entries, &config.rule)?;
+    apply_rules(&mut portal_entries, &config.rule).wrap_err("Failed to apply rules.")?;
 
-    let tree = build_tree(portal_entries)?;
+    let tree = build_tree(portal_entries).wrap_err("Failed to build target file system tree.")?;
 
     let db = Db::init(db_path)?;
     traverse_tree(Path::new("/"), &tree, &db)?;
@@ -106,15 +109,15 @@ fn validate_paths(source_dir: &Path, target_dir: &Path) -> Result<()> {
 
 fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore> {
     let mut builder = GitignoreBuilder::new(target_dir);
-    builder.add_line(None, "dotrift.toml").unwrap();
+    builder
+        .add_line(None, "dotrift.toml")
+        .expect("Failed to add dotrift.toml ignore");
     for pattern in patterns {
         builder
             .add_line(None, pattern)
-            .map_err(|e| eyre!("Invalid ignore pattern `{}`: {}.", pattern, e))?;
+            .wrap_err("Invalid ignore pattern.")?;
     }
-    builder
-        .build()
-        .map_err(|e| eyre!("Failed to build ignore matcher: {}.", e))
+    builder.build().wrap_err("Failed to build ignore matcher.")
 }
 
 fn is_glob(pattern: &str) -> bool {
@@ -188,9 +191,11 @@ fn resolve_glob_portal(
     let full_pattern_str = full_pattern.to_string_lossy();
 
     for entry in glob(&full_pattern_str).wrap_err("Invalid glob pattern.")? {
-        let source_path = entry.wrap_err("Error reading glob match.")?;
+        let source_path = entry.wrap_err("Failed to read glob match.")?;
 
-        let source_rel = source_path.strip_prefix(source_dir).unwrap();
+        let source_rel = source_path
+            .strip_prefix(source_dir)
+            .expect("Glob match not under source directory");
 
         let stripped = if prefix.is_empty() {
             source_rel.to_path_buf()
@@ -238,7 +243,9 @@ fn resolve_literal_portal(
         {
             let file_source = entry.path().to_path_buf();
 
-            let rel_to_pattern = file_source.strip_prefix(&source_path).unwrap();
+            let rel_to_pattern = file_source
+                .strip_prefix(&source_path)
+                .expect("Walkdir file not under pattern");
 
             let target_path = target_dir.join(target_rel).join(rel_to_pattern);
 
@@ -333,8 +340,7 @@ fn create_dir(path: &Path, db: &Db) -> Result<bool> {
         match choice {
             0 => return Ok(true),
             1 => {
-                fs::remove_file(path)
-                    .wrap_err_with(|| format!("Failed to remove `{}`.", path.display()))?;
+                fs::remove_file(path).remove_file_error(path)?;
                 db.delete_entry(path)?;
             }
             2 => {
@@ -343,8 +349,7 @@ fn create_dir(path: &Path, db: &Db) -> Result<bool> {
             _ => unreachable!(),
         }
     }
-    fs::create_dir_all(path)
-        .wrap_err_with(|| format!("Failed to create directory `{}`.", path.display()))?;
+    fs::create_dir_all(path).create_dir_error(path)?;
     Ok(false)
 }
 
@@ -355,9 +360,7 @@ fn write_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
             match choice {
                 0 => return Ok(()),
                 1 => {
-                    fs::remove_dir_all(target).wrap_err_with(|| {
-                        format!("Failed to remove directory `{}`.", target.display())
-                    })?;
+                    fs::remove_dir_all(target).remove_dir_error(target)?;
                     db.delete_entry_with_prefix(target)?;
                 }
                 2 => {

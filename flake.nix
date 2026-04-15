@@ -40,7 +40,7 @@
               ];
               wrappers = [
                 "cargo"
-                "codebook"
+                "codebook-lsp"
                 "rust-analyzer"
                 "nixd"
                 "taplo"

@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use color_eyre::eyre::{Context, Result, eyre};
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::config::DeployType;
+use crate::{
+    config::DeployType,
+    error::{EyreError, IoError},
+};
 
 pub struct Db {
     conn: Connection,
@@ -30,7 +33,7 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
             return Err(rusqlite::Error::FromSqlConversionFailure(
                 1,
                 rusqlite::types::Type::Text,
-                eyre!("Invalid type: `{other}`").into(),
+                eyre!(r#"Invalid type: "{other}"."#).into(),
             ));
         }
     };
@@ -48,16 +51,14 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
 impl Db {
     pub fn init(path: &PathBuf) -> Result<Self> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).wrap_err_with(|| {
-                format!(
-                    "Failed to create database directory `{}`.",
-                    parent.display()
-                )
-            })?;
+            std::fs::create_dir_all(parent)
+                .create_dir_error(parent)
+                .wrap_as_db_error()?;
         }
 
         let conn = Connection::open(path)
-            .wrap_err_with(|| format!("Failed to open database at `{}`.", path.display()))?;
+            .wrap_err_with(|| format!("Failed to open connection at `{}`.", path.display()))
+            .wrap_as_db_error()?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS entries (
@@ -68,7 +69,8 @@ impl Db {
             )",
             [],
         )
-        .wrap_err("Failed to create entries table.")?;
+        .wrap_err("Failed to create table.")
+        .wrap_as_db_error()?;
 
         Ok(Self { conn })
     }
@@ -76,36 +78,44 @@ impl Db {
     pub fn insert_or_update(&self, entry: &DbEntry) -> Result<()> {
         let hash_str = entry.hash.map(|h| format!("{:x}", h));
 
-        self.conn.execute(
-            "INSERT OR REPLACE INTO entries (target_path, action_type, reference, hash)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![
-                entry.target_path.to_string_lossy(),
-                match entry.action_type {
-                    DeployType::Symlink => "symlink",
-                    DeployType::Copy => "copy",
-                },
-                entry.reference.to_string_lossy(),
-                hash_str,
-            ],
-        )?;
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO entries (target_path, action_type, reference, hash) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    entry.target_path.to_string_lossy(),
+                    match entry.action_type {
+                        DeployType::Symlink => "symlink",
+                        DeployType::Copy => "copy",
+                    },
+                    entry.reference.to_string_lossy(),
+                    hash_str,
+                ],
+            )
+            .wrap_err("Failed to insert or update entry.")
+            .wrap_as_db_error()?;
 
         Ok(())
     }
 
     pub fn delete_entry(&self, target: &Path) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM entries WHERE target_path = ?1",
-            params![target.to_string_lossy()],
-        )?;
+        self.conn
+            .execute(
+                "DELETE FROM entries WHERE target_path = ?1",
+                params![target.to_string_lossy()],
+            )
+            .wrap_err("Failed to delete entry.")
+            .wrap_as_db_error()?;
         Ok(())
     }
 
     pub fn delete_entry_with_prefix(&self, target: &Path) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM entries WHERE target_path like ?1",
-            params![target.to_string_lossy() + "%"],
-        )?;
+        self.conn
+            .execute(
+                "DELETE FROM entries WHERE target_path like ?1",
+                params![target.to_string_lossy() + "%"],
+            )
+            .wrap_err("Failed to delete entries.")
+            .wrap_as_db_error()?;
         Ok(())
     }
 
@@ -113,28 +123,37 @@ impl Db {
         let mut stmt = self
         .conn
         .prepare("SELECT target_path, action_type, reference, hash FROM entries WHERE target_path = ?1")
-        .wrap_err("Failed to prepare statement.")?;
+        .wrap_err("Failed to prepare statement.").wrap_as_db_error()?;
 
         stmt.query_row(params![target.to_string_lossy()], row_to_entry)
             .optional()
             .wrap_err("Failed to query entry.")
+            .wrap_as_db_error()
     }
 
     pub fn get_all_entries(&self) -> Result<Vec<DbEntry>> {
         let mut stmt = self
             .conn
             .prepare("SELECT target_path, action_type, reference, hash FROM entries")
-            .wrap_err("Failed to prepare statement.")?;
+            .wrap_err("Failed to prepare statement.")
+            .wrap_as_db_error()?;
 
         let entries = stmt
             .query_map([], row_to_entry)
-            .wrap_err("Failed to query entries.")?;
+            .optional()
+            .wrap_err("Failed to query entries.")
+            .wrap_as_db_error()?;
 
         let mut result = Vec::new();
-        for entry in entries {
-            result.push(entry?);
+        if let Some(entries) = entries {
+            for entry in entries {
+                result.push(
+                    entry
+                        .wrap_err("Failed to query entry.")
+                        .wrap_as_db_error()?,
+                );
+            }
         }
-
         Ok(result)
     }
 }
