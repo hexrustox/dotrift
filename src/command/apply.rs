@@ -19,7 +19,7 @@ use crate::{
     cli::ApplyFlags,
     command::{
         tree::{Node, build_tree},
-        util::hash_file,
+        util::{hash_file, is_actual_dir},
     },
     config::{Config, DeployType, FileMode, Rules},
     db::{Db, DbEntry},
@@ -222,7 +222,6 @@ fn resolve_literal_portal(
 ) -> Result<()> {
     let source_path = source_dir.join(pattern);
 
-    // FIXME
     if !source_path.exists() {
         return Err(eyre!(
             "Source path does not exist: `{}`.",
@@ -230,12 +229,11 @@ fn resolve_literal_portal(
         ));
     }
 
-    // FIXME
-    if source_path.is_dir() {
+    if is_actual_dir(&source_path) {
         for entry in WalkDir::new(&source_path)
             .into_iter()
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
+            .filter(|e| !e.file_type().is_dir())
         {
             let file_source = entry.path().to_path_buf();
 
@@ -327,7 +325,7 @@ fn traverse_tree(target: &Path, node: &Node, db: &Db) -> Result<()> {
 
 fn create_dir(path: &Path, db: &Db) -> Result<bool> {
     if path.exists() {
-        if path.is_dir() {
+        if is_actual_dir(path) {
             return Ok(false);
         }
         let choice = prompt_collision(path, true)?;
@@ -351,7 +349,7 @@ fn create_dir(path: &Path, db: &Db) -> Result<bool> {
 
 fn write_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
     if target.exists() {
-        if target.is_dir() {
+        if is_actual_dir(target) {
             let choice = prompt_collision(target, false)?;
             match choice {
                 0 => return Ok(()),
@@ -392,6 +390,11 @@ fn is_managed(target: &Path, db: &Db) -> bool {
         _ => return false,
     };
 
+    match (db_entry.action_type, target.is_symlink()) {
+        (DeployType::Symlink, true) | (DeployType::Copy, false) => {}
+        _ => return false,
+    }
+
     match db_entry.action_type {
         DeployType::Symlink => match fs::read_link(target) {
             Ok(p) => p == db_entry.reference,
@@ -430,14 +433,14 @@ fn deploy_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
     }
 
     db.insert_or_update(&DbEntry {
-        target_path: target.to_path_buf(),
         action_type: entry.action_type,
         reference: entry.source.clone(),
         hash: if entry.action_type == DeployType::Copy {
-            Some(hash_file(&entry.source)?)
+            Some(hash_file(target)?)
         } else {
             None
         },
+        target_path: target.to_path_buf(),
     })?;
 
     Ok(())
@@ -484,18 +487,26 @@ mod tests {
         };
     }
 
-    fn setup_test(portal: &str, ignore: &str, rule: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
+    fn setup_test(
+        portal: &str,
+        ignore: &str,
+        rule: &str,
+        populate: bool,
+    ) -> (tempfile::TempDir, PathBuf, PathBuf) {
         let temp_dir = tempdir().unwrap();
         let source_dir = temp_dir.path().join("source");
         let target_dir = temp_dir.path().join("target");
         fs::create_dir(&source_dir).unwrap();
         fs::create_dir(&target_dir).unwrap();
 
-        fs::write(source_dir.join("a.txt"), "").unwrap();
-        fs::write(source_dir.join("b.txt"), "").unwrap();
-        fs::create_dir(source_dir.join("subdir")).unwrap();
-        fs::write(source_dir.join("subdir").join("c.txt"), "").unwrap();
-        fs::write(source_dir.join("subdir").join("d.txt"), "").unwrap();
+        if populate {
+            fs::write(source_dir.join("a.txt"), "").unwrap();
+            fs::write(source_dir.join("b.txt"), "").unwrap();
+            fs::create_dir(source_dir.join("subdir")).unwrap();
+            fs::write(source_dir.join("subdir").join("c.txt"), "").unwrap();
+            fs::write(source_dir.join("subdir").join("d.txt"), "").unwrap();
+        }
+
         let config = format!("ignore = [{ignore}]\n[portal]\n{portal}\n[rule]\n{rule}");
         fs::write(source_dir.join("dotrift.toml"), config).unwrap();
 
@@ -531,24 +542,13 @@ mod tests {
     #[test_case(r#""**/*.txt" = "files""# => portal_entries!(("a.txt", "files/a.txt"), ("b.txt", "files/b.txt"), ("subdir/c.txt", "files/subdir/c.txt"), ("subdir/d.txt", "files/subdir/d.txt")); "glob_deep")]
     #[test_case(r#""" = """# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "all_files")]
     #[test_case(r#""*.txt" = "root""# => portal_entries!(("a.txt", "root/a.txt"), ("b.txt", "root/b.txt")); "glob_root_only")]
-    #[test_case(r#""../../a.txt" = "../../a.txt""# => portal_entries!(("a.txt", "a.txt")); "parent_dir_ref")]
+    #[test_case(r#""*.rs" = """# => portal_entries!(); "glob_nothing")]
+    #[test_case(r#""subdir/dir/../c.txt" = "dist/../root/c.txt""# => portal_entries!(("subdir/c.txt", "root/c.txt")); "traversal")]
+    #[test_case(r#""../../a.txt" = "../../a.txt""# => portal_entries!(("a.txt", "a.txt")); "traversal_does_not_escape")]
     #[test_case(r#""a.txt" = "A.txt"
 "a.*" = """# => portal_entries!(("a.txt", "a.txt"), ("a.txt", "A.txt")); "multiple_portals_same_source")]
     fn test_resolve_portals(portal: &str) -> HashMap<PathBuf, PortalEntry> {
-        let (temp_dir, source_dir, target_dir) = setup_test(portal, "", "");
-        let config = Config::read(source_dir.clone()).unwrap();
-        let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
-        let portal_entries =
-            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
-        flatten(portal_entries, temp_dir.path())
-    }
-
-    #[test_case(r#""*.txt""# => portal_entries!(); "glob_no_match")]
-    #[test_case(r#""subdir/*""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "glob_subdir_only")]
-    #[test_case(r#""**""# => portal_entries!(); "glob_all_empty")]
-    #[test_case(r#""*.txt", "!dotrift.toml""# => portal_entries!(("dotrift.toml", "dotrift.toml")); "negate_ignore")]
-    fn test_ignore(ignore: &str) -> HashMap<PathBuf, PortalEntry> {
-        let (temp_dir, source_dir, target_dir) = setup_test("\"\" = \"\"", ignore, "");
+        let (temp_dir, source_dir, target_dir) = setup_test(portal, "", "", true);
         let config = Config::read(source_dir.clone()).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
         let portal_entries =
@@ -558,38 +558,48 @@ mod tests {
 
     #[test]
     fn test_resolve_portals_collision() {
-        let temp_dir = tempdir().unwrap();
-        let source_dir = temp_dir.path().join("source");
-        let target_dir = temp_dir.path().join("target");
-        fs::create_dir(&source_dir).unwrap();
-        fs::create_dir(&target_dir).unwrap();
-
-        fs::write(source_dir.join("a.txt"), "").unwrap();
-        fs::write(source_dir.join("b.txt"), "").unwrap();
-
-        fs::write(
-            source_dir.join("dotrift.toml"),
-            r#"[portal]
-"a.txt" = "same.txt"
+        let (_temp_dir, source_dir, target_dir) = setup_test(
+            r#""a.txt" = "same.txt"
 "b.txt" = "same.txt""#,
-        )
-        .unwrap();
+            "",
+            "",
+            true,
+        );
 
         let config = Config::read(source_dir.clone()).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
 
-        let result = resolve_portals(
-            &source_dir.normalize(),
-            &target_dir.normalize(),
-            &config.portal,
-            &ignore_matcher,
-        );
-
+        let result = resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher);
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("collision"));
     }
 
+    #[test]
+    fn test_resolve_portals_does_not_exist() {
+        let (_temp_dir, source_dir, target_dir) = setup_test(r#""a.txt" = "a.txt""#, "", "", false);
+
+        let config = Config::read(source_dir.clone()).unwrap();
+        let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
+
+        let result = resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher);
+        assert!(result.is_err());
+    }
+
+    #[test_case(r#""a.txt", "b.txt""# => portal_entries!(("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "multiple")]
+    #[test_case(r#""*.txt""# => portal_entries!(); "glob_no_match")]
+    #[test_case(r#""/*.txt""# => portal_entries!(("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "glob_no_root_txt")]
+    #[test_case(r#""subdir/*""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "glob_subdir")]
+    #[test_case(r#""**""# => portal_entries!(); "glob_all_empty")]
+    #[test_case(r#""*.txt", "!dotrift.toml""# => portal_entries!(("dotrift.toml", "dotrift.toml")); "negate_ignore")]
+    fn test_ignore(ignore: &str) -> HashMap<PathBuf, PortalEntry> {
+        let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, ignore, "", true);
+        let config = Config::read(source_dir.clone()).unwrap();
+        let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
+        let portal_entries =
+            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
+        flatten(portal_entries, temp_dir.path())
+    }
+
+    #[test_case("" => portal_entries!(("a.txt", "a.txt", Symlink, None)); "empty")]
     #[test_case(r#""*.txt" = { mode = "600" }"# => portal_entries!(("a.txt", "a.txt", Symlink, Some(FileMode(0o600)))); "rule_mode")]
     #[test_case(r#""*.txt" = { type = "copy" }"# => portal_entries!(("a.txt", "a.txt", Copy, None)); "rule_type")]
     #[test_case(r#""*.txt" = { mode = "600" }
@@ -597,7 +607,7 @@ mod tests {
     #[test_case(r#""*.txt" = { type = "symlink", mode = "600" }
 "**/a.txt" = { type = "copy", mode = "700" }"# => portal_entries!(("a.txt", "a.txt", Copy, Some(FileMode(0o700)))); "rule_override")]
     fn test_apply_rules(rule: &str) -> HashMap<PathBuf, PortalEntry> {
-        let (temp_dir, source_dir, target_dir) = setup_test(r#""a.txt" = "a.txt""#, "", rule);
+        let (temp_dir, source_dir, target_dir) = setup_test(r#""a.txt" = "a.txt""#, "", rule, true);
         let config = Config::read(source_dir.clone()).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
         let mut portal_entries =
@@ -612,12 +622,11 @@ mod tests {
     |t| t.join("link"),
     |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Symlink, reference: s.join("file"), hash: None })
     => true; "symlink_matching_source")]
-    #[test_case(|s, t| {
-        fs::write(s.join("file"), "").unwrap();
+    #[test_case(|_, t| {
         fs::write(t.join("file"), "").unwrap();
     },
     |t| t.join("file"),
-    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Copy, reference: PathBuf::new(), hash: Some(hash_file(&s.join("file")).unwrap()) })
+    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Copy, reference: s.join("file"), hash: Some(hash_file(&t.join("file")).unwrap()) })
     => true; "copy_matching_hash")]
     #[test_case(|s, t| {
         unix_fs::symlink(s.join("file1"), t.join("link")).unwrap();
@@ -630,28 +639,27 @@ mod tests {
         fs::write(t.join("file"), "b").unwrap();
     },
     |t| t.join("file"),
-    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Copy, reference: PathBuf::new(), hash: Some(hash_file(&s.join("file")).unwrap()) })
+    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Copy, reference: s.join("file"), hash: Some(hash_file(&s.join("file")).unwrap()) })
     => false; "copy_different_hash")]
     #[test_case(|s, t| {
+        fs::write(s.join("file"), "").unwrap();
         unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
     },
     |t| t.join("link"),
-    |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Copy, reference: s.join("file"), hash: None })
+    |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Copy, reference: s.join("file"), hash: Some(hash_file(&s.join("file")).unwrap()) })
     => false; "symlink_db_is_copy")]
-    #[test_case(|s, t| {
-        fs::write(s.join("file"), "").unwrap();
+    #[test_case(|_, t| {
+        fs::write(t.join("file"), "").unwrap();
+    },
+    |t| t.join("file"),
+    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Symlink, reference: s.join("file"), hash: None })
+    => false; "copy_db_is_symlink")]
+    #[test_case(|_, t| {
         fs::write(t.join("file"), "").unwrap();
     },
     |t| t.join("file"),
     |_, _| None
     => false; "no_db_entry")]
-    #[test_case(|s, t| {
-        fs::write(s.join("file"), "").unwrap();
-        fs::write(t.join("file"), "").unwrap();
-    },
-    |t| t.join("file"),
-    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Symlink, reference: s.join("file"), hash: None })
-    => false; "target_is_file_not_symlink")]
     fn test_is_managed(
         cb: impl FnOnce(&PathBuf, &PathBuf),
         target_path: impl FnOnce(&PathBuf) -> PathBuf,
@@ -679,14 +687,14 @@ mod tests {
         assert!(t.join("file").exists());
         assert!(t.join("file").is_symlink());
         assert_eq!(fs::read_link(t.join("file")).unwrap(), s.join("file"));
-    })]
+    }; "deploy_symlink")]
     #[test_case(|s, _| {
         fs::create_dir_all(s.join("dir")).unwrap();
         fs::write(s.join("dir/file"), "").unwrap();
     }, |_, t| {
         assert!(t.join("dir").exists());
         assert!(t.join("dir/file").exists());
-    })]
+    }; "deploy_symlink_nested_dirs")]
     #[test_case(|s, t| {
         fs::create_dir_all(s.join("dir")).unwrap();
         fs::write(s.join("dir/file"), "").unwrap();
@@ -694,7 +702,7 @@ mod tests {
     }, |_, t| {
         assert!(t.join("dir").exists());
         assert!(t.join("dir").is_file());
-    })]
+    }; "deploy_symlink_dir_blocked_by_file_skip")]
     #[test_case(|s, t| {
         PROMPT_SELECTION.set(1);
         fs::create_dir_all(s.join("dir")).unwrap();
@@ -703,7 +711,7 @@ mod tests {
     }, |_, t| {
         assert!(t.join("dir").exists());
         assert!(t.join("dir/file").exists());
-    })]
+    }; "deploy_symlink_dir_blocked_by_file_overwrite")]
     #[test_case(|s, t| {
         fs::write(s.join("dir"), "").unwrap();
         fs::create_dir_all(t.join("dir")).unwrap();
@@ -711,7 +719,7 @@ mod tests {
     }, |_, t| {
         assert!(t.join("dir").exists());
         assert!(t.join("dir/file").exists());
-    })]
+    }; "deploy_symlink_blocked_by_dir_skip")]
     #[test_case(|s, t| {
         PROMPT_SELECTION.set(1);
         fs::write(s.join("dir"), "").unwrap();
@@ -720,25 +728,30 @@ mod tests {
     }, |_, t| {
         assert!(t.join("dir").exists());
         assert!(t.join("dir").is_file());
-    })]
+    }; "deploy_symlink_blocked_by_dir_overwrite")]
     #[test_case(|s, t| {
         fs::write(s.join("file"), "").unwrap();
         fs::write(t.join("file"), "").unwrap();
     }, |_, t| {
         assert!(!t.join("file").is_symlink());
-    })]
+    }; "deploy_symlink_blocked_by_existing_skip")]
     #[test_case(|s, t| {
         PROMPT_SELECTION.set(1);
         fs::write(s.join("file"), "").unwrap();
         fs::write(t.join("file"), "").unwrap();
     }, |_, t| {
         assert!(t.join("file").is_symlink());
-    })]
-    fn test_run_symlink(
+    }; "deploy_symlink_blocked_by_existing_overwrite")]
+    #[test_case(|s, _| {
+        unix_fs::symlink(Path::new("/a"), s.join("file")).unwrap();
+    }, |s, t| {
+        assert_eq!(fs::read_link(t.join("file")).unwrap(), s.join("file"));
+    }; "deploy_symlink_broken_preserved")]
+    fn test_apply_symlink(
         setup: impl FnOnce(&PathBuf, &PathBuf),
         assert: impl FnOnce(&PathBuf, &PathBuf),
     ) {
-        let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, "", "");
+        let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, "", "", false);
         setup(&source_dir, &target_dir);
         run(
             source_dir.clone(),
@@ -758,12 +771,33 @@ mod tests {
         fs::write(s.join("file"), "").unwrap();
     }, |_, t| {
         use std::os::unix::fs::PermissionsExt;
-        
+
         assert!(t.join("file").exists());
         assert!(!t.join("file").is_symlink());
         assert_eq!(fs::File::open(t.join("file")).unwrap().metadata().unwrap().permissions().mode(), 0o100123);
-    })]
-    fn test_run_copy(
+    }; "deploy_copy_with_mode")]
+    #[test_case(|s, t| {
+        fs::write(s.join("file"), "a").unwrap();
+        fs::write(t.join("file"), "b").unwrap();
+    }, |_, t| {
+        assert_eq!(fs::read_to_string(t.join("file")).unwrap(), "b");
+    }; "deploy_copy_blocked_by_existing_skip")]
+    #[test_case(|s, t| {
+        PROMPT_SELECTION.set(1);
+        fs::write(s.join("file"), "a").unwrap();
+        fs::write(t.join("file"), "b").unwrap();
+    }, |_, t| {
+        assert_eq!(fs::read_to_string(t.join("file")).unwrap(), "a");
+    }; "deploy_copy_blocked_by_existing_overwrite")]
+    #[test_case(|s, t| {
+        fs::write(t.join("origin"), "").unwrap();
+        unix_fs::symlink(t.join("origin"), s.join("file")).unwrap();
+        assert!(s.join("file").is_symlink());
+    }, |_, t| {
+        assert!(t.join("file").exists());
+        assert!(!t.join("file").is_symlink());
+    }; "deploy_copy_overwrites_existing_symlink")]
+    fn test_apply_copy(
         setup: impl FnOnce(&PathBuf, &PathBuf),
         assert: impl FnOnce(&PathBuf, &PathBuf),
     ) {
@@ -771,6 +805,7 @@ mod tests {
             r#""" = """#,
             "",
             r#""**/*" = { type = "copy", mode = "123" }"#,
+            false,
         );
         setup(&source_dir, &target_dir);
         run(

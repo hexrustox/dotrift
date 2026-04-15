@@ -6,14 +6,22 @@ use std::path::Path;
 use color_eyre::eyre::{Context, Result};
 use twox_hash::XxHash64;
 
+const SEED: u64 = 42;
 const BUFFER_SIZE: usize = 8192;
 
-// FIXME
+pub fn is_actual_dir(path: &Path) -> bool {
+    if path.is_symlink() {
+        return false;
+    }
+
+    path.is_dir()
+}
+
 pub fn hash_file(path: &Path) -> Result<u64> {
     let file =
         File::open(path).wrap_err_with(|| format!("Failed to open `{}`.", path.display()))?;
     let mut reader = BufReader::with_capacity(BUFFER_SIZE, file);
-    let mut hasher = XxHash64::with_seed(1);
+    let mut hasher = XxHash64::with_seed(SEED);
     let mut buffer = [0u8; BUFFER_SIZE];
 
     loop {

@@ -25,8 +25,8 @@ impl Config {
     pub fn read(source_dir: PathBuf) -> color_eyre::Result<Self> {
         let path = config_path(source_dir);
         let s = read_to_string(&path)
-            .wrap_err(format!("Failed to read config file `{}`", path.display()))?;
-        toml::from_str(&s).wrap_err("Failed to parse config file")
+            .wrap_err(format!("Failed to read config file `{}`.", path.display()))?;
+        toml::from_str(&s).wrap_err("Failed to parse config file.")
     }
 }
 
