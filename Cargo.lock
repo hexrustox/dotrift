@@ -316,10 +316,12 @@ dependencies = [
  "normalize-path",
  "rusqlite",
  "serde",
+ "strum",
  "tempfile",
  "test-case",
  "thiserror",
  "toml",
+ "tui",
  "twox-hash",
  "walkdir",
 ]

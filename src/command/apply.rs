@@ -1,16 +1,11 @@
-#[cfg(test)]
-use std::cell::RefCell;
-
 use std::{
     collections::HashMap,
     fs::{self, remove_file},
-    io::{self, IsTerminal},
     os::unix::fs as unix_fs,
     path::{Path, PathBuf},
 };
 
 use color_eyre::eyre::{Context, Result, eyre};
-use dialoguer::Select;
 use glob::glob;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use normalize_path::NormalizePath;
@@ -19,6 +14,7 @@ use walkdir::WalkDir;
 use crate::{
     cli::ApplyFlags,
     command::{
+        prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
         util::{hash_file, is_actual_dir},
     },
@@ -26,11 +22,6 @@ use crate::{
     db::{Db, DbEntry},
     error::IoError,
 };
-
-#[cfg(test)]
-thread_local! {
-    static PROMPT_SELECTION: RefCell<usize> = const { RefCell::new(0) };
-}
 
 #[derive(Default, Debug, PartialEq)]
 pub struct PortalEntry {
@@ -338,15 +329,14 @@ fn create_dir(path: &Path, db: &Db) -> Result<bool> {
         }
         let choice = prompt_collision(path, true)?;
         match choice {
-            0 => return Ok(true),
-            1 => {
+            CollisionOptions::Skip => return Ok(true),
+            CollisionOptions::Overwrite => {
                 fs::remove_file(path).remove_file_error(path)?;
                 db.delete_entry(path)?;
             }
-            2 => {
+            CollisionOptions::Quit => {
                 return Err(eyre!("Aborted."));
             }
-            _ => unreachable!(),
         }
     }
     fs::create_dir_all(path).create_dir_error(path)?;
@@ -358,27 +348,25 @@ fn write_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
         if is_actual_dir(target) {
             let choice = prompt_collision(target, false)?;
             match choice {
-                0 => return Ok(()),
-                1 => {
+                CollisionOptions::Skip => return Ok(()),
+                CollisionOptions::Overwrite => {
                     fs::remove_dir_all(target).remove_dir_error(target)?;
                     db.delete_entry_with_prefix(target)?;
                 }
-                2 => {
+                CollisionOptions::Quit => {
                     return Err(eyre!("Aborted."));
                 }
-                _ => unreachable!(),
             }
         } else {
             let managed = is_managed(target, db);
             if !managed {
                 let choice = prompt_collision(target, false)?;
                 match choice {
-                    0 => return Ok(()),
-                    1 => {}
-                    2 => {
+                    CollisionOptions::Skip => return Ok(()),
+                    CollisionOptions::Overwrite => {}
+                    CollisionOptions::Quit => {
                         return Err(eyre!("Aborted."));
                     }
-                    _ => unreachable!(),
                 }
             }
         }
@@ -450,37 +438,10 @@ fn deploy_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
     Ok(())
 }
 
-#[allow(unused_variables)]
-fn prompt_collision(path: &Path, is_dir: bool) -> Result<usize> {
-    #[cfg(test)]
-    {
-        return Ok(PROMPT_SELECTION.with_borrow(|n| *n));
-    }
-
-    #[allow(unreachable_code)]
-    let stdin = io::stdin();
-    if !stdin.is_terminal() {
-        return Ok(0);
-    }
-
-    let type_str = if is_dir { "directory" } else { "file" };
-    let selection = Select::new()
-        .with_prompt(format!(
-            "`{}` is an existing {}, skip/overwrite/quit?",
-            path.display(),
-            type_str
-        ))
-        .items(["skip", "overwrite", "quit"])
-        .default(0)
-        .interact()
-        .wrap_err("Failed to get user input.")?;
-
-    println!();
-    Ok(selection)
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::command::prompt::PROMPT_SELECTION;
+
     use super::*;
     use std::fs;
     use tempfile::tempdir;
@@ -713,7 +674,7 @@ mod tests {
         assert!(t.join("dir").is_file());
     }; "deploy_symlink_dir_blocked_by_file_skip")]
     #[test_case(|s, t| {
-        PROMPT_SELECTION.set(1);
+        PROMPT_SELECTION.set(CollisionOptions::Overwrite);
         fs::create_dir_all(s.join("dir")).unwrap();
         fs::write(s.join("dir/file"), "").unwrap();
         fs::write(t.join("dir"), "").unwrap();
@@ -730,7 +691,7 @@ mod tests {
         assert!(t.join("dir/file").exists());
     }; "deploy_symlink_blocked_by_dir_skip")]
     #[test_case(|s, t| {
-        PROMPT_SELECTION.set(1);
+        PROMPT_SELECTION.set(CollisionOptions::Overwrite);
         fs::write(s.join("dir"), "").unwrap();
         fs::create_dir_all(t.join("dir")).unwrap();
         fs::write(t.join("dir/file"), "").unwrap();
@@ -745,7 +706,7 @@ mod tests {
         assert!(!t.join("file").is_symlink());
     }; "deploy_symlink_blocked_by_existing_skip")]
     #[test_case(|s, t| {
-        PROMPT_SELECTION.set(1);
+        PROMPT_SELECTION.set(CollisionOptions::Overwrite);
         fs::write(s.join("file"), "").unwrap();
         fs::write(t.join("file"), "").unwrap();
     }, |_, t| {
@@ -792,7 +753,7 @@ mod tests {
         assert_eq!(fs::read_to_string(t.join("file")).unwrap(), "b");
     }; "deploy_copy_blocked_by_existing_skip")]
     #[test_case(|s, t| {
-        PROMPT_SELECTION.set(1);
+        PROMPT_SELECTION.set(CollisionOptions::Overwrite);
         fs::write(s.join("file"), "a").unwrap();
         fs::write(t.join("file"), "b").unwrap();
     }, |_, t| {
