@@ -1,15 +1,11 @@
-mod cli;
-mod command;
-mod config;
-mod db;
-mod error;
-mod path;
-
 use clap::Parser;
 use cli::{Cli, Commands};
 use color_eyre::eyre::Context;
-
-use crate::path::{db_path, source_path};
+use dotrift::{
+    cli,
+    command::apply,
+    path::{db_path, source_path},
+};
 
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
@@ -20,7 +16,7 @@ fn main() -> color_eyre::Result<()> {
 
     match cli.command {
         Commands::Apply(flags) => {
-            command::apply::run(source_dir, cli.target, &db_path(), flags)
+            apply::run(source_dir, cli.target, &db_path(), flags)
                 .wrap_err("Failed to apply dotfiles")?;
         }
         Commands::Unapply(_flags) => {}

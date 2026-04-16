@@ -1,10 +1,12 @@
-use std::fs::File;
+use std::fs::{self, File};
 use std::hash::Hasher;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
 use color_eyre::eyre::{Context, Result};
 use twox_hash::XxHash64;
+
+use crate::{config::DeployType, db::Db};
 
 const SEED: u64 = 42;
 const BUFFER_SIZE: usize = 8192;
@@ -35,4 +37,129 @@ pub fn hash_file(path: &Path) -> Result<u64> {
     }
 
     Ok(hasher.finish())
+}
+
+pub fn is_managed(target: &Path, db: &Db) -> bool {
+    let db_entry = match db.get_entry(target).ok() {
+        Some(Some(e)) => e,
+        _ => return false,
+    };
+
+    match (db_entry.action_type, target.is_symlink()) {
+        (DeployType::Symlink, true) | (DeployType::Copy, false) => {}
+        _ => return false,
+    }
+
+    match db_entry.action_type {
+        DeployType::Symlink => match fs::read_link(target) {
+            Ok(p) => p == db_entry.reference,
+            Err(_) => false,
+        },
+        DeployType::Copy => match hash_file(target) {
+            Ok(h) => Some(h) == db_entry.hash,
+            Err(_) => false,
+        },
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    use crate::db::DbEntry;
+    use std::os::unix::fs as unix_fs;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+    use test_case::test_case;
+
+    pub fn setup_test(
+        portal: &str,
+        ignore: &str,
+        rule: &str,
+        populate: bool,
+    ) -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let temp_dir = tempdir().unwrap();
+        let source_dir = temp_dir.path().join("source");
+        let target_dir = temp_dir.path().join("target");
+        fs::create_dir(&source_dir).unwrap();
+        fs::create_dir(&target_dir).unwrap();
+
+        if populate {
+            fs::write(source_dir.join("a.txt"), "").unwrap();
+            fs::write(source_dir.join("b.txt"), "").unwrap();
+            fs::create_dir(source_dir.join("subdir")).unwrap();
+            fs::write(source_dir.join("subdir").join("c.txt"), "").unwrap();
+            fs::write(source_dir.join("subdir").join("d.txt"), "").unwrap();
+        }
+
+        let config = format!("ignore = [{ignore}]\n[portal]\n{portal}\n[rule]\n{rule}");
+        fs::write(source_dir.join("dotrift.toml"), config).unwrap();
+
+        (temp_dir, source_dir, target_dir)
+    }
+
+    #[test_case(|s, t| {
+        unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
+    },
+    |t| t.join("link"),
+    |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Symlink, reference: s.join("file"), hash: None })
+    => true; "symlink_matching_source")]
+    #[test_case(|_, t| {
+        fs::write(t.join("file"), "").unwrap();
+    },
+    |t| t.join("file"),
+    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Copy, reference: s.join("file"), hash: Some(hash_file(&t.join("file")).unwrap()) })
+    => true; "copy_matching_hash")]
+    #[test_case(|s, t| {
+        unix_fs::symlink(s.join("file1"), t.join("link")).unwrap();
+    },
+    |t| t.join("link"),
+    |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Symlink, reference: s.join("file2"), hash: None })
+    => false; "symlink_different_source")]
+    #[test_case(|s, t| {
+        fs::write(s.join("file"), "a").unwrap();
+        fs::write(t.join("file"), "b").unwrap();
+    },
+    |t| t.join("file"),
+    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Copy, reference: s.join("file"), hash: Some(hash_file(&s.join("file")).unwrap()) })
+    => false; "copy_different_hash")]
+    #[test_case(|s, t| {
+        fs::write(s.join("file"), "").unwrap();
+        unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
+    },
+    |t| t.join("link"),
+    |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Copy, reference: s.join("file"), hash: Some(hash_file(&s.join("file")).unwrap()) })
+    => false; "symlink_db_is_copy")]
+    #[test_case(|_, t| {
+        fs::write(t.join("file"), "").unwrap();
+    },
+    |t| t.join("file"),
+    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Symlink, reference: s.join("file"), hash: None })
+    => false; "copy_db_is_symlink")]
+    #[test_case(|_, t| {
+        fs::write(t.join("file"), "").unwrap();
+    },
+    |t| t.join("file"),
+    |_, _| None
+    => false; "no_db_entry")]
+    fn test_is_managed(
+        cb: impl FnOnce(&PathBuf, &PathBuf),
+        target_path: impl FnOnce(&PathBuf) -> PathBuf,
+        db_entry: impl FnOnce(&PathBuf, &PathBuf) -> Option<DbEntry>,
+    ) -> bool {
+        let temp_dir = tempdir().unwrap();
+        let source_dir = temp_dir.path().join("source");
+        let target_dir = temp_dir.path().join("target");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+
+        cb(&source_dir, &target_dir);
+
+        let db = Db::init(&temp_dir.path().join("db")).unwrap();
+        if let Some(e) = db_entry(&source_dir, &target_dir) {
+            db.insert_or_update(&e).unwrap();
+        }
+
+        is_managed(&target_path(&target_dir), &db)
+    }
 }

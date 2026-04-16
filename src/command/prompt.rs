@@ -1,3 +1,9 @@
+use std::{
+    fmt::Display,
+    io::{self, IsTerminal},
+    path::Path,
+};
+
 use color_eyre::eyre::Context;
 use strum::EnumIter;
 use tui::prompt::{HotKey, SelectPrompt};
@@ -32,22 +38,12 @@ impl HotKey for CollisionOptions {
     }
 }
 
-#[cfg(test)]
-use std::cell::RefCell;
-use std::{
-    fmt::Display,
-    io::{self, IsTerminal},
-    path::Path,
-};
-#[cfg(test)]
-thread_local! {
-    pub static PROMPT_SELECTION: RefCell<CollisionOptions> = RefCell::new(CollisionOptions::default()) ;
-}
-
 #[allow(unused_variables)]
 pub fn prompt_collision(path: &Path, is_dir: bool) -> color_eyre::Result<CollisionOptions> {
     #[cfg(test)]
     {
+        use crate::command::prompt::tests::PROMPT_SELECTION;
+
         return Ok(PROMPT_SELECTION.with_borrow(|n| *n));
     }
 
@@ -66,4 +62,14 @@ pub fn prompt_collision(path: &Path, is_dir: bool) -> color_eyre::Result<Collisi
         ))
         .interact()
         .wrap_err("Failed to get user input.")
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    thread_local! {
+        pub static PROMPT_SELECTION: RefCell<CollisionOptions> = RefCell::new(CollisionOptions::default()) ;
+    }
 }
