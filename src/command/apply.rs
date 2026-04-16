@@ -228,8 +228,7 @@ fn resolve_literal_portal(
 ) -> Result<()> {
     let source_path = source_dir.join(pattern);
 
-    // FIXME
-    if !source_path.exists() {
+    if matches!(source_path.try_exists(), Ok(false)) {
         return Err(eyre!(
             "Source path does not exist: `{}`.",
             source_path.display()
@@ -371,7 +370,7 @@ fn traverse_tree(target: &Path, node: &Node, db: &Db) -> Result<()> {
 }
 
 fn create_dir(path: &Path, db: &Db) -> Result<bool> {
-    if path.exists() {
+    if !matches!(path.try_exists(), Ok(false)) {
         if is_actual_dir(path) {
             return Ok(false);
         }
@@ -392,7 +391,7 @@ fn create_dir(path: &Path, db: &Db) -> Result<bool> {
 }
 
 fn write_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
-    if target.exists() {
+    if !matches!(target.try_exists(), Ok(false)) {
         if is_actual_dir(target) {
             let choice = prompt_collision(target, false)?;
             match choice {
