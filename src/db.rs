@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{Context, Result, eyre};
+use color_eyre::eyre::{Context, eyre};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
@@ -49,7 +49,7 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
 }
 
 impl Db {
-    pub fn init(path: &PathBuf) -> Result<Self> {
+    pub fn init(path: &PathBuf) -> color_eyre::Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .create_dir_error(parent)
@@ -75,7 +75,7 @@ impl Db {
         Ok(Self { conn })
     }
 
-    pub fn insert_or_update(&self, entry: &DbEntry) -> Result<()> {
+    pub fn insert_or_update(&self, entry: &DbEntry) -> color_eyre::Result<()> {
         let hash_str = entry.hash.map(|h| format!("{:x}", h));
 
         self.conn
@@ -83,10 +83,7 @@ impl Db {
                 "INSERT OR REPLACE INTO entries (target_path, action_type, reference, hash) VALUES (?1, ?2, ?3, ?4)",
                 params![
                     entry.target_path.to_string_lossy(),
-                    match entry.action_type {
-                        DeployType::Symlink => "symlink",
-                        DeployType::Copy => "copy",
-                    },
+                    entry.action_type.to_string(),
                     entry.reference.to_string_lossy(),
                     hash_str,
                 ],
@@ -97,7 +94,7 @@ impl Db {
         Ok(())
     }
 
-    pub fn delete_entry(&self, target: &Path) -> Result<()> {
+    pub fn delete_entry(&self, target: &Path) -> color_eyre::Result<()> {
         self.conn
             .execute(
                 "DELETE FROM entries WHERE target_path = ?1",
@@ -108,7 +105,7 @@ impl Db {
         Ok(())
     }
 
-    pub fn delete_entry_with_prefix(&self, target: &Path) -> Result<()> {
+    pub fn delete_entry_with_prefix(&self, target: &Path) -> color_eyre::Result<()> {
         self.conn
             .execute(
                 "DELETE FROM entries WHERE target_path like ?1",
@@ -119,7 +116,7 @@ impl Db {
         Ok(())
     }
 
-    pub fn get_entry(&self, target: &Path) -> Result<Option<DbEntry>> {
+    pub fn get_entry(&self, target: &Path) -> color_eyre::Result<Option<DbEntry>> {
         let mut stmt = self
         .conn
         .prepare("SELECT target_path, action_type, reference, hash FROM entries WHERE target_path = ?1")
@@ -131,7 +128,7 @@ impl Db {
             .wrap_as_db_error()
     }
 
-    pub fn get_all_entries(&self) -> Result<Vec<DbEntry>> {
+    pub fn get_all_entries(&self) -> color_eyre::Result<Vec<DbEntry>> {
         let mut stmt = self
             .conn
             .prepare("SELECT target_path, action_type, reference, hash FROM entries")

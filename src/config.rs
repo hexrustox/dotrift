@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::fs::read_to_string;
 use std::path::PathBuf;
 
@@ -48,6 +49,15 @@ pub enum DeployType {
     #[default]
     Symlink,
     Copy,
+}
+
+impl Display for DeployType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeployType::Symlink => write!(f, "symlink"),
+            DeployType::Copy => write!(f, "copy"),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]

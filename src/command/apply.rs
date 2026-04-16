@@ -60,6 +60,11 @@ pub fn run(
 
     let tree = build_tree(portal_entries).wrap_err("Failed to build target file system tree.")?;
 
+    if flags.dry_run {
+        print_tree(Path::new("/"), &tree)?;
+        return Ok(());
+    }
+
     let db = Db::init(db_path)?;
     traverse_tree(Path::new("/"), &tree, &db)?;
 
@@ -184,9 +189,7 @@ fn resolve_glob_portal(
     for entry in glob(&full_pattern_str).wrap_err("Invalid glob pattern.")? {
         let source_path = entry.wrap_err("Failed to read glob match.")?;
 
-        let source_rel = source_path
-            .strip_prefix(source_dir)
-            .expect("Glob match not under source directory");
+        let source_rel = source_path.strip_prefix(source_dir).unwrap_or(&source_path);
 
         let stripped = if prefix.is_empty() {
             source_rel.to_path_buf()
@@ -236,7 +239,7 @@ fn resolve_literal_portal(
 
             let rel_to_pattern = file_source
                 .strip_prefix(&source_path)
-                .expect("Walkdir file not under pattern");
+                .unwrap_or(&file_source);
 
             let target_path = target_dir.join(target_rel).join(rel_to_pattern);
 
@@ -290,6 +293,7 @@ fn apply_rules(portal_entries: &mut HashMap<PathBuf, PortalEntry>, rules: &Rules
     for (pattern, rule) in rules.iter().rev() {
         let pattern = glob::Pattern::new(pattern).wrap_err("Invalid glob pattern.")?;
         for (path, portal_entry) in portal_entries.iter_mut() {
+            // FIXME
             if !pattern.matches(&path.to_string_lossy()) {
                 continue;
             }
@@ -302,6 +306,35 @@ fn apply_rules(portal_entries: &mut HashMap<PathBuf, PortalEntry>, rules: &Rules
         }
     }
 
+    Ok(())
+}
+
+fn print_tree(path: &Path, node: &Node) -> Result<()> {
+    match node {
+        Node::Dir(children) => {
+            if path != Path::new("/") {
+                println!("[CREATE DIR] {}", path.display());
+            }
+            for (name, child) in children {
+                print_tree(&path.join(name), child)?;
+            }
+        }
+        Node::File(entry) => {
+            println!(
+                "[CREATE {}] {} {} {}",
+                match entry.action_type {
+                    DeployType::Symlink => "LNK",
+                    DeployType::Copy => "FIL",
+                },
+                path.display(),
+                match entry.action_type {
+                    DeployType::Symlink => "->",
+                    _ => "<-",
+                },
+                entry.source.display()
+            );
+        }
+    }
     Ok(())
 }
 
@@ -790,5 +823,28 @@ mod tests {
         )
         .unwrap();
         assert(&source_dir, &target_dir);
+    }
+
+    #[test]
+    fn test_dry_run_no_write() {
+        let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, "", "", false);
+        fs::write(source_dir.join("file"), "content").unwrap();
+
+        run(
+            source_dir.clone(),
+            Some(target_dir.clone()),
+            &temp_dir.path().join("db"),
+            ApplyFlags {
+                dry_run: true,
+                clean_up: false,
+                prune_empty_dirs: false,
+            },
+        )
+        .unwrap();
+
+        assert!(
+            !target_dir.join("file").exists(),
+            "dry_run should not create files"
+        );
     }
 }
