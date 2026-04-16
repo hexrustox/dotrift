@@ -59,6 +59,12 @@ pub fn run(
     apply_rules(&target_normalized, &mut portal_entries, &config.rule)
         .wrap_err("Failed to apply rules.")?;
 
+    let db = Db::init(db_path)?;
+
+    if flags.clean_up {
+        cleanup(&portal_entries, &db, flags.dry_run, flags.prune_empty_dirs)?;
+    }
+
     let tree = build_tree(portal_entries).wrap_err("Failed to build target file system tree.")?;
 
     if flags.dry_run {
@@ -66,7 +72,6 @@ pub fn run(
         return Ok(());
     }
 
-    let db = Db::init(db_path)?;
     traverse_tree(Path::new("/"), &tree, &db)?;
 
     Ok(())
@@ -223,6 +228,7 @@ fn resolve_literal_portal(
 ) -> Result<()> {
     let source_path = source_dir.join(pattern);
 
+    // FIXME
     if !source_path.exists() {
         return Err(eyre!(
             "Source path does not exist: `{}`.",
@@ -476,6 +482,53 @@ fn deploy_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
         },
         target_path: target.to_path_buf(),
     })?;
+
+    Ok(())
+}
+
+fn cleanup(
+    portal_entries: &HashMap<PathBuf, PortalEntry>,
+    db: &Db,
+    dry_run: bool,
+    prune_empty_dirs: bool,
+) -> Result<()> {
+    let db_entries = db.get_all_entries()?;
+
+    for entry in db_entries {
+        let path = &entry.target_path;
+        if portal_entries.contains_key(path) {
+            continue;
+        }
+
+        if matches!(path.try_exists(), Ok(false)) {
+            let managed = is_managed(path, db);
+            if managed {
+                if dry_run {
+                    println!("[REMOVE] {}", path.display());
+                } else {
+                    fs::remove_file(path).remove_file_error(path)?;
+
+                    if prune_empty_dirs {
+                        let mut current = path.parent();
+                        while let Some(dir) = current {
+                            if let Ok(iter) = dir.read_dir()
+                                && iter.count() == 0
+                            {
+                                fs::remove_dir(dir).remove_dir_error(dir)?;
+                            } else {
+                                break;
+                            }
+                            current = dir.parent();
+                        }
+                    }
+                }
+            }
+        }
+
+        if !dry_run {
+            db.delete_entry(path)?;
+        }
+    }
 
     Ok(())
 }

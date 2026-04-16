@@ -139,9 +139,7 @@ Reverses the `apply` process, removing managed files from the target.
 
 1. **`--dry-run` Behavior (if active):**
    * Iterate all DB entries.
-   * Print to `stdout`:
-     * `[WOULD REMOVE] <path>`: File is managed and exists on disk (would be deleted from disk and DB).
-     * `[WOULD UNTRACK] <path>`: File is unmanaged/modified or missing (would only be removed from DB).
+   * Print `[WOULD REMOVE] <path>`: File is managed and exists on disk (would be deleted from disk and DB).
    * **Note:** Do not simulate recursive empty directory deletion for `--prune-empty-dirs`; only show the file deletions that would initiate the process.
 
 2. **Execution (if not `--dry-run`):** Iterate all DB entries.
