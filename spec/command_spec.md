@@ -132,8 +132,8 @@ Reverses the `apply` process, removing managed files from the target.
 **Usage:** `dotrift unapply [OPTIONS]`
 
 **Options:**
-* `--dry-run`: Print planned removals without touching the filesystem or database.
-* `--prune-empty-dirs`: Recursively delete orphaned empty directories after file removal.
+* `--dry-run`: Print planned operations without touching the filesystem or database.
+* `--prune-empty-dirs`: Recursively delete orphaned empty directories.
 
 ### Execution Pipeline
 
@@ -157,7 +157,7 @@ Reverses the `apply` process, removing managed files from the target.
 
 **Arguments:**
 * `<TARGET_FILE>`: Absolute path to existing file on disk.
-* `<SOURCE_RELATIVE_PATH>`: Desired location relative to `source-dir`.
+* `<SOURCE_RELATIVE_PATH>`: Absolute path in `source-dir`.
 
 ### Execution Pipeline
 1. **Validate:** Ensure `<TARGET_FILE>` exists.
@@ -176,6 +176,7 @@ Prints the content differences between the source file and the target file.
 
 **Arguments:**
 * `<TARGET_FILE>`: Absolute path to a specific file to check.
+* `[OPTIONS]`: Optional. Flags passed to the `diff` command.
 
 ### Execution Pipeline
 

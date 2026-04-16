@@ -112,7 +112,6 @@ Defines the deployment method (`type`) and file permissions (`mode`), directory 
 
 * **`[portal]` Syntax:** Supports standard **bash-like globbing** (`*`, `**`, `?`, `[]`). Uses `glob` crate. Brace expansion (`{}`) is not supported.
 * **`ignore` Syntax:** Supports **Gitignore-style semantics**.
-* **Hidden Files:** Standard behavior applies; `*` does not match hidden files (e.g., `.hidden_file`). Users must explicitly use `.*` patterns to match them.
 * **Prefix Normalization:** The `./` prefix is purely cosmetic. `"a" = "b"` and `"./a" = "./b"` are identical.
 * **Symlinks in Source:** Symbolic links encountered in the source directory are treated as regular files. The manager does not follow them to resolve their targets during discovery; the symlink itself is deployed.
 
@@ -127,6 +126,4 @@ Defines the deployment method (`type`) and file permissions (`mode`), directory 
 * **Target Collisions:** If two different source paths resolve to the exact same target path. This inherently catches exact duplicate `[portal]` rules after path normalization.
 
 ### Warnings (Continues Execution)
-* **Unmatched Portal Patterns:** If a `[portal]` glob pattern matches zero files in the source directory (evaluated after `ignore` filtering).
-* **Unmatched Rule Patterns:** If a `[rule]` glob pattern matches zero resolved target paths.
 * **Invalid Mode on Symlink:** When `[rule]` attempts to apply a `mode` to a `type = "symlink"`.
