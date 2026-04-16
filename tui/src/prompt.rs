@@ -7,13 +7,26 @@ use crossterm::{
     cursor,
     event::{self, Event, KeyCode},
     queue,
-    style::{Color, Print, Stylize},
+    style::{Attribute, Color, Print, Stylize},
     terminal,
 };
 use strum::IntoEnumIterator;
 
-pub trait HotKey {
+pub trait HotKey: Display {
     fn hot_key(&self) -> char;
+
+    fn display(&self) -> String {
+        let ch = self.hot_key().to_string();
+        format!(
+            "[{}]{}",
+            ch,
+            if let Some(s) = self.to_string().strip_prefix(&ch) {
+                s.to_string()
+            } else {
+                self.to_string()
+            }
+        )
+    }
 }
 
 pub struct SelectPrompt<I> {
@@ -52,6 +65,11 @@ where
         self
     }
 
+    pub fn default(mut self, default: I) -> Self {
+        self.default = Some(default);
+        self
+    }
+
     pub fn interact(self) -> io::Result<I> {
         let mut stdout = io::stdout();
         queue!(stdout, cursor::Hide, cursor::SavePosition)?;
@@ -63,16 +81,16 @@ where
             queue!(
                 stdout,
                 Print(format!(
-                    "{}{}",
+                    "{}({})",
                     self.prompt,
                     I::iter()
                         .map(|item| if item == select {
                             format!("{}{}", self.anchor, item)
                                 .with(Color::Blue)
-                                .bold()
+                                .attribute(Attribute::Bold)
                                 .to_string()
                         } else {
-                            format!("[{}]{}", item.hot_key(), item)
+                            item.display().attribute(Attribute::Dim).to_string()
                         })
                         .collect::<Vec<_>>()
                         .join(&self.separator)
@@ -86,13 +104,24 @@ where
                         KeyCode::Char(c) => {
                             if let Some(s) = I::iter().find(|item| item.hot_key() == c) {
                                 select = s;
-
-                                queue!(
-                                    stdout,
-                                    cursor::RestorePosition,
-                                    terminal::Clear(terminal::ClearType::CurrentLine),
-                                )?;
-                                stdout.flush()?;
+                                break;
+                            }
+                        }
+                        KeyCode::Left => {
+                            let mut iter = I::iter();
+                            let len = iter.len();
+                            if let Some(index) = iter.position(|item| item == select) {
+                                let skip = (index + len - 1) % len;
+                                select = I::iter().nth(skip).unwrap_or(select);
+                                break;
+                            }
+                        }
+                        KeyCode::Right => {
+                            let mut iter = I::iter();
+                            let len = iter.len();
+                            if let Some(index) = iter.position(|item| item == select) {
+                                let skip = (index + 1) % len;
+                                select = I::iter().nth(skip).unwrap_or(select);
                                 break;
                             }
                         }
@@ -112,6 +141,13 @@ where
                     }
                 }
             }
+
+            queue!(
+                stdout,
+                cursor::RestorePosition,
+                terminal::Clear(terminal::ClearType::CurrentLine),
+            )?;
+            stdout.flush()?;
         }
     }
 }

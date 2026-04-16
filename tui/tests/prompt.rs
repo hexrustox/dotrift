@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
+use strum::EnumIter;
 use tui::prompt::{HotKey, SelectPrompt};
-use tui::reexports::strum::EnumIter;
 
 #[derive(Default, PartialEq, EnumIter)]
 enum Fruits {
@@ -35,8 +35,6 @@ impl HotKey for Fruits {
 fn main() {
     let select = SelectPrompt::<Fruits>::new()
         .prompt("What fruit? ")
-        .separator(", ")
-        .anchor("* ")
         .interact()
         .unwrap();
 
