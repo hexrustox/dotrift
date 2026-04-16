@@ -29,7 +29,7 @@ fn test_dry_run() {
 "" = ""
 
 [rule]
-"**/subdir/*" = { type = "copy" }
+"subdir/*" = { type = "copy" }
 "#;
     fs::write(source_dir.join("dotrift.toml"), config).unwrap();
 

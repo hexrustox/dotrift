@@ -56,7 +56,8 @@ pub fn run(
     )
     .wrap_err("Failed to resolve portals.")?;
 
-    apply_rules(&mut portal_entries, &config.rule).wrap_err("Failed to apply rules.")?;
+    apply_rules(&target_normalized, &mut portal_entries, &config.rule)
+        .wrap_err("Failed to apply rules.")?;
 
     let tree = build_tree(portal_entries).wrap_err("Failed to build target file system tree.")?;
 
@@ -289,12 +290,20 @@ fn is_ignored(matcher: &Gitignore, path: &Path) -> bool {
     matcher.matched(path, false).is_ignore()
 }
 
-fn apply_rules(portal_entries: &mut HashMap<PathBuf, PortalEntry>, rules: &Rules) -> Result<()> {
-    for (pattern, rule) in rules.iter().rev() {
+fn apply_rules(
+    target_dir: &Path,
+    portal_entries: &mut HashMap<PathBuf, PortalEntry>,
+    rules: &Rules,
+) -> Result<()> {
+    for (pattern, rule) in rules.iter() {
         let pattern = glob::Pattern::new(pattern).wrap_err("Invalid glob pattern.")?;
         for (path, portal_entry) in portal_entries.iter_mut() {
-            // FIXME
-            if !pattern.matches(&path.to_string_lossy()) {
+            if !pattern.matches(
+                &path
+                    .strip_prefix(target_dir)
+                    .unwrap_or(path)
+                    .to_string_lossy(),
+            ) {
                 continue;
             }
             if let Some(rule_type) = &rule.r#type {
@@ -606,16 +615,16 @@ mod tests {
     #[test_case(r#""*.txt" = { mode = "600" }"# => portal_entries!(("a.txt", "a.txt", Symlink, Some(FileMode(0o600)))); "rule_mode")]
     #[test_case(r#""*.txt" = { type = "copy" }"# => portal_entries!(("a.txt", "a.txt", Copy, None)); "rule_type")]
     #[test_case(r#""*.txt" = { mode = "600" }
-"**/a.txt" = { type = "copy" }"# => portal_entries!(("a.txt", "a.txt", Copy, Some(FileMode(0o600)))); "rule_merge")]
+"a.txt" = { type = "copy" }"# => portal_entries!(("a.txt", "a.txt", Copy, Some(FileMode(0o600)))); "rule_merge")]
     #[test_case(r#""*.txt" = { type = "symlink", mode = "600" }
-"**/a.txt" = { type = "copy", mode = "700" }"# => portal_entries!(("a.txt", "a.txt", Copy, Some(FileMode(0o700)))); "rule_override")]
+"a.txt" = { type = "copy", mode = "700" }"# => portal_entries!(("a.txt", "a.txt", Copy, Some(FileMode(0o700)))); "rule_override")]
     fn test_apply_rules(rule: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = setup_test(r#""a.txt" = "a.txt""#, "", rule, true);
         let config = Config::read(source_dir.clone()).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
         let mut portal_entries =
             resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
-        apply_rules(&mut portal_entries, &config.rule).unwrap();
+        apply_rules(&target_dir, &mut portal_entries, &config.rule).unwrap();
         flatten(portal_entries, temp_dir.path())
     }
 
