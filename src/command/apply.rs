@@ -36,27 +36,20 @@ pub fn run(
     db_path: &PathBuf,
     flags: ApplyFlags,
 ) -> Result<()> {
-    let source_normalized = source_dir.normalize();
-
     let config = Config::read(source_dir.clone())?;
 
-    let target_dir = resolve_target(target_override, &config)?;
-    let target_normalized = target_dir.normalize();
+    let target_dir = resolve_target(target_override, &config)?.normalize();
 
-    validate_paths(&source_normalized, &target_normalized)?;
+    validate_paths(&source_dir, &target_dir)?;
 
-    let ignore_matcher = build_ignore(&config.ignore, &target_normalized)
-        .wrap_err("Failed to build ignore matcher.")?;
+    let ignore_matcher =
+        build_ignore(&config.ignore, &target_dir).wrap_err("Failed to build ignore matcher.")?;
 
-    let mut portal_entries = resolve_portals(
-        &source_normalized,
-        &target_normalized,
-        &config.portal,
-        &ignore_matcher,
-    )
-    .wrap_err("Failed to resolve portals.")?;
+    let mut portal_entries =
+        resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher)
+            .wrap_err("Failed to resolve portals.")?;
 
-    apply_rules(&target_normalized, &mut portal_entries, &config.rule)
+    apply_rules(&target_dir, &mut portal_entries, &config.rule)
         .wrap_err("Failed to apply rules.")?;
 
     let db = Db::init(db_path)?;
