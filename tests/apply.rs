@@ -103,7 +103,12 @@ fn test_clean_up() {
     )
     .unwrap();
 
-    fs::write(source_dir.join("dotrift.toml"), "").unwrap();
+    let config = r#"
+[portal]
+"*.txt" = ""
+"#;
+    fs::write(source_dir.join("dotrift.toml"), config).unwrap();
+
     apply::run(
         source_dir.clone(),
         Some(target_dir.clone()),
@@ -116,14 +121,14 @@ fn test_clean_up() {
     )
     .unwrap();
 
-    assert!(!target_dir.join("a.txt").exists());
-    assert!(!target_dir.join("b.txt").exists());
+    assert!(target_dir.join("a.txt").exists());
+    assert!(target_dir.join("b.txt").exists());
     assert!(target_dir.join("subdir").exists());
     assert!(!target_dir.join("subdir/c.txt").exists());
     assert!(!target_dir.join("subdir/d.txt").exists());
 
     let db = Db::init(&db_path).unwrap();
-    assert_eq!(db.get_all_entries().unwrap().len(), 0);
+    assert_eq!(db.get_all_entries().unwrap().len(), 2);
 }
 
 #[test]
@@ -147,6 +152,7 @@ fn test_clean_up_prune_empty_dirs() {
     .unwrap();
 
     fs::write(source_dir.join("dotrift.toml"), "").unwrap();
+
     apply::run(
         source_dir.clone(),
         Some(target_dir.clone()),

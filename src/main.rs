@@ -30,17 +30,12 @@ fn main() -> color_eyre::Result<()> {
                 .wrap_err("Failed to apply dotfiles")?;
         }
         Commands::Unapply(flags) => {
-            unapply::run(source_dir, cli.target, &db_path(), flags)?;
+            unapply::run(source_dir, cli.target, &db_path(), flags)
+                .wrap_err("Failed to unapply dotfiles")?;
         }
-        Commands::Add {
-            target_file: _,
-            source_relative: _,
-        } => {}
-        Commands::Diff {
-            target_file: _,
-            extra_args: _,
-        } => {}
-        Commands::Status { target_file: _ } => {}
+        Commands::Add { .. } => {}
+        Commands::Diff { .. } => {}
+        Commands::Status { .. } => {}
     }
 
     Ok(())
