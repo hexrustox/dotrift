@@ -5,7 +5,7 @@ use cli::{Cli, Commands};
 use color_eyre::eyre::Context;
 use dotrift::{
     cli,
-    command::apply,
+    command::{apply, unapply},
     path::{db_path, source_path},
 };
 use normalize_path::NormalizePath;
@@ -29,7 +29,9 @@ fn main() -> color_eyre::Result<()> {
             apply::run(source_dir, cli.target, &db_path(), flags)
                 .wrap_err("Failed to apply dotfiles")?;
         }
-        Commands::Unapply(_flags) => {}
+        Commands::Unapply(flags) => {
+            unapply::run(source_dir, cli.target, &db_path(), flags)?;
+        }
         Commands::Add {
             target_file: _,
             source_relative: _,

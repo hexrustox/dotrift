@@ -8,7 +8,7 @@ use std::path::PathBuf;
     about = "Declarative dotfile manager using TOML configuration."
 )]
 pub struct Cli {
-    /// Path to the source directory containing dotrift.toml and dotfiles. Default: ~/.local/share/dotrift.
+    /// Path to the source directory containing dotrift.toml and dotfiles. Default: $XDG_DATA_HOME/dotrift or ~/.local/share/dotrift.
     #[arg(short = 's', long)]
     pub source: Option<PathBuf>,
 
@@ -20,14 +20,13 @@ pub struct Cli {
     pub command: Commands,
 }
 
-/// Common options for apply and unapply commands.
-#[derive(Args, Clone, Copy, Debug)]
+#[derive(Args)]
 pub struct ApplyFlags {
-    /// Print planned operations without touching the filesystem or database.
+    /// Print planned operations without mutating the filesystem.
     #[arg(short = 'd', long)]
     pub dry_run: bool,
 
-    /// Remove previously managed files no longer mapped in dotrift.toml.
+    /// Remove previously managed files that are no longer mapped in dotrift.toml.
     #[arg(short = 'c', long)]
     pub clean_up: bool,
 
@@ -36,13 +35,24 @@ pub struct ApplyFlags {
     pub prune_empty_dirs: bool,
 }
 
+#[derive(Args)]
+pub struct UnapplyFlags {
+    /// Print planned operations without mutating the filesystem.
+    #[arg(short = 'd', long)]
+    pub dry_run: bool,
+
+    /// Recursively delete orphaned empty directories.
+    #[arg(short = 'p', long, requires = "clean_up")]
+    pub prune_empty_dirs: bool,
+}
+
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Evaluates dotrift.toml and applies the defined state to the target filesystem.
+    /// Evaluates dotrift.toml and applies the defined state to the target directory.
     Apply(ApplyFlags),
 
     /// Reverses the apply process, removing managed files from the target.
-    Unapply(ApplyFlags),
+    Unapply(UnapplyFlags),
 
     /// Adds existing target file to source directory.
     Add {

@@ -16,7 +16,7 @@ use crate::{
     command::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
-        util::{hash_file, is_actual_dir, is_managed},
+        util::{clean_up, hash_file, is_actual_dir, is_managed, resolve_target, validate_paths},
     },
     config::{Config, DeployType, FileMode, Rules},
     db::{Db, DbEntry},
@@ -55,7 +55,12 @@ pub fn run(
     let db = Db::init(db_path)?;
 
     if flags.clean_up {
-        clean_up(&portal_entries, &db, flags.dry_run, flags.prune_empty_dirs)?;
+        clean_up(
+            Some(&portal_entries),
+            &db,
+            flags.dry_run,
+            flags.prune_empty_dirs,
+        )?;
     }
 
     let tree = build_tree(portal_entries).wrap_err("Failed to build target file system tree.")?;
@@ -66,38 +71,6 @@ pub fn run(
     }
 
     traverse_tree(Path::new("/"), &tree, &db)?;
-
-    Ok(())
-}
-
-fn resolve_target(target_override: Option<PathBuf>, config: &Config) -> Result<PathBuf> {
-    validate_absolute(
-        &target_override
-            .or(config.target_dir.clone())
-            .or(dirs::home_dir())
-            .ok_or_else(|| eyre!("Cannot determine target directory."))?,
-    )
-}
-
-fn validate_absolute(path: &Path) -> Result<PathBuf> {
-    if path.is_absolute() {
-        Ok(path.to_path_buf())
-    } else {
-        Err(eyre!(
-            "Target directory must be an absolute path: `{}`.",
-            path.display()
-        ))
-    }
-}
-
-fn validate_paths(source_dir: &Path, target_dir: &Path) -> Result<()> {
-    if source_dir == target_dir {
-        return Err(eyre!("Source directory cannot equal target directory."));
-    }
-
-    if target_dir.starts_with(source_dir) {
-        return Err(eyre!("Target directory cannot be inside source directory."));
-    }
 
     Ok(())
 }
@@ -451,53 +424,6 @@ fn deploy_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
         },
         target_path: target.to_path_buf(),
     })?;
-
-    Ok(())
-}
-
-fn clean_up(
-    portal_entries: &HashMap<PathBuf, PortalEntry>,
-    db: &Db,
-    dry_run: bool,
-    prune_empty_dirs: bool,
-) -> Result<()> {
-    let db_entries = db.get_all_entries()?;
-
-    for entry in db_entries {
-        let path = &entry.target_path;
-        if portal_entries.contains_key(path) {
-            continue;
-        }
-
-        if !matches!(path.try_exists(), Ok(false)) {
-            let managed = is_managed(path, db);
-            if managed {
-                if dry_run {
-                    println!("[REMOVE] {}", path.display());
-                } else {
-                    fs::remove_file(path).remove_file_error(path)?;
-
-                    if prune_empty_dirs {
-                        let mut current = path.parent();
-                        while let Some(dir) = current {
-                            if let Ok(iter) = dir.read_dir()
-                                && iter.count() == 0
-                            {
-                                fs::remove_dir(dir).remove_dir_error(dir)?;
-                            } else {
-                                break;
-                            }
-                            current = dir.parent();
-                        }
-                    }
-                }
-            }
-        }
-
-        if !dry_run {
-            db.delete_entry(path)?;
-        }
-    }
 
     Ok(())
 }

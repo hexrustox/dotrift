@@ -132,7 +132,7 @@ fn test_clean_up_prune_empty_dirs() {
 [portal]
 "" = ""
 "#;
-    let (_temp_dir, source_dir, target_dir, db_path) = setup_test(config);
+    let (temp_dir, source_dir, target_dir, db_path) = setup_test(config);
 
     apply::run(
         source_dir.clone(),
@@ -160,4 +160,6 @@ fn test_clean_up_prune_empty_dirs() {
     .unwrap();
 
     assert!(!target_dir.join("subdir").exists());
+    assert!(!target_dir.exists());
+    assert!(temp_dir.path().exists());
 }

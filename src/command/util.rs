@@ -1,15 +1,47 @@
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::hash::Hasher;
 use std::io::{BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{Context, Result};
+use color_eyre::eyre::{Context, Result, eyre};
 use twox_hash::XxHash64;
 
+use crate::command::apply::PortalEntry;
+use crate::config::Config;
+use crate::error::IoError;
 use crate::{config::DeployType, db::Db};
 
 const SEED: u64 = 42;
 const BUFFER_SIZE: usize = 8192;
+
+pub fn resolve_target(target_override: Option<PathBuf>, config: &Config) -> Result<PathBuf> {
+    let path = &target_override
+        .or(config.target_dir.clone())
+        .or(dirs::home_dir())
+        .ok_or_else(|| eyre!("Cannot determine target directory."))?;
+
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        Err(eyre!(
+            "Target directory must be an absolute path: `{}`.",
+            path.display()
+        ))
+    }
+}
+
+pub fn validate_paths(source_dir: &Path, target_dir: &Path) -> Result<()> {
+    if source_dir == target_dir {
+        return Err(eyre!("Source directory cannot equal target directory."));
+    }
+
+    if target_dir.starts_with(source_dir) {
+        return Err(eyre!("Target directory cannot be inside source directory."));
+    }
+
+    Ok(())
+}
 
 pub fn is_actual_dir(path: &Path) -> bool {
     if path.is_symlink() {
@@ -60,6 +92,53 @@ pub fn is_managed(target: &Path, db: &Db) -> bool {
             Err(_) => false,
         },
     }
+}
+
+pub fn clean_up(
+    portal_entries: Option<&HashMap<PathBuf, PortalEntry>>,
+    db: &Db,
+    dry_run: bool,
+    prune_empty_dirs: bool,
+) -> Result<()> {
+    let db_entries = db.get_all_entries()?;
+
+    for entry in db_entries {
+        let path = &entry.target_path;
+        if portal_entries.is_some_and(|m| m.contains_key(path)) {
+            continue;
+        }
+
+        if !matches!(path.try_exists(), Ok(false)) {
+            let managed = is_managed(path, db);
+            if managed {
+                if dry_run {
+                    println!("[REMOVE] {}", path.display());
+                } else {
+                    fs::remove_file(path).remove_file_error(path)?;
+
+                    if prune_empty_dirs {
+                        let mut current = path.parent();
+                        while let Some(dir) = current {
+                            if let Ok(iter) = dir.read_dir()
+                                && iter.count() == 0
+                            {
+                                fs::remove_dir(dir).remove_dir_error(dir)?;
+                            } else {
+                                break;
+                            }
+                            current = dir.parent();
+                        }
+                    }
+                }
+            }
+        }
+
+        if !dry_run {
+            db.delete_entry(path)?;
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
