@@ -222,9 +222,9 @@ pub mod tests {
     |_, _| None
     => false; "no_db_entry")]
     fn test_is_managed(
-        cb: impl FnOnce(&PathBuf, &PathBuf),
-        target_path: impl FnOnce(&PathBuf) -> PathBuf,
-        db_entry: impl FnOnce(&PathBuf, &PathBuf) -> Option<DbEntry>,
+        cb: impl FnOnce(&Path, &Path),
+        target_path: impl FnOnce(&Path) -> PathBuf,
+        db_entry: impl FnOnce(&Path, &Path) -> Option<DbEntry>,
     ) -> bool {
         let temp_dir = tempdir().unwrap();
         let source_dir = temp_dir.path().join("source");

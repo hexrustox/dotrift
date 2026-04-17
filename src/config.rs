@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs::read_to_string;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::Context;
 use indexmap::IndexMap;
@@ -24,7 +24,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn read(source_dir: PathBuf) -> color_eyre::Result<Self> {
+    pub fn read(source_dir: &Path) -> color_eyre::Result<Self> {
         let path = config_path(source_dir);
         let s = read_to_string(&path).read_file_error(&path)?;
         toml::from_str(&s).wrap_err_with(|| format!("Failed to parse file `{}`.", path.display()))

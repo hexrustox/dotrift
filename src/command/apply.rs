@@ -33,10 +33,10 @@ pub struct PortalEntry {
 pub fn run(
     source_dir: PathBuf,
     target_override: Option<PathBuf>,
-    db_path: &PathBuf,
+    db_path: &Path,
     flags: ApplyFlags,
 ) -> Result<()> {
-    let config = Config::read(source_dir.clone())?;
+    let config = Config::read(&source_dir)?;
 
     let target_dir = resolve_target(target_override, &config)?.normalize();
 
@@ -482,7 +482,7 @@ mod tests {
 "a.*" = """# => portal_entries!(("a.txt", "a.txt"), ("a.txt", "A.txt")); "multiple_portals_same_source")]
     fn test_resolve_portals(portal: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = setup_test(portal, "", "", true);
-        let config = Config::read(source_dir.clone()).unwrap();
+        let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
         let portal_entries =
             resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
@@ -499,7 +499,7 @@ mod tests {
             true,
         );
 
-        let config = Config::read(source_dir.clone()).unwrap();
+        let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
 
         let result = resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher);
@@ -510,7 +510,7 @@ mod tests {
     fn test_resolve_portals_does_not_exist() {
         let (_temp_dir, source_dir, target_dir) = setup_test(r#""a.txt" = "a.txt""#, "", "", false);
 
-        let config = Config::read(source_dir.clone()).unwrap();
+        let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
 
         let result = resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher);
@@ -525,7 +525,7 @@ mod tests {
     #[test_case(r#""*.txt", "!dotrift.toml""# => portal_entries!(("dotrift.toml", "dotrift.toml")); "negate_ignore")]
     fn test_ignore(ignore: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, ignore, "", true);
-        let config = Config::read(source_dir.clone()).unwrap();
+        let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
         let portal_entries =
             resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
@@ -541,7 +541,7 @@ mod tests {
 "a.txt" = { type = "copy", mode = "700" }"# => portal_entries!(("a.txt", "a.txt", Copy, Some(FileMode(0o700)))); "rule_override")]
     fn test_apply_rules(rule: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = setup_test(r#""a.txt" = "a.txt""#, "", rule, true);
-        let config = Config::read(source_dir.clone()).unwrap();
+        let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
         let mut portal_entries =
             resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
@@ -615,10 +615,7 @@ mod tests {
     }, |s, t| {
         assert_eq!(fs::read_link(t.join("file")).unwrap(), s.join("file"));
     }; "deploy_symlink_broken_preserved")]
-    fn test_apply_symlink(
-        setup: impl FnOnce(&PathBuf, &PathBuf),
-        assert: impl FnOnce(&PathBuf, &PathBuf),
-    ) {
+    fn test_apply_symlink(setup: impl FnOnce(&Path, &Path), assert: impl FnOnce(&Path, &Path)) {
         let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, "", "", false);
         setup(&source_dir, &target_dir);
         run(
@@ -665,10 +662,7 @@ mod tests {
         assert!(t.join("file").exists());
         assert!(!t.join("file").is_symlink());
     }; "deploy_copy_overwrites_existing_symlink")]
-    fn test_apply_copy(
-        setup: impl FnOnce(&PathBuf, &PathBuf),
-        assert: impl FnOnce(&PathBuf, &PathBuf),
-    ) {
+    fn test_apply_copy(setup: impl FnOnce(&Path, &Path), assert: impl FnOnce(&Path, &Path)) {
         let (temp_dir, source_dir, target_dir) = setup_test(
             r#""" = """#,
             "",

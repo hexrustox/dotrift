@@ -49,7 +49,7 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
 }
 
 impl Db {
-    pub fn init(path: &PathBuf) -> color_eyre::Result<Self> {
+    pub fn init(path: &Path) -> color_eyre::Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .create_dir_error(parent)
@@ -231,7 +231,7 @@ mod tests {
         })
         .unwrap();
 
-        db.delete_entry_with_prefix(&PathBuf::from("/a")).unwrap();
+        db.delete_entry_with_prefix(Path::new("/a")).unwrap();
         assert_eq!(db.get_all_entries().unwrap().len(), 1);
     }
 }

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use normalize_path::NormalizePath;
 
@@ -12,10 +12,10 @@ use crate::{
 pub fn run(
     source_dir: PathBuf,
     target_override: Option<PathBuf>,
-    db_path: &PathBuf,
+    db_path: &Path,
     flags: UnapplyFlags,
 ) -> color_eyre::Result<()> {
-    let config = Config::read(source_dir.clone())?;
+    let config = Config::read(&source_dir)?;
 
     let target_dir = resolve_target(target_override, &config)?.normalize();
 

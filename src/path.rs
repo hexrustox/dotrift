@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use dirs::{data_dir, state_dir};
 
@@ -8,7 +8,7 @@ pub fn source_path() -> PathBuf {
     data_dir().unwrap().join(PKG_NAME)
 }
 
-pub fn config_path(source_dir: PathBuf) -> PathBuf {
+pub fn config_path(source_dir: &Path) -> PathBuf {
     source_dir.join(format!("{}.toml", PKG_NAME))
 }
 
