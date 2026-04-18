@@ -17,8 +17,8 @@ use crate::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
         util::{
-            GLOB_OPTION, clean_up, hash_file, is_actual_dir, is_glob, is_managed, resolve_target,
-            stripping_prefix, validate_paths,
+            GLOB_OPTION, clean_up, hash_file, is_actual_dir, is_glob, is_managed, print_portal,
+            resolve_target, stripping_prefix, validate_paths,
         },
     },
     config::{Config, DeployType, FileMode, Rules},
@@ -275,7 +275,7 @@ fn print_tree(path: &Path, node: &Node) -> Result<()> {
     match node {
         Node::Dir(children) => {
             if path != Path::new("/") {
-                println!("[CREATE DIR] {}", path.display());
+                println!("[CREATE] {}", path.display());
             }
             for (name, child) in children {
                 print_tree(&path.join(name), child)?;
@@ -283,17 +283,8 @@ fn print_tree(path: &Path, node: &Node) -> Result<()> {
         }
         Node::File(entry) => {
             println!(
-                "[CREATE {}] {} {} {}",
-                match entry.action_type {
-                    DeployType::Symlink => "LNK",
-                    DeployType::Copy => "FIL",
-                },
-                path.display(),
-                match entry.action_type {
-                    DeployType::Symlink => "->",
-                    _ => "<-",
-                },
-                entry.source.display()
+                "[CREATE] {}",
+                print_portal(path, &entry.source, entry.action_type)
             );
         }
     }

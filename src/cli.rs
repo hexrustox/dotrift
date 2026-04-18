@@ -9,15 +9,15 @@ use std::path::PathBuf;
 )]
 pub struct Cli {
     /// Override the source directory. Relative to current directory if path is not absolute. Default: $XDG_DATA_HOME/dotrift or ~/.local/share/dotrift.
-    #[arg(short, long)]
+    #[arg(short, long, name = "SOURCE_DIRECTORY")]
     pub source: Option<PathBuf>,
 
     /// Override the target directory. Relative to current directory if path is not absolute.
-    #[arg(short, long)]
+    #[arg(short, long, name = "TARGET_DIRECTORY")]
     pub target: Option<PathBuf>,
 
     /// Override the config file. Default: $XDG_CONFIG_HOME/dotrift/config.toml or ~/.config/dotrift/config.toml.
-    #[arg(short, long)]
+    #[arg(short, long, name = "CONFIG_FILE")]
     pub config: Option<PathBuf>,
 
     #[command(subcommand)]
@@ -87,7 +87,7 @@ pub enum Commands {
         #[command(flatten)]
         flags: AddFlags,
         /// Path to existing file or directory.
-        path: PathBuf,
+        file: PathBuf,
 
         /// Path to move the file or directory to. Relative to the source directory if path is not absolute.
         destination: PathBuf,
@@ -96,16 +96,16 @@ pub enum Commands {
     /// Prints content differences between source and target file.
     Diff {
         /// Absolute path to specific file to check.
-        target_file: PathBuf,
+        file: PathBuf,
 
         /// Additional options passed to the diff command.
         #[arg(last = true)]
         extra_args: Vec<String>,
     },
 
-    /// Reports management status of target filesystem.
+    /// Reports management status of target file.
     Status {
-        /// Optional absolute path to specific file (omitted: lists all managed files).
-        target_file: Option<PathBuf>,
+        /// Optional path to specific file (omitted: lists all managed files).
+        file: Option<PathBuf>,
     },
 }

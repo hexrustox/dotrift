@@ -5,7 +5,7 @@ use cli::{Cli, Commands};
 use color_eyre::eyre::Context;
 use dotrift::{
     cli,
-    command::{add, apply, init, unapply},
+    command::{add, apply, init, status, unapply},
     path::{db_path, source_path},
 };
 use normalize_path::NormalizePath;
@@ -38,12 +38,14 @@ fn main() -> color_eyre::Result<()> {
         }
         Commands::Add {
             flags,
-            path,
+            file,
             destination,
-        } => add::run(source_dir, cli.config, path, destination, flags)
+        } => add::run(source_dir, cli.config, file, destination, flags)
             .wrap_err("Failed to add path")?,
         Commands::Diff { .. } => {}
-        Commands::Status { .. } => {}
+        Commands::Status { file } => {
+            status::run(file, &db_path()).wrap_err("Failed to get status")?;
+        }
     }
 
     Ok(())

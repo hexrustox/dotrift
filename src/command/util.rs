@@ -168,6 +168,18 @@ pub fn clean_up(
     Ok(())
 }
 
+pub fn print_portal(target: &Path, source: &Path, deploy_type: DeployType) -> String {
+    format!(
+        "{} -> {} ({})",
+        target.display(),
+        source.display(),
+        match deploy_type {
+            DeployType::Symlink => "symlink",
+            _ => "file",
+        },
+    )
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
