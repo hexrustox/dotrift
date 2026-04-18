@@ -73,10 +73,13 @@ pub enum OpenEditor {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Evaluates and applies the defined state to the target directory.
+    /// Initialized the source directory.
+    Init,
+
+    /// Apply the dotfiles to the target directory.
     Apply(ApplyFlags),
 
-    /// Reverses the apply process, removing managed files from the target.
+    /// Reverses the apply process, removing managed files from the target directory.
     Unapply(UnapplyFlags),
 
     /// Adds existing file to source directory.

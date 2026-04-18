@@ -1,0 +1,13 @@
+# Default dotrift.toml
+# target-directory = "/home/user"
+
+# Pattern relative to target directory to ignore
+ignore = []
+
+# Files, directories and patterns to map to the target directory
+[portal]
+"" = ""
+
+# Patterns relative to target directory to match against to set type and mode
+[rule]
+"**/*" = { type = "symlink" }

@@ -1,4 +1,4 @@
-use std::{borrow::Cow, env, ffi::OsString, fs, path::PathBuf, process::Command};
+use std::{borrow::Cow, env, fs, path::PathBuf, process::Command};
 
 use color_eyre::eyre::{Context, eyre};
 use glob::Pattern;

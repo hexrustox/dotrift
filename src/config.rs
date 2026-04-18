@@ -12,15 +12,12 @@ use crate::error::{IoError, SerdeError};
 use crate::path::config_path;
 
 #[derive(Deserialize, Default)]
-#[serde(deny_unknown_fields)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Config {
-    #[serde(rename = "target-dir")]
+    #[serde(rename = "target-directory")]
     pub target_dir: Option<PathBuf>,
-    #[serde(default)]
     pub ignore: Vec<String>,
-    #[serde(default)]
     pub portal: Portal,
-    #[serde(default)]
     pub rule: Rules,
 }
 
@@ -36,11 +33,10 @@ pub type Portal = HashMap<String, PathBuf>;
 pub type Rules = IndexMap<String, Rule>;
 
 #[derive(Deserialize, Default, Debug, Clone)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct Rule {
-    #[serde(default, rename = "type")]
+    #[serde(rename = "type")]
     pub r#type: Option<DeployType>,
-    #[serde(default)]
     pub mode: Option<FileMode>,
 }
 
