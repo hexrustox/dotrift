@@ -1,13 +1,14 @@
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::fs::read_to_string;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    fs,
+    path::{Path, PathBuf},
+};
 
-use color_eyre::eyre::Context;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
-use crate::error::IoError;
+use crate::error::{IoError, SerdeError};
 use crate::path::config_path;
 
 #[derive(Deserialize, Default)]
@@ -26,8 +27,8 @@ pub struct Config {
 impl Config {
     pub fn read(source_dir: &Path) -> color_eyre::Result<Self> {
         let path = config_path(source_dir);
-        let s = read_to_string(&path).read_file_error(&path)?;
-        toml::from_str(&s).wrap_err_with(|| format!("Failed to parse file `{}`.", path.display()))
+        let s = fs::read_to_string(&path).read_file_error(&path)?;
+        toml::from_str(&s).parse_error(&path)
     }
 }
 

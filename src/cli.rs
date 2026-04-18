@@ -9,12 +9,16 @@ use std::path::PathBuf;
 )]
 pub struct Cli {
     /// Override the source directory. Relative to current directory if path is not absolute. Default: $XDG_DATA_HOME/dotrift or ~/.local/share/dotrift.
-    #[arg(short = 's', long)]
+    #[arg(short, long)]
     pub source: Option<PathBuf>,
 
     /// Override the target directory. Relative to current directory if path is not absolute.
-    #[arg(short = 't', long)]
+    #[arg(short, long)]
     pub target: Option<PathBuf>,
+
+    /// Override the config file. Default: $XDG_CONFIG_HOME/dotrift/config.toml or ~/.config/dotrift/config.toml.
+    #[arg(short, long)]
+    pub config: Option<PathBuf>,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -23,26 +27,26 @@ pub struct Cli {
 #[derive(Args)]
 pub struct ApplyFlags {
     /// Print planned operations without mutating the filesystem.
-    #[arg(short = 'd', long)]
+    #[arg(short, long)]
     pub dry_run: bool,
 
     /// Remove previously managed files that are no longer mapped in dotrift.toml.
-    #[arg(short = 'c', long)]
+    #[arg(short, long)]
     pub clean_up: bool,
 
     /// Recursively delete orphaned empty directories. Requires --clean-up.
-    #[arg(short = 'p', long, requires = "clean_up")]
+    #[arg(short, long, requires = "clean_up")]
     pub prune_empty_dirs: bool,
 }
 
 #[derive(Args)]
 pub struct UnapplyFlags {
     /// Print planned operations without mutating the filesystem.
-    #[arg(short = 'd', long)]
+    #[arg(short, long)]
     pub dry_run: bool,
 
     /// Recursively delete orphaned empty directories.
-    #[arg(short = 'p', long, requires = "clean_up")]
+    #[arg(short, long)]
     pub prune_empty_dirs: bool,
 }
 

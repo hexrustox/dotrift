@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fs, path::PathBuf};
+use std::{borrow::Cow, env, ffi::OsString, fs, path::PathBuf, process::Command};
 
 use color_eyre::eyre::{Context, eyre};
 use glob::Pattern;
@@ -9,10 +9,13 @@ use crate::{
     command::util::{is_actual_dir, is_glob},
     config::Config,
     error::{GlobError, IoError},
+    global_config::GlobalConfig,
+    path::{config_path, global_config_path},
 };
 
 pub fn run(
     source_dir: PathBuf,
+    config_override: Option<PathBuf>,
     file: PathBuf,
     destination: PathBuf,
     flags: AddFlags,
@@ -23,35 +26,10 @@ pub fn run(
         source_dir.join(destination).normalize()
     };
     let Ok(dest_rel) = destination.strip_prefix(&source_dir) else {
-        return Err(eyre!("Destination must be inside source directory"));
+        return Err(eyre!("Destination must be inside source directory."));
     };
     if !matches!(destination.try_exists(), Ok(false)) && !flags.force {
         return Err(eyre!("`{}` already exists.", destination.display()));
-    }
-
-    if let Some(parent) = destination.parent() {
-        if flags.force {
-            let mut current = Some(parent);
-            while let Some(path) = current {
-                if !matches!(path.try_exists(), Ok(false)) && !is_actual_dir(path) {
-                    fs::remove_file(path).remove_file_error(path)?;
-                    break;
-                }
-                current = path.parent();
-            }
-        }
-        fs::create_dir_all(parent).create_dir_error(parent)?;
-    }
-    if flags.copy {
-        fs::copy(&file, &destination).copy_file_error(&file, &destination)?;
-    } else {
-        fs::rename(&file, &destination).wrap_err({
-            format!(
-                "Failed to move `{}` to `{}`.",
-                file.display(),
-                destination.display()
-            )
-        })?;
     }
 
     let open_editor = if let Some(open_editor) = flags.editor {
@@ -86,7 +64,52 @@ pub fn run(
     }
 
     if open_editor {
-        // TODO
+        let specific_config = config_override.is_some();
+        let path = config_override.unwrap_or(global_config_path());
+        let (cmd, mut args) = match GlobalConfig::read(&path) {
+            Ok(GlobalConfig {
+                editor_command: Some(config),
+            }) => (config.command, config.args),
+            Err(err) if specific_config => {
+                return Err(err);
+            }
+            _ => match env::var_os("VISUAL").or(env::var_os("EDITOR")) {
+                Some(cmd) => (cmd.to_string_lossy().to_string(), Vec::new()),
+                None => return Err(eyre!("Failed to open editor.")),
+            },
+        };
+        args.push(config_path(&source_dir).to_string_lossy().to_string());
+        Command::new(&cmd).args(&args).status().wrap_err_with(|| {
+            format!(
+                "Failed to spawn process `{}`",
+                [vec![cmd], args].concat().join(" ")
+            )
+        })?;
+    }
+
+    if let Some(parent) = destination.parent() {
+        if flags.force {
+            let mut current = Some(parent);
+            while let Some(path) = current {
+                if !matches!(path.try_exists(), Ok(false)) && !is_actual_dir(path) {
+                    fs::remove_file(path).remove_file_error(path)?;
+                    break;
+                }
+                current = path.parent();
+            }
+        }
+        fs::create_dir_all(parent).create_dir_error(parent)?;
+    }
+    if flags.copy {
+        fs::copy(&file, &destination).copy_file_error(&file, &destination)?;
+    } else {
+        fs::rename(&file, &destination).wrap_err({
+            format!(
+                "Failed to move `{}` to `{}`.",
+                file.display(),
+                destination.display()
+            )
+        })?;
     }
 
     Ok(())
@@ -119,6 +142,7 @@ mod tests {
         fs::write(&path, "").unwrap();
         run(
             source_dir.clone(),
+            None,
             path,
             source_dir.join(dest.into()),
             AddFlags {

@@ -29,6 +29,18 @@ impl<T> IoError<T> for io::Result<T> {
     }
 }
 
+pub trait SerdeError<T> {
+    fn parse_error(self, p: &Path) -> color_eyre::Result<T>;
+}
+
+impl<T, E: Send + Sync + std::error::Error + serde::de::Error + 'static> SerdeError<T>
+    for Result<T, E>
+{
+    fn parse_error(self, p: &Path) -> color_eyre::Result<T> {
+        self.wrap_err_with(|| format!("Failed to parse file `{}`.", p.display()))
+    }
+}
+
 pub trait EyreError<T> {
     fn wrap_as_db_error(self) -> color_eyre::Result<T>;
 }
