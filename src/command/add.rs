@@ -36,31 +36,35 @@ pub fn run(
     let mut open_editor = if let Some(open_editor) = flags.editor {
         matches!(open_editor, OpenEditor::Always)
     } else {
-        let config = Config::read(&source_dir)?;
-        let mut open_editor = true;
-        for (pattern, _) in config.portal {
-            if is_glob(&pattern) && {
-                let glob = Pattern::new(&pattern).glob_error()?;
-                glob.matches_path_with(dest_rel, GLOB_OPTION)
-            } || *dest_rel == *pattern
-                || {
-                    let mut bool = false;
-                    let mut current = dest_rel.parent();
-                    while let Some(parent) = current {
-                        if *parent == *pattern {
-                            bool = true;
-                            break;
+        match Config::read(&source_dir) {
+            Ok(config) => {
+                let mut open_editor = true;
+                for (pattern, _) in config.portal {
+                    if is_glob(&pattern) && {
+                        let glob = Pattern::new(&pattern).glob_error()?;
+                        glob.matches_path_with(dest_rel, GLOB_OPTION)
+                    } || *dest_rel == *pattern
+                        || {
+                            let mut bool = false;
+                            let mut current = dest_rel.parent();
+                            while let Some(parent) = current {
+                                if *parent == *pattern {
+                                    bool = true;
+                                    break;
+                                }
+                                current = parent.parent();
+                            }
+                            bool
                         }
-                        current = parent.parent();
+                    {
+                        open_editor = false;
+                        break;
                     }
-                    bool
                 }
-            {
-                open_editor = false;
-                break;
+                open_editor
             }
+            Err(_) => true,
         }
-        open_editor
     };
 
     #[cfg(test)]
@@ -99,7 +103,7 @@ pub fn run(
         if flags.force {
             let mut current = Some(parent);
             while let Some(path) = current {
-                if !matches!(path.try_exists(), Ok(false)) && !is_actual_dir(path) {
+                if path.exists() && !is_actual_dir(path) {
                     fs::remove_file(path).remove_file_error(path)?;
                     break;
                 }
@@ -125,12 +129,106 @@ pub fn run(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::{cell::RefCell, path::Path};
 
     use crate::command::util::tests::setup_test;
 
     use super::*;
+    use tempfile::TempDir;
     use test_case::test_case;
+
+    #[test_case(|t, s| {
+        fs::write(t.join("file"), "").unwrap();
+        (t.join("file"), s.join("file"))
+    }, |s| {
+        assert!(s.join("file").exists());
+    }; "move_absolute_path")]
+    #[test_case(|t, _| {
+        fs::write(t.join("file"), "").unwrap();
+        (t.join("file"), "file".into())
+    }, |s| {
+        assert!(s.join("file").exists());
+    }; "move_relative_path")]
+    #[test_case(|t, _| {
+        fs::write(t.join("file"), "").unwrap();
+        (t.join("file"), "./dir/../file".into())
+    }, |s| {
+        assert!(s.join("file").exists());
+    }; "move_normalized_path")]
+    #[test_case(|t, s| {
+        (t.join("file"), s.join("file"))
+    }, |_| {} => panics "move"; "fail_missing_source")]
+    #[test_case(|t, s| {
+        fs::write(t.join("file"), "").unwrap();
+        fs::write(s.join("file"), "").unwrap();
+        (t.join("file"), s.join("file"))
+    }, |_| {} => panics "already exists"; "fail_dest_exists")]
+    #[test_case(|t, _| {
+        (t.join("file"), "../file".into())
+    }, |_| {} => panics "inside"; "fail_escape_source")]
+    fn test_add(
+        setup: impl FnOnce(&Path, &Path) -> (PathBuf, PathBuf),
+        assertion: impl FnOnce(&Path),
+    ) {
+        let temp_dir = TempDir::new().unwrap();
+        let source_dir = temp_dir.path().join("source");
+        fs::create_dir_all(&source_dir).unwrap();
+        let (f, d) = setup(temp_dir.path(), &source_dir);
+
+        run(
+            source_dir.clone(),
+            None,
+            f,
+            d,
+            AddFlags {
+                copy: false,
+                force: false,
+                editor: None,
+            },
+        )
+        .unwrap();
+
+        assertion(&source_dir);
+    }
+
+    #[test_case(|t, s| {
+        fs::write(t.join("file"), "a").unwrap();
+        fs::write(s.join("file"), "b").unwrap();
+        (t.join("file"), s.join("file"))
+    }, |s| {
+        assert_eq!(fs::read_to_string(s.join("file")).unwrap(), "a");
+    }; "overwrite_existing")]
+    #[test_case(|t, s| {
+        fs::write(t.join("file"), "").unwrap();
+        fs::write(s.join("dir"), "").unwrap();
+        (t.join("file"), s.join("dir/subdir/file"))
+    }, |s| {
+        assert!(s.join("dir/subdir/file").exists());
+    }; "clear_path_obstruction")]
+    fn test_add_force(
+        setup: impl FnOnce(&Path, &Path) -> (PathBuf, PathBuf),
+        assertion: impl FnOnce(&Path),
+    ) {
+        let temp_dir = TempDir::new().unwrap();
+        let source_dir = temp_dir.path().join("source");
+        fs::create_dir_all(&source_dir).unwrap();
+        let (f, d) = setup(temp_dir.path(), &source_dir);
+
+        run(
+            source_dir.clone(),
+            None,
+            f,
+            d,
+            AddFlags {
+                copy: false,
+                force: true,
+                editor: None,
+            },
+        )
+        .unwrap();
+
+        assertion(&source_dir);
+    }
 
     thread_local! {
         pub static OPEN_EDITOR: RefCell<bool> = const { RefCell::new(false) };

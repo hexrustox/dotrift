@@ -460,6 +460,9 @@ mod tests {
     #[test_case(r#""subdir/**/*.txt" = "out""# => portal_entries!(("subdir/c.txt", "out/c.txt"), ("subdir/d.txt", "out/d.txt")); "glob_recursive_middle")]
     #[test_case(r#""a.txt" = "A.txt"
 "a.*" = """# => portal_entries!(("a.txt", "a.txt"), ("a.txt", "A.txt")); "multiple_same_source")]
+    #[test_case(r#""a.txt" = "same"
+"b.txt" = "same""# => panics "collision"; "multiple_same_target")]
+    #[test_case(r#""foo" = "bar""# => panics "does not exist"; "non_existing")]
     fn test_resolve_portals(portal: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = setup_test(portal, "", "", true);
         let config = Config::read(&source_dir).unwrap();
@@ -467,34 +470,6 @@ mod tests {
         let portal_entries =
             resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
         flatten(portal_entries, temp_dir.path())
-    }
-
-    #[test]
-    fn test_resolve_portals_collision() {
-        let (_temp_dir, source_dir, target_dir) = setup_test(
-            r#""a.txt" = "same.txt"
-"b.txt" = "same.txt""#,
-            "",
-            "",
-            true,
-        );
-
-        let config = Config::read(&source_dir).unwrap();
-        let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
-
-        let result = resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_resolve_portals_does_not_exist() {
-        let (_temp_dir, source_dir, target_dir) = setup_test(r#""a.txt" = "a.txt""#, "", "", false);
-
-        let config = Config::read(&source_dir).unwrap();
-        let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
-
-        let result = resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher);
-        assert!(result.is_err());
     }
 
     #[test_case("" => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "empty")]
@@ -674,7 +649,7 @@ mod tests {
     #[test]
     fn test_dry_run_no_write() {
         let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, "", "", false);
-        fs::write(source_dir.join("file"), "content").unwrap();
+        fs::write(source_dir.join("file"), "").unwrap();
 
         run(
             source_dir.clone(),
