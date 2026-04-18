@@ -1,4 +1,4 @@
-use std::{borrow::Cow, env, fs, path::PathBuf, process::Command};
+use std::{env, fs, path::PathBuf, process::Command};
 
 use color_eyre::eyre::{Context, eyre};
 use glob::Pattern;
@@ -6,7 +6,7 @@ use normalize_path::NormalizePath;
 
 use crate::{
     cli::{AddFlags, OpenEditor},
-    command::util::{is_actual_dir, is_glob},
+    command::util::{GLOB_OPTION, is_actual_dir, is_glob},
     config::Config,
     error::{GlobError, IoError},
     global_config::GlobalConfig,
@@ -32,22 +32,29 @@ pub fn run(
         return Err(eyre!("`{}` already exists.", destination.display()));
     }
 
-    let open_editor = if let Some(open_editor) = flags.editor {
+    #[allow(unused_mut)]
+    let mut open_editor = if let Some(open_editor) = flags.editor {
         matches!(open_editor, OpenEditor::Always)
     } else {
         let config = Config::read(&source_dir)?;
         let mut open_editor = true;
-        let dest_rel = dest_rel
-            .as_os_str()
-            .to_str()
-            .map(Cow::Borrowed)
-            .unwrap_or_else(|| dest_rel.to_string_lossy());
         for (pattern, _) in config.portal {
             if is_glob(&pattern) && {
                 let glob = Pattern::new(&pattern).glob_error()?;
-                glob.matches(&dest_rel)
-            } || dest_rel == pattern
-                || dest_rel.starts_with(&pattern)
+                glob.matches_path_with(dest_rel, GLOB_OPTION)
+            } || *dest_rel == *pattern
+                || {
+                    let mut bool = false;
+                    let mut current = dest_rel.parent();
+                    while let Some(parent) = current {
+                        if *parent == *pattern {
+                            bool = true;
+                            break;
+                        }
+                        current = parent.parent();
+                    }
+                    bool
+                }
             {
                 open_editor = false;
                 break;
@@ -61,6 +68,7 @@ pub fn run(
         use crate::command::add::tests::OPEN_EDITOR;
 
         OPEN_EDITOR.set(open_editor);
+        open_editor = false;
     }
 
     if open_editor {
@@ -130,11 +138,12 @@ mod tests {
 
     #[test_case("", "file" => true; "empty")]
     #[test_case(r#""" = """#, "file" => false; "match_root")]
-    #[test_case(r#""**" = """#, "file" => false; "match_glob")]
+    #[test_case(r#""*" = ".""#, "file" => false; "match_glob")]
     #[test_case(r#""dir" = """#, "dir/file" => false; "match_parent")]
     #[test_case(r#""dir/file" = """#, "dir/file" => false; "exact_match")]
     #[test_case(r#""*.txt" = """#, "file" => true; "mismatch_glob")]
-    #[test_case(r#""subdir" = """#, "file" => true; "mismatch_literal")]
+    #[test_case(r#""file1" = """#, "file2" => true; "mismatch_literal")]
+    #[test_case(r#""file" = """#, "file2" => true; "match_prefix")]
     fn test_open_editor(portal: &str, dest: impl Into<PathBuf>) -> bool {
         let (temp_dir, source_dir, _) = setup_test(portal, "", "", false);
 

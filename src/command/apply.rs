@@ -6,7 +6,7 @@ use std::{
 };
 
 use color_eyre::eyre::{Context, Result, eyre};
-use glob::{Pattern, glob};
+use glob::{Pattern, glob_with};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
@@ -17,7 +17,7 @@ use crate::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
         util::{
-            clean_up, hash_file, is_actual_dir, is_glob, is_managed, resolve_target,
+            GLOB_OPTION, clean_up, hash_file, is_actual_dir, is_glob, is_managed, resolve_target,
             stripping_prefix, validate_paths,
         },
     },
@@ -140,8 +140,11 @@ fn resolve_glob_portal(
     let full_pattern = source_dir.join(pattern);
     let full_pattern_str = full_pattern.to_string_lossy();
 
-    for entry in glob(&full_pattern_str).glob_error()? {
+    for entry in glob_with(&full_pattern_str, GLOB_OPTION).glob_error()? {
         let source_path = entry.wrap_err("Failed to read glob match.")?;
+        if is_actual_dir(&source_path) {
+            continue;
+        }
 
         let source_rel = source_path.strip_prefix(source_dir).unwrap_or(&source_path);
 
@@ -251,12 +254,9 @@ fn apply_rules(
     for (pattern, rule) in rules.iter() {
         let pattern = Pattern::new(pattern).glob_error()?;
         for (path, portal_entry) in portal_entries.iter_mut() {
-            if !pattern.matches(
-                &path
-                    .strip_prefix(target_dir)
-                    .unwrap_or(path)
-                    .to_string_lossy(),
-            ) {
+            if !pattern
+                .matches_path_with(path.strip_prefix(target_dir).unwrap_or(path), GLOB_OPTION)
+            {
                 continue;
             }
             if let Some(rule_type) = &rule.r#type {
@@ -448,7 +448,8 @@ mod tests {
     #[test_case("" => HashMap::new(); "empty")]
     #[test_case(r#""a.txt" = "A.txt""# => portal_entries!(("a.txt", "A.txt")); "literal_file")]
     #[test_case(r#""subdir" = "dir""# => portal_entries!(("subdir/c.txt", "dir/c.txt"), ("subdir/d.txt", "dir/d.txt")); "subdir_to_dir")]
-    #[test_case(r#""" = """# => portal_entries!(("a.txt", "files/a.txt"), ("b.txt", "files/b.txt"), ("subdir/c.txt", "files/subdir/c.txt"), ("subdir/d.txt", "files/subdir/d.txt")); "root")]
+    #[test_case(r#""" = """# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "root")]
+    #[test_case(r#""**/*" = ".""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "glob_root")]
     #[test_case(r#""**/*.txt" = "files""# => portal_entries!(("a.txt", "files/a.txt"), ("b.txt", "files/b.txt"), ("subdir/c.txt", "files/subdir/c.txt"), ("subdir/d.txt", "files/subdir/d.txt")); "glob_deep")]
     #[test_case(r#""" = """# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "all_files")]
     #[test_case(r#""*.txt" = "root""# => portal_entries!(("a.txt", "root/a.txt"), ("b.txt", "root/b.txt")); "glob_root_only")]
@@ -678,9 +679,6 @@ mod tests {
         )
         .unwrap();
 
-        assert!(
-            !target_dir.join("file").exists(),
-            "dry_run should not create files"
-        );
+        assert!(!target_dir.join("file").exists(),);
     }
 }

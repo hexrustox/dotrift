@@ -5,6 +5,7 @@ use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Context, Result, eyre};
+use glob::MatchOptions;
 use twox_hash::XxHash64;
 
 use crate::command::apply::PortalEntry;
@@ -14,6 +15,11 @@ use crate::{config::DeployType, db::Db};
 
 const SEED: u64 = 42;
 const BUFFER_SIZE: usize = 8192;
+pub const GLOB_OPTION: MatchOptions = MatchOptions {
+    case_sensitive: true,
+    require_literal_separator: true,
+    require_literal_leading_dot: false,
+};
 
 pub fn resolve_target(target_override: Option<PathBuf>, config: &Config) -> Result<PathBuf> {
     let path = &target_override
