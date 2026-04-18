@@ -54,7 +54,7 @@ pub fn is_glob(pattern: &str) -> bool {
 }
 
 pub fn stripping_prefix(glob_pattern: &str) -> String {
-    let mut prefix = String::new();
+    let mut prefix = String::with_capacity(glob_pattern.len());
     for component in glob_pattern.split('/') {
         if is_glob(component) {
             break;
@@ -64,18 +64,14 @@ pub fn stripping_prefix(glob_pattern: &str) -> String {
         }
         prefix.push_str(component);
     }
-    if !prefix.is_empty() {
-        prefix.push('/');
-    }
     prefix
 }
 
-pub fn is_actual_dir(path: &Path) -> bool {
-    if path.is_symlink() {
-        return false;
+pub fn is_literal_dir(path: &Path) -> bool {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata.is_dir(),
+        Err(_) => false,
     }
-
-    path.is_dir()
 }
 
 pub fn hash_file(path: &Path) -> Result<u64> {

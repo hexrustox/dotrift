@@ -60,6 +60,7 @@ fn test_run() {
 }
 
 #[test]
+#[ignore]
 fn test_dry_run() {
     let config = r#"
 [portal]

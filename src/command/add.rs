@@ -6,7 +6,7 @@ use normalize_path::NormalizePath;
 
 use crate::{
     cli::{AddFlags, OpenEditor},
-    command::util::{GLOB_OPTION, is_actual_dir, is_glob},
+    command::util::{GLOB_OPTION, is_glob, is_literal_dir},
     config::Config,
     error::{GlobError, IoError},
     global_config::GlobalConfig,
@@ -103,7 +103,7 @@ pub fn run(
         if flags.force {
             let mut current = Some(parent);
             while let Some(path) = current {
-                if path.exists() && !is_actual_dir(path) {
+                if path.exists() && !is_literal_dir(path) {
                     fs::remove_file(path).remove_file_error(path)?;
                     break;
                 }

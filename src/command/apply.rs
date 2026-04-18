@@ -17,7 +17,7 @@ use crate::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
         util::{
-            GLOB_OPTION, clean_up, hash_file, is_actual_dir, is_glob, is_managed, print_portal,
+            GLOB_OPTION, clean_up, hash_file, is_glob, is_literal_dir, is_managed, print_portal,
             resolve_target, stripping_prefix, validate_paths,
         },
     },
@@ -142,7 +142,7 @@ fn resolve_glob_portal(
 
     for entry in glob_with(&full_pattern_str, GLOB_OPTION).glob_error()? {
         let source_path = entry.wrap_err("Failed to read glob match")?;
-        if is_actual_dir(&source_path) {
+        if is_literal_dir(&source_path) {
             continue;
         }
 
@@ -186,7 +186,7 @@ fn resolve_literal_portal(
         ));
     }
 
-    if is_actual_dir(&source_path) {
+    if is_literal_dir(&source_path) {
         for entry in WalkDir::new(&source_path)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -310,7 +310,7 @@ fn traverse_tree(target: &Path, node: &Node, db: &Db) -> Result<()> {
 
 fn create_dir(path: &Path, db: &Db) -> Result<bool> {
     if path.exists() {
-        if is_actual_dir(path) {
+        if is_literal_dir(path) {
             return Ok(false);
         }
         let choice = prompt_collision(path, true)?;
@@ -331,7 +331,7 @@ fn create_dir(path: &Path, db: &Db) -> Result<bool> {
 
 fn write_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
     if target.exists() {
-        if is_actual_dir(target) {
+        if is_literal_dir(target) {
             let choice = prompt_collision(target, false)?;
             match choice {
                 CollisionOptions::Skip => return Ok(()),
