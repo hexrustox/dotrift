@@ -5,7 +5,7 @@ use std::path::PathBuf;
 #[command(
     name = "dotrift",
     version,
-    about = "Declarative dotfile manager using TOML configuration."
+    about = "Declarative dotfile manager using TOML configuration"
 )]
 pub struct Cli {
     /// Override the source directory. Relative to current directory if path is not absolute. Default: $XDG_DATA_HOME/dotrift or ~/.local/share/dotrift.

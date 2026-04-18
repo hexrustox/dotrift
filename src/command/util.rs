@@ -25,13 +25,13 @@ pub fn resolve_target(target_override: Option<PathBuf>, config: &Config) -> Resu
     let path = &target_override
         .or(config.target_dir.clone())
         .or(dirs::home_dir())
-        .ok_or_else(|| eyre!("Cannot determine target directory."))?;
+        .ok_or_else(|| eyre!("Cannot determine target directory"))?;
 
     if path.is_absolute() {
         Ok(path.to_path_buf())
     } else {
         Err(eyre!(
-            "Target directory must be an absolute path: `{}`.",
+            "Target directory must be an absolute path: `{}`",
             path.display()
         ))
     }
@@ -39,11 +39,11 @@ pub fn resolve_target(target_override: Option<PathBuf>, config: &Config) -> Resu
 
 pub fn validate_paths(source_dir: &Path, target_dir: &Path) -> Result<()> {
     if source_dir == target_dir {
-        return Err(eyre!("Source directory cannot equal target directory."));
+        return Err(eyre!("Source directory cannot equal target directory"));
     }
 
     if target_dir.starts_with(source_dir) {
-        return Err(eyre!("Target directory cannot be inside source directory."));
+        return Err(eyre!("Target directory cannot be inside source directory"));
     }
 
     Ok(())
@@ -79,8 +79,7 @@ pub fn is_actual_dir(path: &Path) -> bool {
 }
 
 pub fn hash_file(path: &Path) -> Result<u64> {
-    let file =
-        File::open(path).wrap_err_with(|| format!("Failed to open `{}`.", path.display()))?;
+    let file = File::open(path).wrap_err_with(|| format!("Failed to open `{}`", path.display()))?;
     let mut reader = BufReader::with_capacity(BUFFER_SIZE, file);
     let mut hasher = XxHash64::with_seed(SEED);
     let mut buffer = [0u8; BUFFER_SIZE];
@@ -88,7 +87,7 @@ pub fn hash_file(path: &Path) -> Result<u64> {
     loop {
         let bytes_read = reader
             .read(&mut buffer)
-            .wrap_err_with(|| format!("Failed to read from `{}`.", path.display()))?;
+            .wrap_err_with(|| format!("Failed to read from `{}`", path.display()))?;
         if bytes_read == 0 {
             break;
         }

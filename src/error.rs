@@ -13,19 +13,19 @@ pub trait IoError<T> {
 
 impl<T> IoError<T> for io::Result<T> {
     fn read_file_error(self, p: &Path) -> color_eyre::Result<T> {
-        self.wrap_err_with(|| format!("Failed to read file `{}`.", p.display()))
+        self.wrap_err_with(|| format!("Failed to read file `{}`", p.display()))
     }
     fn remove_file_error(self, p: &Path) -> color_eyre::Result<T> {
-        self.wrap_err_with(|| format!("Failed to remove file `{}`.", p.display()))
+        self.wrap_err_with(|| format!("Failed to remove file `{}`", p.display()))
     }
     fn copy_file_error(self, p1: &Path, p2: &Path) -> color_eyre::Result<T> {
-        self.wrap_err_with(|| format!("Failed to copy `{}` to `{}`.", p1.display(), p2.display()))
+        self.wrap_err_with(|| format!("Failed to copy `{}` to `{}`", p1.display(), p2.display()))
     }
     fn create_dir_error(self, p: &Path) -> color_eyre::Result<T> {
-        self.wrap_err_with(|| format!("Failed to create directory `{}`.", p.display()))
+        self.wrap_err_with(|| format!("Failed to create directory `{}`", p.display()))
     }
     fn remove_dir_error(self, p: &Path) -> color_eyre::Result<T> {
-        self.wrap_err_with(|| format!("Failed to remove directory `{}`.", p.display()))
+        self.wrap_err_with(|| format!("Failed to remove directory `{}`", p.display()))
     }
 }
 
@@ -37,7 +37,7 @@ impl<T, E: Send + Sync + std::error::Error + serde::de::Error + 'static> SerdeEr
     for Result<T, E>
 {
     fn parse_error(self, p: &Path) -> color_eyre::Result<T> {
-        self.wrap_err_with(|| format!("Failed to parse file `{}`.", p.display()))
+        self.wrap_err_with(|| format!("Failed to parse file `{}`", p.display()))
     }
 }
 
@@ -47,7 +47,7 @@ pub trait EyreError<T> {
 
 impl<T> EyreError<T> for color_eyre::Result<T> {
     fn wrap_as_db_error(self) -> color_eyre::Result<T> {
-        self.wrap_err("SQLite database error.")
+        self.wrap_err("SQLite database error")
     }
 }
 
@@ -57,6 +57,6 @@ pub trait GlobError<T> {
 
 impl<T> GlobError<T> for Result<T, PatternError> {
     fn glob_error(self) -> color_eyre::Result<T> {
-        self.wrap_err("Invalid glob pattern.")
+        self.wrap_err("Invalid glob pattern")
     }
 }

@@ -61,7 +61,7 @@ pub fn prompt_collision(path: &Path, is_dir: bool) -> color_eyre::Result<Collisi
             type_str
         ))
         .interact()
-        .wrap_err("Failed to get user input.")
+        .wrap_err("Failed to get user input")
 }
 
 #[cfg(test)]

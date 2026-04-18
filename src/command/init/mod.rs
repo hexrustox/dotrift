@@ -10,7 +10,7 @@ pub fn run(source_dir: PathBuf) -> color_eyre::Result<()> {
         let parent = path.parent().unwrap();
         fs::create_dir_all(parent).create_dir_error(parent)?;
         fs::write(&path, include_bytes!("./template.toml"))
-            .wrap_err_with(|| format!("Failed to write file `{}`.", path.display()))?;
+            .wrap_err_with(|| format!("Failed to write file `{}`", path.display()))?;
 
         Ok(())
     } else {

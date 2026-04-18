@@ -33,7 +33,7 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
             return Err(rusqlite::Error::FromSqlConversionFailure(
                 1,
                 rusqlite::types::Type::Text,
-                eyre!(r#"Invalid type: "{other}"."#).into(),
+                eyre!(r#"Invalid type: "{other}""#).into(),
             ));
         }
     };
@@ -57,7 +57,7 @@ impl Db {
         }
 
         let conn = Connection::open(path)
-            .wrap_err_with(|| format!("Failed to open connection at `{}`.", path.display()))
+            .wrap_err_with(|| format!("Failed to open connection at `{}`", path.display()))
             .wrap_as_db_error()?;
 
         conn.execute(
@@ -69,7 +69,7 @@ impl Db {
             )",
             [],
         )
-        .wrap_err("Failed to create table.")
+        .wrap_err("Failed to create table")
         .wrap_as_db_error()?;
 
         Ok(Self { conn })
@@ -88,7 +88,7 @@ impl Db {
                     hash_str,
                 ],
             )
-            .wrap_err("Failed to insert or update entry.")
+            .wrap_err("Failed to insert or update entry")
             .wrap_as_db_error()?;
 
         Ok(())
@@ -100,7 +100,7 @@ impl Db {
                 "DELETE FROM entries WHERE target_path = ?1",
                 params![target.to_string_lossy()],
             )
-            .wrap_err("Failed to delete entry.")
+            .wrap_err("Failed to delete entry")
             .wrap_as_db_error()?;
         Ok(())
     }
@@ -111,7 +111,7 @@ impl Db {
                 "DELETE FROM entries WHERE target_path like ?1",
                 params![target.to_string_lossy() + "%"],
             )
-            .wrap_err("Failed to delete entries.")
+            .wrap_err("Failed to delete entries")
             .wrap_as_db_error()?;
         Ok(())
     }
@@ -120,11 +120,11 @@ impl Db {
         let mut stmt = self
         .conn
         .prepare("SELECT target_path, deploy_type, reference, hash FROM entries WHERE target_path = ?1")
-        .wrap_err("Failed to prepare statement.").wrap_as_db_error()?;
+        .wrap_err("Failed to prepare statement").wrap_as_db_error()?;
 
         stmt.query_row(params![target.to_string_lossy()], row_to_entry)
             .optional()
-            .wrap_err("Failed to query entry.")
+            .wrap_err("Failed to query entry")
             .wrap_as_db_error()
     }
 
@@ -132,23 +132,19 @@ impl Db {
         let mut stmt = self
             .conn
             .prepare("SELECT target_path, deploy_type, reference, hash FROM entries")
-            .wrap_err("Failed to prepare statement.")
+            .wrap_err("Failed to prepare statement")
             .wrap_as_db_error()?;
 
         let entries = stmt
             .query_map([], row_to_entry)
             .optional()
-            .wrap_err("Failed to query entries.")
+            .wrap_err("Failed to query entries")
             .wrap_as_db_error()?;
 
         let mut result = Vec::new();
         if let Some(entries) = entries {
             for entry in entries {
-                result.push(
-                    entry
-                        .wrap_err("Failed to query entry.")
-                        .wrap_as_db_error()?,
-                );
+                result.push(entry.wrap_err("Failed to query entry").wrap_as_db_error()?);
             }
         }
         Ok(result)

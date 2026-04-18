@@ -55,7 +55,7 @@ fn full_path(path: PathBuf) -> color_eyre::Result<PathBuf> {
     if path.is_absolute() {
         Ok(path)
     } else {
-        let cwd = current_dir().wrap_err("Failed to get current directory.")?;
+        let cwd = current_dir().wrap_err("Failed to get current directory")?;
         Ok(cwd.join(path).normalize())
     }
 }

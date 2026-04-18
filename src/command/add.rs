@@ -26,10 +26,10 @@ pub fn run(
         source_dir.join(destination).normalize()
     };
     let Ok(dest_rel) = destination.strip_prefix(&source_dir) else {
-        return Err(eyre!("Destination must be inside source directory."));
+        return Err(eyre!("Destination must be inside source directory"));
     };
     if destination.exists() && !flags.force {
-        return Err(eyre!("`{}` already exists.", destination.display()));
+        return Err(eyre!("`{}` already exists", destination.display()));
     }
 
     #[allow(unused_mut)]
@@ -87,7 +87,7 @@ pub fn run(
             }
             _ => match env::var_os("VISUAL").or(env::var_os("EDITOR")) {
                 Some(cmd) => (cmd.to_string_lossy().to_string(), Vec::new()),
-                None => return Err(eyre!("Failed to open editor.")),
+                None => return Err(eyre!("Failed to open editor")),
             },
         };
         args.push(config_path(&source_dir).to_string_lossy().to_string());
@@ -117,7 +117,7 @@ pub fn run(
     } else {
         fs::rename(&file, &destination).wrap_err({
             format!(
-                "Failed to move `{}` to `{}`.",
+                "Failed to move `{}` to `{}`",
                 file.display(),
                 destination.display()
             )

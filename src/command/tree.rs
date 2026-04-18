@@ -8,9 +8,9 @@ use crate::command::apply::PortalEntry;
 
 #[derive(Debug, Error)]
 pub enum TreeError {
-    #[error("File exists when creating directory at `{0}`.")]
+    #[error("File exists when creating directory at `{0}`")]
     FileAtDir(PathBuf),
-    #[error("Directory exists when creating file at `{0}`.")]
+    #[error("Directory exists when creating file at `{0}`")]
     DirAtFile(PathBuf),
 }
 

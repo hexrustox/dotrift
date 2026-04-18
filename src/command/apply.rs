@@ -46,14 +46,14 @@ pub fn run(
     validate_paths(&source_dir, &target_dir)?;
 
     let ignore_matcher =
-        build_ignore(&config.ignore, &target_dir).wrap_err("Failed to build ignore matcher.")?;
+        build_ignore(&config.ignore, &target_dir).wrap_err("Failed to build ignore matcher")?;
 
     let mut portal_entries =
         resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher)
-            .wrap_err("Failed to resolve portals.")?;
+            .wrap_err("Failed to resolve portals")?;
 
     apply_rules(&target_dir, &mut portal_entries, &config.rule)
-        .wrap_err("Failed to apply rules.")?;
+        .wrap_err("Failed to apply rules")?;
 
     let db = Db::init(db_path)?;
 
@@ -66,7 +66,7 @@ pub fn run(
         )?;
     }
 
-    let tree = build_tree(portal_entries).wrap_err("Failed to build target file system tree.")?;
+    let tree = build_tree(portal_entries).wrap_err("Failed to build target file system tree")?;
 
     if flags.dry_run {
         print_tree(Path::new("/"), &tree)?;
@@ -86,9 +86,9 @@ fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore> {
     for pattern in patterns {
         builder
             .add_line(None, pattern)
-            .wrap_err("Invalid ignore pattern.")?;
+            .wrap_err("Invalid ignore pattern")?;
     }
-    builder.build().wrap_err("Failed to build ignore matcher.")
+    builder.build().wrap_err("Failed to build ignore matcher")
 }
 
 fn resolve_portals(
@@ -141,7 +141,7 @@ fn resolve_glob_portal(
     let full_pattern_str = full_pattern.to_string_lossy();
 
     for entry in glob_with(&full_pattern_str, GLOB_OPTION).glob_error()? {
-        let source_path = entry.wrap_err("Failed to read glob match.")?;
+        let source_path = entry.wrap_err("Failed to read glob match")?;
         if is_actual_dir(&source_path) {
             continue;
         }
@@ -181,7 +181,7 @@ fn resolve_literal_portal(
 
     if !source_path.exists() {
         return Err(eyre!(
-            "Source path does not exist: `{}`.",
+            "Source path does not exist: `{}`",
             source_path.display()
         ));
     }
@@ -321,7 +321,7 @@ fn create_dir(path: &Path, db: &Db) -> Result<bool> {
                 db.delete_entry(path)?;
             }
             CollisionOptions::Quit => {
-                return Err(eyre!("Aborted."));
+                return Err(eyre!("Aborted"));
             }
         }
     }
@@ -340,7 +340,7 @@ fn write_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
                     db.delete_entry_with_prefix(target)?;
                 }
                 CollisionOptions::Quit => {
-                    return Err(eyre!("Aborted."));
+                    return Err(eyre!("Aborted"));
                 }
             }
         } else {
@@ -351,7 +351,7 @@ fn write_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
                     CollisionOptions::Skip => return Ok(()),
                     CollisionOptions::Overwrite => {}
                     CollisionOptions::Quit => {
-                        return Err(eyre!("Aborted."));
+                        return Err(eyre!("Aborted"));
                     }
                 }
             }
@@ -367,7 +367,7 @@ fn deploy_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
         DeployType::Symlink => {
             let _ = remove_file(target);
             unix_fs::symlink(&entry.source, target)
-                .wrap_err_with(|| format!("Failed to create symlink `{}`.", target.display()))?;
+                .wrap_err_with(|| format!("Failed to create symlink `{}`", target.display()))?;
         }
         DeployType::Copy => {
             fs::copy(&entry.source, target).copy_file_error(&entry.source, target)?;
@@ -375,7 +375,7 @@ fn deploy_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
                 let mode_val = mode.0 as u32;
                 use std::os::unix::fs::PermissionsExt;
                 fs::set_permissions(target, fs::Permissions::from_mode(mode_val)).wrap_err_with(
-                    || format!("Failed to set permissions on `{}`.", target.display()),
+                    || format!("Failed to set permissions on `{}`", target.display()),
                 )?;
             }
         }

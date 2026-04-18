@@ -26,7 +26,6 @@ Consistent logging is critical for debugging and monitoring. All log messages (i
 
 ### 1. General Formatting
 *   **Capitalization:** Start every log message with an uppercase letter.
-*   **Punctuation:** End every log message with a period (`.`).
 *   **Tone:** Use plain language. Avoid emotional wording (e.g., do not use "Catastrophic failure," use "Failed to initialize connection").
 
 ### 2. Quotation Mark Guidelines
@@ -34,8 +33,8 @@ Strict adherence to quotation types prevents ambiguity between code variables, f
 
 | Quote Type | Symbol | Usage Category | Examples |
 | :--- | :--- | :--- | :--- |
-| **Backticks** | `` ` `` | **Technical Identifiers** Use for variable names, function names, file paths, URLs, database keys, and system IDs. | File not found: /etc/config.json. Variable \`x\` is undefined. |
-| **Double Quotes** | `"` | **String Values & User Input** Use for actual string values, API responses, or user-provided data. | User provided invalid email: "john.doe@". Received payload: "success". |
+| **Backticks** | `` ` `` | **Technical Identifiers** Use for variable names, function names, file paths, URLs, database keys, and system IDs. | File not found: /etc/config.json. Variable \`x\` is undefined |
+| **Double Quotes** | `"` | **String Values & User Input** Use for actual string values, API responses, or user-provided data. | User provided invalid email: "john.doe@". Received payload: "success" |
 | **Single Quotes** | `'` | **Reserved / Avoid** Do not use single quotes in log messages unless the data itself contains a single quote. This avoids confusion with JSON string encapsulation. |  |
 
 ### 3. What to Quote (and what not to quote)
@@ -57,19 +56,19 @@ error: failed to load user 12345
 // Over-quoting, emotional language
 ERROR: Disaster! The config file "settings.yaml" is missing!
 // Single quotes used for technical identifiers
-Warning: function 'calculateTotal' returned null.
+Warning: function 'calculateTotal' returned null
 ```
 
 **Good Logging:**
 ```text
 // Capitalized, period, ID wrapped in backticks
-Error: Failed to load user with ID `12345`.
+Error: Failed to load user with ID `12345`
 
 // Objective tone, file path in backticks
-Error: Configuration file `settings.yaml` not found in directory `/etc/config`.
+Error: Configuration file `settings.yaml` not found in directory `/etc/config`
 
 // Function name in backticks, generic object "Result" unquoted
-Warning: Function `calculateTotal` returned an unexpected result.
+Warning: Function `calculateTotal` returned an unexpected result
 ```
 
 ### 5. Structured Data (Key-Value Pairs)
