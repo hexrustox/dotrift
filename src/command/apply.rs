@@ -6,7 +6,7 @@ use std::{
 };
 
 use color_eyre::eyre::{Context, Result, eyre};
-use glob::glob;
+use glob::{Pattern, glob};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
@@ -16,11 +16,14 @@ use crate::{
     command::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
-        util::{clean_up, hash_file, is_actual_dir, is_managed, resolve_target, validate_paths},
+        util::{
+            clean_up, hash_file, is_actual_dir, is_glob, is_managed, resolve_target,
+            stripping_prefix, validate_paths,
+        },
     },
     config::{Config, DeployType, FileMode, Rules},
     db::{Db, DbEntry},
-    error::IoError,
+    error::{GlobError, IoError},
 };
 
 #[derive(Default, Debug, PartialEq)]
@@ -88,27 +91,6 @@ fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore> {
     builder.build().wrap_err("Failed to build ignore matcher.")
 }
 
-fn is_glob(pattern: &str) -> bool {
-    pattern.contains(['*', '?', '['])
-}
-
-fn stripping_prefix(glob_pattern: &str) -> String {
-    let mut prefix = String::new();
-    for component in glob_pattern.split('/') {
-        if is_glob(component) {
-            break;
-        }
-        if !prefix.is_empty() {
-            prefix.push('/');
-        }
-        prefix.push_str(component);
-    }
-    if !prefix.is_empty() {
-        prefix.push('/');
-    }
-    prefix
-}
-
 fn resolve_portals(
     source_dir: &Path,
     target_dir: &Path,
@@ -158,7 +140,7 @@ fn resolve_glob_portal(
     let full_pattern = source_dir.join(pattern);
     let full_pattern_str = full_pattern.to_string_lossy();
 
-    for entry in glob(&full_pattern_str).wrap_err("Invalid glob pattern.")? {
+    for entry in glob(&full_pattern_str).glob_error()? {
         let source_path = entry.wrap_err("Failed to read glob match.")?;
 
         let source_rel = source_path.strip_prefix(source_dir).unwrap_or(&source_path);
@@ -267,7 +249,7 @@ fn apply_rules(
     rules: &Rules,
 ) -> Result<()> {
     for (pattern, rule) in rules.iter() {
-        let pattern = glob::Pattern::new(pattern).wrap_err("Invalid glob pattern.")?;
+        let pattern = Pattern::new(pattern).glob_error()?;
         for (path, portal_entry) in portal_entries.iter_mut() {
             if !pattern.matches(
                 &path
@@ -397,13 +379,7 @@ fn deploy_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
                 .wrap_err_with(|| format!("Failed to create symlink `{}`.", target.display()))?;
         }
         DeployType::Copy => {
-            fs::copy(&entry.source, target).wrap_err_with(|| {
-                format!(
-                    "Failed to copy `{}` to `{}`.",
-                    entry.source.display(),
-                    target.display()
-                )
-            })?;
+            fs::copy(&entry.source, target).copy_file_error(&entry.source, target)?;
             if let Some(mode) = entry.mode {
                 let mode_val = mode.0 as u32;
                 use std::os::unix::fs::PermissionsExt;
@@ -472,6 +448,7 @@ mod tests {
     #[test_case("" => HashMap::new(); "empty")]
     #[test_case(r#""a.txt" = "A.txt""# => portal_entries!(("a.txt", "A.txt")); "literal_file")]
     #[test_case(r#""subdir" = "dir""# => portal_entries!(("subdir/c.txt", "dir/c.txt"), ("subdir/d.txt", "dir/d.txt")); "subdir_to_dir")]
+    #[test_case(r#""" = """# => portal_entries!(("a.txt", "files/a.txt"), ("b.txt", "files/b.txt"), ("subdir/c.txt", "files/subdir/c.txt"), ("subdir/d.txt", "files/subdir/d.txt")); "root")]
     #[test_case(r#""**/*.txt" = "files""# => portal_entries!(("a.txt", "files/a.txt"), ("b.txt", "files/b.txt"), ("subdir/c.txt", "files/subdir/c.txt"), ("subdir/d.txt", "files/subdir/d.txt")); "glob_deep")]
     #[test_case(r#""" = """# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "all_files")]
     #[test_case(r#""*.txt" = "root""# => portal_entries!(("a.txt", "root/a.txt"), ("b.txt", "root/b.txt")); "glob_root_only")]

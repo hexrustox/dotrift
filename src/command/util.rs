@@ -43,6 +43,27 @@ pub fn validate_paths(source_dir: &Path, target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn is_glob(pattern: &str) -> bool {
+    pattern.contains(['*', '?', '['])
+}
+
+pub fn stripping_prefix(glob_pattern: &str) -> String {
+    let mut prefix = String::new();
+    for component in glob_pattern.split('/') {
+        if is_glob(component) {
+            break;
+        }
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(component);
+    }
+    if !prefix.is_empty() {
+        prefix.push('/');
+    }
+    prefix
+}
+
 pub fn is_actual_dir(path: &Path) -> bool {
     if path.is_symlink() {
         return false;

@@ -1,3 +1,4 @@
+pub mod add;
 pub mod apply;
 mod prompt;
 mod tree;

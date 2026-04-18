@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -8,11 +8,11 @@ use std::path::PathBuf;
     about = "Declarative dotfile manager using TOML configuration."
 )]
 pub struct Cli {
-    /// Path to the source directory containing dotrift.toml and dotfiles. Default: $XDG_DATA_HOME/dotrift or ~/.local/share/dotrift.
+    /// Override the source directory. Relative to current directory if path is not absolute. Default: $XDG_DATA_HOME/dotrift or ~/.local/share/dotrift.
     #[arg(short = 's', long)]
     pub source: Option<PathBuf>,
 
-    /// Override the target directory.
+    /// Override the target directory. Relative to current directory if path is not absolute.
     #[arg(short = 't', long)]
     pub target: Option<PathBuf>,
 
@@ -46,21 +46,44 @@ pub struct UnapplyFlags {
     pub prune_empty_dirs: bool,
 }
 
+#[derive(Args)]
+pub struct AddFlags {
+    /// Copy instead of moving the file or directory to the destination
+    #[arg(short, long)]
+    pub copy: bool,
+
+    /// Remove any intermediate file and directories if they already exist
+    #[arg(short, long)]
+    pub force: bool,
+
+    /// Whether to open dotrift.toml with your editor
+    #[arg(short, long, name = "WHEN")]
+    pub editor: Option<OpenEditor>,
+}
+
+#[derive(ValueEnum, Clone)]
+pub enum OpenEditor {
+    Always,
+    Never,
+}
+
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Evaluates dotrift.toml and applies the defined state to the target directory.
+    /// Evaluates and applies the defined state to the target directory.
     Apply(ApplyFlags),
 
     /// Reverses the apply process, removing managed files from the target.
     Unapply(UnapplyFlags),
 
-    /// Adds existing target file to source directory.
+    /// Adds existing file to source directory.
     Add {
-        /// Absolute path to existing file on disk.
-        target_file: PathBuf,
+        #[command(flatten)]
+        flags: AddFlags,
+        /// Path to existing file or directory.
+        path: PathBuf,
 
-        /// Desired location relative to source directory.
-        source_relative: String,
+        /// Path to move the file or directory to. Relative to the source directory if path is not absolute.
+        destination: PathBuf,
     },
 
     /// Prints content differences between source and target file.
