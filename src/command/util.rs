@@ -135,7 +135,7 @@ pub fn clean_up(
             continue;
         }
 
-        if !matches!(path.try_exists(), Ok(false)) {
+        if path.exists() {
             let managed = is_managed(path, db);
             if managed {
                 if dry_run {

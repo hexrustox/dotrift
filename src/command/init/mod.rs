@@ -6,7 +6,7 @@ use crate::{error::IoError, path::config_path};
 
 pub fn run(source_dir: PathBuf) -> color_eyre::Result<()> {
     let path = config_path(&source_dir);
-    if matches!(path.try_exists(), Ok(false)) {
+    if !path.exists() {
         let parent = path.parent().unwrap();
         fs::create_dir_all(parent).create_dir_error(parent)?;
         fs::write(&path, include_bytes!("./template.toml"))

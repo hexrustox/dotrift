@@ -28,7 +28,7 @@ pub fn run(
     let Ok(dest_rel) = destination.strip_prefix(&source_dir) else {
         return Err(eyre!("Destination must be inside source directory."));
     };
-    if !matches!(destination.try_exists(), Ok(false)) && !flags.force {
+    if destination.exists() && !flags.force {
         return Err(eyre!("`{}` already exists.", destination.display()));
     }
 
