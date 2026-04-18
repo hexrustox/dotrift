@@ -243,7 +243,7 @@ fn insert_portal_entry(
 }
 
 fn is_ignored(matcher: &Gitignore, path: &Path) -> bool {
-    matcher.matched(path, false).is_ignore()
+    matcher.matched_path_or_any_parents(path, false).is_ignore()
 }
 
 fn apply_rules(
@@ -445,19 +445,21 @@ mod tests {
             .collect()
     }
 
-    #[test_case("" => HashMap::new(); "empty")]
+    #[test_case("" => HashMap::new(); "literal_empty")]
     #[test_case(r#""a.txt" = "A.txt""# => portal_entries!(("a.txt", "A.txt")); "literal_file")]
-    #[test_case(r#""subdir" = "dir""# => portal_entries!(("subdir/c.txt", "dir/c.txt"), ("subdir/d.txt", "dir/d.txt")); "subdir_to_dir")]
-    #[test_case(r#""" = """# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "root")]
-    #[test_case(r#""**/*" = ".""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "glob_root")]
-    #[test_case(r#""**/*.txt" = "files""# => portal_entries!(("a.txt", "files/a.txt"), ("b.txt", "files/b.txt"), ("subdir/c.txt", "files/subdir/c.txt"), ("subdir/d.txt", "files/subdir/d.txt")); "glob_deep")]
-    #[test_case(r#""" = """# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "all_files")]
-    #[test_case(r#""*.txt" = "root""# => portal_entries!(("a.txt", "root/a.txt"), ("b.txt", "root/b.txt")); "glob_root_only")]
-    #[test_case(r#""*.rs" = """# => portal_entries!(); "glob_nothing")]
-    #[test_case(r#""subdir/dir/../c.txt" = "dist/../root/c.txt""# => portal_entries!(("subdir/c.txt", "root/c.txt")); "traversal")]
-    #[test_case(r#""../../a.txt" = "../../a.txt""# => portal_entries!(("a.txt", "a.txt")); "traversal_does_not_escape")]
+    #[test_case(r#""subdir" = "dir""# => portal_entries!(("subdir/c.txt", "dir/c.txt"), ("subdir/d.txt", "dir/d.txt")); "literal_dir")]
+    #[test_case(r#""" = """# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "literal_root")]
+    #[test_case(r#""./a.txt" = "./b.txt""# => portal_entries!(("a.txt", "b.txt")); "literal_dot_normalized")]
+    #[test_case(r#""subdir/dir/../c.txt" = "dist/../root/c.txt""# => portal_entries!(("subdir/c.txt", "root/c.txt")); "literal_path_traversal")]
+    #[test_case(r#""../../a.txt" = "../../a.txt""# => portal_entries!(("a.txt", "a.txt")); "literal_path_escape_clamped")]
+    #[test_case(r#""*.rs" = """# => portal_entries!(); "glob_no_match")]
+    #[test_case(r#""*.txt" = "root""# => portal_entries!(("a.txt", "root/a.txt"), ("b.txt", "root/b.txt")); "glob_shallow_pattern")]
+    #[test_case(r#""**/*" = ".""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "glob_recursive_all")]
+    #[test_case(r#""**/*.txt" = "files""# => portal_entries!(("a.txt", "files/a.txt"), ("b.txt", "files/b.txt"), ("subdir/c.txt", "files/subdir/c.txt"), ("subdir/d.txt", "files/subdir/d.txt")); "glob_recursive_pattern")]
+    #[test_case(r#""**/c.txt" = "out""# => portal_entries!(("subdir/c.txt", "out/subdir/c.txt")); "glob_recursive_prefix")]
+    #[test_case(r#""subdir/**/*.txt" = "out""# => portal_entries!(("subdir/c.txt", "out/c.txt"), ("subdir/d.txt", "out/d.txt")); "glob_recursive_middle")]
     #[test_case(r#""a.txt" = "A.txt"
-"a.*" = """# => portal_entries!(("a.txt", "a.txt"), ("a.txt", "A.txt")); "multiple_portals_same_source")]
+"a.*" = """# => portal_entries!(("a.txt", "a.txt"), ("a.txt", "A.txt")); "multiple_same_source")]
     fn test_resolve_portals(portal: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = setup_test(portal, "", "", true);
         let config = Config::read(&source_dir).unwrap();
@@ -495,12 +497,19 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test_case(r#""a.txt", "b.txt""# => portal_entries!(("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "multiple")]
-    #[test_case(r#""*.txt""# => portal_entries!(); "glob_no_match")]
-    #[test_case(r#""/*.txt""# => portal_entries!(("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "glob_no_root_txt")]
-    #[test_case(r#""subdir/*""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "glob_subdir")]
-    #[test_case(r#""**""# => portal_entries!(); "glob_all_empty")]
-    #[test_case(r#""*.txt", "!dotrift.toml""# => portal_entries!(("dotrift.toml", "dotrift.toml")); "negate_ignore")]
+    #[test_case("" => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "empty")]
+    #[test_case(r#""*.txt""# => portal_entries!(); "glob_all_files")]
+    #[test_case(r#""**""# => portal_entries!(); "glob_everything")]
+    #[test_case(r#""/*.txt""# => portal_entries!(("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "glob_anchored")]
+    #[test_case(r#""subdir/*""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "glob_dir_contents")]
+    #[test_case(r#""**/c.txt""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/d.txt", "subdir/d.txt")); "glob_file_anywhere")]
+    #[test_case(r#""subdir/**""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "glob_double_star_dir")]
+    #[test_case(r#""subdir/""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "dir_trailing_slash")]
+    #[test_case(r#""*.txt", "!dotrift.toml""# => portal_entries!(("dotrift.toml", "dotrift.toml")); "negate_selective")]
+    #[test_case(r#""!a.txt""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "negate_only")]
+    #[test_case(r#""*.txt", "!a.txt", "!b.txt""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "negate_multiple")]
+    #[test_case(r#""!nonexistent.txt""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "negate_nonexistent")]
+    #[test_case(r#""a.txt", "b.txt""# => portal_entries!(("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "multiple_literal")]
     fn test_ignore(ignore: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, ignore, "", true);
         let config = Config::read(&source_dir).unwrap();

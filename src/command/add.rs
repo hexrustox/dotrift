@@ -133,17 +133,27 @@ mod tests {
     use test_case::test_case;
 
     thread_local! {
-        pub static OPEN_EDITOR:RefCell<bool> = const { RefCell::new(false) };
+        pub static OPEN_EDITOR: RefCell<bool> = const { RefCell::new(false) };
     }
 
     #[test_case("", "file" => true; "empty")]
     #[test_case(r#""" = """#, "file" => false; "match_root")]
-    #[test_case(r#""*" = ".""#, "file" => false; "match_glob")]
+    #[test_case(r#""dir/file" = """#, "dir/file" => false; "match_exact")]
     #[test_case(r#""dir" = """#, "dir/file" => false; "match_parent")]
-    #[test_case(r#""dir/file" = """#, "dir/file" => false; "exact_match")]
+    #[test_case(r#""a" = """#, "a/b/c" => false; "match_ancestor")]
+    #[test_case(r#""a/b" = """#, "a/b/c" => false; "match_nested")]
+    #[test_case(r#""a/b/c" = """#, "a/b/c" => false; "match_deep")]
+    #[test_case(r#""*" = ".""#, "file" => false; "match_glob")]
+    #[test_case(r#""dir/*" = """#, "dir/file" => false; "match_glob_parent")]
+    #[test_case(r#""**/file" = """#, "a/b/file" => false; "match_glob_recursive")]
+    #[test_case(r#""file1" = ""
+"file2" = """#, "file1" => false; "match_first_portal")]
+    #[test_case(r#""file1" = ""
+"file2" = """#, "file2" => false; "match_second_portal")]
     #[test_case(r#""*.txt" = """#, "file" => true; "mismatch_glob")]
+    #[test_case(r#""*.txt" = """#, "file.cfg" => true; "mismatch_glob_extension")]
     #[test_case(r#""file1" = """#, "file2" => true; "mismatch_literal")]
-    #[test_case(r#""file" = """#, "file2" => true; "match_prefix")]
+    #[test_case(r#""file" = """#, "file2" => true; "mismatch_prefix")]
     fn test_open_editor(portal: &str, dest: impl Into<PathBuf>) -> bool {
         let (temp_dir, source_dir, _) = setup_test(portal, "", "", false);
 
