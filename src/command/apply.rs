@@ -29,7 +29,7 @@ use crate::{
 #[derive(Default, Debug, PartialEq)]
 pub struct PortalEntry {
     pub source: PathBuf,
-    pub action_type: DeployType,
+    pub deploy_type: DeployType,
     pub mode: Option<FileMode>,
 }
 
@@ -228,7 +228,7 @@ fn insert_portal_entry(
         target_path.clone(),
         PortalEntry {
             source: source_path.clone(),
-            action_type: DeployType::default(),
+            deploy_type: DeployType::default(),
             mode: None,
         },
     ) {
@@ -260,7 +260,7 @@ fn apply_rules(
                 continue;
             }
             if let Some(rule_type) = &rule.r#type {
-                portal_entry.action_type = *rule_type;
+                portal_entry.deploy_type = *rule_type;
             }
             if let Some(rule_mode) = &rule.mode {
                 portal_entry.mode = Some(*rule_mode);
@@ -284,7 +284,7 @@ fn print_tree(path: &Path, node: &Node) -> Result<()> {
         Node::File(entry) => {
             println!(
                 "[CREATE] {}",
-                print_portal(path, &entry.source, entry.action_type)
+                print_portal(path, &entry.source, entry.deploy_type)
             );
         }
     }
@@ -363,7 +363,7 @@ fn write_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
 }
 
 fn deploy_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
-    match entry.action_type {
+    match entry.deploy_type {
         DeployType::Symlink => {
             let _ = remove_file(target);
             unix_fs::symlink(&entry.source, target)
@@ -382,9 +382,9 @@ fn deploy_file(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
     }
 
     db.insert_or_update(&DbEntry {
-        action_type: entry.action_type,
-        reference: entry.source.clone(),
-        hash: if entry.action_type == DeployType::Copy {
+        deploy_type: entry.deploy_type,
+        source_path: entry.source.clone(),
+        hash: if entry.deploy_type == DeployType::Copy {
             Some(hash_file(target)?)
         } else {
             None
@@ -409,7 +409,7 @@ mod tests {
             HashMap::from_iter([$(($t.into(), PortalEntry { source: $s.into(), ..Default::default() })),*])
         };
         ($(($s:literal, $t:literal, $a:ident, $m:expr)),*) => {
-            HashMap::from_iter([$(($t.into(), PortalEntry { source: $s.into(), action_type: DeployType::$a, mode: $m })),*])
+            HashMap::from_iter([$(($t.into(), PortalEntry { source: $s.into(), deploy_type: DeployType::$a, mode: $m })),*])
         };
     }
 

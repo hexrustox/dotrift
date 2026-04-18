@@ -104,14 +104,14 @@ pub fn is_managed(target: &Path, db: &Db) -> bool {
         _ => return false,
     };
 
-    match (db_entry.action_type, target.is_symlink()) {
+    match (db_entry.deploy_type, target.is_symlink()) {
         (DeployType::Symlink, true) | (DeployType::Copy, false) => {}
         _ => return false,
     }
 
-    match db_entry.action_type {
+    match db_entry.deploy_type {
         DeployType::Symlink => match fs::read_link(target) {
-            Ok(p) => p == db_entry.reference,
+            Ok(p) => p == db_entry.source_path,
             Err(_) => false,
         },
         DeployType::Copy => match hash_file(target) {
@@ -220,39 +220,39 @@ pub mod tests {
         unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
     },
     |t| t.join("link"),
-    |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Symlink, reference: s.join("file"), hash: None })
+    |s, t| Some(DbEntry { target_path: t.join("link"), deploy_type: DeployType::Symlink, source_path: s.join("file"), hash: None })
     => true; "symlink_matching_source")]
     #[test_case(|_, t| {
         fs::write(t.join("file"), "").unwrap();
     },
     |t| t.join("file"),
-    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Copy, reference: s.join("file"), hash: Some(hash_file(&t.join("file")).unwrap()) })
+    |s, t| Some(DbEntry { target_path: t.join("file"), deploy_type: DeployType::Copy, source_path: s.join("file"), hash: Some(hash_file(&t.join("file")).unwrap()) })
     => true; "copy_matching_hash")]
     #[test_case(|s, t| {
         unix_fs::symlink(s.join("file1"), t.join("link")).unwrap();
     },
     |t| t.join("link"),
-    |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Symlink, reference: s.join("file2"), hash: None })
+    |s, t| Some(DbEntry { target_path: t.join("link"), deploy_type: DeployType::Symlink, source_path: s.join("file2"), hash: None })
     => false; "symlink_different_source")]
     #[test_case(|s, t| {
         fs::write(s.join("file"), "a").unwrap();
         fs::write(t.join("file"), "b").unwrap();
     },
     |t| t.join("file"),
-    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Copy, reference: s.join("file"), hash: Some(hash_file(&s.join("file")).unwrap()) })
+    |s, t| Some(DbEntry { target_path: t.join("file"), deploy_type: DeployType::Copy, source_path: s.join("file"), hash: Some(hash_file(&s.join("file")).unwrap()) })
     => false; "copy_different_hash")]
     #[test_case(|s, t| {
         fs::write(s.join("file"), "").unwrap();
         unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
     },
     |t| t.join("link"),
-    |s, t| Some(DbEntry { target_path: t.join("link"), action_type: DeployType::Copy, reference: s.join("file"), hash: Some(hash_file(&s.join("file")).unwrap()) })
+    |s, t| Some(DbEntry { target_path: t.join("link"), deploy_type: DeployType::Copy, source_path: s.join("file"), hash: Some(hash_file(&s.join("file")).unwrap()) })
     => false; "symlink_db_is_copy")]
     #[test_case(|_, t| {
         fs::write(t.join("file"), "").unwrap();
     },
     |t| t.join("file"),
-    |s, t| Some(DbEntry { target_path: t.join("file"), action_type: DeployType::Symlink, reference: s.join("file"), hash: None })
+    |s, t| Some(DbEntry { target_path: t.join("file"), deploy_type: DeployType::Symlink, source_path: s.join("file"), hash: None })
     => false; "copy_db_is_symlink")]
     #[test_case(|_, t| {
         fs::write(t.join("file"), "").unwrap();

@@ -15,18 +15,18 @@ pub struct Db {
 #[derive(Default, Debug, PartialEq)]
 pub struct DbEntry {
     pub target_path: PathBuf,
-    pub action_type: DeployType,
-    pub reference: PathBuf,
+    pub deploy_type: DeployType,
+    pub source_path: PathBuf,
     pub hash: Option<u64>,
 }
 
 fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
     let target_str: String = row.get(0)?;
-    let action_str: String = row.get(1)?;
+    let deploy_str: String = row.get(1)?;
     let reference_str: String = row.get(2)?;
     let hash_str: Option<String> = row.get(3)?;
 
-    let action_type = match action_str.as_str() {
+    let deploy_type = match deploy_str.as_str() {
         "symlink" => DeployType::Symlink,
         "copy" => DeployType::Copy,
         other => {
@@ -42,8 +42,8 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
 
     Ok(DbEntry {
         target_path: PathBuf::from(target_str),
-        action_type,
-        reference: PathBuf::from(reference_str),
+        deploy_type,
+        source_path: PathBuf::from(reference_str),
         hash,
     })
 }
@@ -63,7 +63,7 @@ impl Db {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS entries (
                 target_path TEXT PRIMARY KEY,
-                action_type TEXT NOT NULL,
+                deploy_type TEXT NOT NULL,
                 reference TEXT NOT NULL,
                 hash TEXT
             )",
@@ -80,11 +80,11 @@ impl Db {
 
         self.conn
             .execute(
-                "INSERT OR REPLACE INTO entries (target_path, action_type, reference, hash) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT OR REPLACE INTO entries (target_path, deploy_type, reference, hash) VALUES (?1, ?2, ?3, ?4)",
                 params![
                     entry.target_path.to_string_lossy(),
-                    entry.action_type.to_string(),
-                    entry.reference.to_string_lossy(),
+                    entry.deploy_type.to_string(),
+                    entry.source_path.to_string_lossy(),
                     hash_str,
                 ],
             )
@@ -119,7 +119,7 @@ impl Db {
     pub fn get_entry(&self, target: &Path) -> color_eyre::Result<Option<DbEntry>> {
         let mut stmt = self
         .conn
-        .prepare("SELECT target_path, action_type, reference, hash FROM entries WHERE target_path = ?1")
+        .prepare("SELECT target_path, deploy_type, reference, hash FROM entries WHERE target_path = ?1")
         .wrap_err("Failed to prepare statement.").wrap_as_db_error()?;
 
         stmt.query_row(params![target.to_string_lossy()], row_to_entry)
@@ -131,7 +131,7 @@ impl Db {
     pub fn get_all_entries(&self) -> color_eyre::Result<Vec<DbEntry>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT target_path, action_type, reference, hash FROM entries")
+            .prepare("SELECT target_path, deploy_type, reference, hash FROM entries")
             .wrap_err("Failed to prepare statement.")
             .wrap_as_db_error()?;
 

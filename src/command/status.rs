@@ -13,7 +13,7 @@ pub fn run(file: Option<PathBuf>, db_path: &Path) -> color_eyre::Result<()> {
             Some(entry) if is_managed(&entry.target_path, &db) => {
                 println!(
                     "[MANAGED] {}",
-                    print_portal(&target, &entry.reference, entry.action_type)
+                    print_portal(&target, &entry.source_path, entry.deploy_type)
                 );
             }
             _ => {
@@ -24,7 +24,7 @@ pub fn run(file: Option<PathBuf>, db_path: &Path) -> color_eyre::Result<()> {
         for entry in db.get_all_entries()? {
             println!(
                 "{}",
-                print_portal(&entry.target_path, &entry.reference, entry.action_type)
+                print_portal(&entry.target_path, &entry.source_path, entry.deploy_type)
             );
         }
     }

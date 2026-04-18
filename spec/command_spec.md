@@ -29,7 +29,7 @@ The local database tracks managed files. It is the single source of truth for re
 ```sql
 CREATE TABLE entries (
     target_path TEXT PRIMARY KEY,
-    action_type TEXT NOT NULL CHECK(action_type IN ('symlink', 'copy')),
+    deploy_type TEXT NOT NULL,
     reference TEXT NOT NULL,
     hash TEXT
 );
@@ -37,7 +37,7 @@ CREATE TABLE entries (
 
 **Columns:**
 * `target_path`: Absolute path of the managed file (primary key).
-* `action_type`: Enum (`symlink` | `copy`).
+* `deploy_type`: Enum (`symlink` | `copy`).
 * `reference`: Absolute path in `source-dir`. Used to read content for copies, or verify link targets for symlinks.
 * `hash`: Hex digest using `xxHash` of source content at last apply. NULL for symlinks.
 
