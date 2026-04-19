@@ -42,9 +42,7 @@ impl HotKey for CollisionOptions {
 pub fn prompt_collision(path: &Path, is_dir: bool) -> color_eyre::Result<CollisionOptions> {
     #[cfg(test)]
     {
-        use crate::command::prompt::tests::PROMPT_SELECTION;
-
-        return Ok(PROMPT_SELECTION.with_borrow(|n| *n));
+        return Ok(tests::PROMPT_SELECTION.with_borrow(|n| *n));
     }
 
     #[allow(unreachable_code)]

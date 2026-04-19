@@ -7,6 +7,7 @@ use crate::error::{IoError, SerdeError};
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct GlobalConfig {
+    pub overwrite_identical: bool,
     pub editor_command: Option<CommandConfig>,
 }
 

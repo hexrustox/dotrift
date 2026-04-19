@@ -93,7 +93,7 @@ pub fn hash_file(path: &Path) -> Result<u64> {
     Ok(hasher.finish())
 }
 
-pub fn is_managed(target: &Path, db: &Db) -> bool {
+pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
     let db_entry = match db.get_entry(target).ok() {
         Some(Some(e)) => e,
         _ => return false,
@@ -109,10 +109,14 @@ pub fn is_managed(target: &Path, db: &Db) -> bool {
             Ok(p) => p == db_entry.source_path,
             Err(_) => false,
         },
-        DeployType::Copy => match hash_file(target) {
-            Ok(h) => Some(h) == db_entry.hash,
-            Err(_) => false,
-        },
+        DeployType::Copy => {
+            Some(target_hash.unwrap_or({
+                let Ok(h) = hash_file(target) else {
+                    return false;
+                };
+                h
+            })) == db_entry.hash
+        }
     }
 }
 
@@ -131,7 +135,7 @@ pub fn clean_up(
         }
 
         if path.exists() {
-            let managed = is_managed(path, db);
+            let managed = is_managed(path, db, None);
             if managed {
                 if dry_run {
                     println!("[REMOVE] {}", path.display());
@@ -273,6 +277,6 @@ pub mod tests {
             db.insert_or_update(&e).unwrap();
         }
 
-        is_managed(&target_path(&target_dir), &db)
+        is_managed(&target_path(&target_dir), &db, None)
     }
 }

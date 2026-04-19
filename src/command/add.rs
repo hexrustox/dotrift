@@ -69,9 +69,7 @@ pub fn run(
 
     #[cfg(test)]
     {
-        use crate::command::add::tests::OPEN_EDITOR;
-
-        OPEN_EDITOR.set(open_editor);
+        tests::OPEN_EDITOR.set(open_editor);
         open_editor = false;
     }
 
@@ -81,6 +79,7 @@ pub fn run(
         let (cmd, mut args) = match GlobalConfig::read(&path) {
             Ok(GlobalConfig {
                 editor_command: Some(config),
+                ..
             }) => (config.command, config.args),
             Err(err) if specific_config => {
                 return Err(err);

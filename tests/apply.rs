@@ -37,6 +37,7 @@ fn test_run() {
     apply::run(
         source_dir.clone(),
         Some(target_dir.clone()),
+        None,
         &db_path,
         ApplyFlags {
             dry_run: false,
@@ -74,6 +75,7 @@ fn test_dry_run() {
     apply::run(
         source_dir.clone(),
         Some(target_dir.clone()),
+        None,
         &db_path,
         ApplyFlags {
             dry_run: true,
@@ -95,6 +97,7 @@ fn test_clean_up() {
     apply::run(
         source_dir.clone(),
         Some(target_dir.clone()),
+        None,
         &db_path,
         ApplyFlags {
             dry_run: false,
@@ -113,6 +116,7 @@ fn test_clean_up() {
     apply::run(
         source_dir.clone(),
         Some(target_dir.clone()),
+        None,
         &db_path,
         ApplyFlags {
             dry_run: false,
@@ -143,6 +147,7 @@ fn test_clean_up_prune_empty_dirs() {
     apply::run(
         source_dir.clone(),
         Some(target_dir.clone()),
+        None,
         &db_path,
         ApplyFlags {
             dry_run: false,
@@ -157,6 +162,7 @@ fn test_clean_up_prune_empty_dirs() {
     apply::run(
         source_dir.clone(),
         Some(target_dir.clone()),
+        None,
         &db_path,
         ApplyFlags {
             dry_run: false,

@@ -29,7 +29,7 @@ fn main() -> color_eyre::Result<()> {
             init::run(source_dir).wrap_err("Failed to initialize")?;
         }
         Commands::Apply(flags) => {
-            apply::run(source_dir, cli.target, &db_path(), flags)
+            apply::run(source_dir, cli.target, cli.config, &db_path(), flags)
                 .wrap_err("Failed to apply dotfiles")?;
         }
         Commands::Unapply(flags) => {
