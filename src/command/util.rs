@@ -1,8 +1,11 @@
-use std::collections::HashMap;
-use std::fs::{self, File};
-use std::hash::Hasher;
-use std::io::{BufReader, Read};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    fs::{self, File, symlink_metadata},
+    hash::Hasher,
+    io::{self, BufReader, Read},
+    os::unix::fs as unix_fs,
+    path::{Path, PathBuf},
+};
 
 use color_eyre::eyre::{Context, Result, eyre};
 use glob::MatchOptions;
@@ -118,6 +121,24 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
             })) == db_entry.hash
         }
     }
+}
+
+pub fn copy(from: &Path, to: &Path) -> io::Result<()> {
+    let meta = symlink_metadata(from)?;
+    if meta.is_file() {
+        fs::copy(from, to)?;
+    } else if meta.is_symlink() {
+        let _ = fs::remove_file(to);
+        unix_fs::symlink(fs::read_link(from)?, to)?;
+    } else {
+        fs::create_dir_all(to)?;
+        for entry in fs::read_dir(from)?.flatten() {
+            let path = entry.path();
+            let suffix = path.strip_prefix(from).unwrap_or(&path);
+            copy(&path, &to.join(suffix))?;
+        }
+    }
+    Ok(())
 }
 
 pub fn clean_up(
@@ -278,5 +299,35 @@ pub mod tests {
         }
 
         is_managed(&target_path(&target_dir), &db, None)
+    }
+
+    #[test_case(|t| {
+        fs::write(t.join("file1"), "a").unwrap();
+        (t.join("file1"), t.join("file2"))
+    }, |t| {
+        assert_eq!(fs::read_to_string(t).unwrap(), "a");
+    })]
+    #[test_case(|t| {
+        unix_fs::symlink(Path::new("/a"), t.join("file1")).unwrap();
+        (t.join("file1"), t.join("file2"))
+    }, |t| {
+        assert_eq!(fs::read_link(t).unwrap(), Path::new("/a"));
+    })]
+    #[test_case(|t| {
+        fs::create_dir_all(t.join("dir1/subdir")).unwrap();
+        fs::write(t.join("dir1/file1"), "").unwrap();
+        fs::write(t.join("dir1/file2"), "").unwrap();
+        fs::write(t.join("dir1/subdir/file3"), "").unwrap();
+        (t.join("dir1"), t.join("dir2"))
+    }, |t| {
+        assert!(t.join("file1").exists());
+        assert!(t.join("file2").exists());
+        assert!(t.join("subdir/file3").exists());
+    })]
+    fn test_copy(setup: impl FnOnce(&Path) -> (PathBuf, PathBuf), assertion: impl FnOnce(&Path)) {
+        let temp_dir = tempdir().unwrap();
+        let (f, t) = setup(temp_dir.path());
+        copy(&f, &t).unwrap();
+        assertion(&t);
     }
 }

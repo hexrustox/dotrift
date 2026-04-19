@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
-    fs::{self, remove_file},
-    os::unix::fs as unix_fs,
+    fs::{self, remove_file, symlink_metadata},
+    os::unix::fs::{self as unix_fs, PermissionsExt},
     path::{Path, PathBuf},
 };
 
@@ -17,8 +17,8 @@ use crate::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
         util::{
-            GLOB_OPTION, clean_up, hash_file, is_glob, is_literal_dir, is_managed, print_portal,
-            resolve_target, stripping_prefix, validate_paths,
+            GLOB_OPTION, clean_up, copy, hash_file, is_glob, is_literal_dir, is_managed,
+            print_portal, resolve_target, stripping_prefix, validate_paths,
         },
     },
     config::{Config, DeployType, FileMode, Rules},
@@ -302,6 +302,7 @@ fn print_tree(path: &Path, node: &Node) -> Result<()> {
 }
 
 fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool) -> Result<()> {
+    println!("{target:?}");
     match node {
         Node::Dir(children) => {
             if create_dir(target, db)? {
@@ -407,13 +408,14 @@ fn write_file(
                 .wrap_err_with(|| format!("Failed to create symlink `{}`", target.display()))?;
         }
         DeployType::Copy => {
-            fs::copy(&entry.source, target).copy_file_error(&entry.source, target)?;
-            if let Some(mode) = entry.mode {
-                let mode_val = mode.0 as u32;
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(target, fs::Permissions::from_mode(mode_val)).wrap_err_with(
-                    || format!("Failed to set permissions on `{}`", target.display()),
-                )?;
+            copy(&entry.source, target).copy_file_error(&entry.source, target)?;
+            if let Some(mode) = entry.mode
+                && symlink_metadata(target).is_ok_and(|m| m.is_file())
+            {
+                fs::set_permissions(target, fs::Permissions::from_mode(mode.0 as u32))
+                    .wrap_err_with(|| {
+                        format!("Failed to set permissions on `{}`", target.display())
+                    })?;
             }
         }
     }
@@ -425,7 +427,7 @@ fn update_db(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
     db.insert_or_update(&DbEntry {
         deploy_type: entry.deploy_type,
         source_path: entry.source.clone(),
-        hash: if entry.deploy_type == DeployType::Copy {
+        hash: if symlink_metadata(target).is_ok_and(|m| m.is_file()) {
             Some(hash_file(target)?)
         } else {
             None
@@ -659,13 +661,10 @@ mod tests {
     }, |_, t| {
         assert_eq!(fs::read_to_string(t.join("file")).unwrap(), "a");
     }; "copy_blocked_by_existing_overwrite")]
-    #[test_case(|s, t| {
-        fs::write(t.join("origin"), "").unwrap();
-        unix_fs::symlink(t.join("origin"), s.join("file")).unwrap();
-        assert!(s.join("file").is_symlink());
+    #[test_case(|s, _| {
+        unix_fs::symlink(Path::new("/a"), s.join("file")).unwrap();
     }, |_, t| {
-        assert!(t.join("file").exists());
-        assert!(!t.join("file").is_symlink());
+        assert_eq!(fs::read_link(t.join("file")).unwrap(), Path::new("/a"));
     }; "copy_overwrites_existing_symlink")]
     #[test_case(|s, t| {
         fs::write(s.join("file"), "a").unwrap();

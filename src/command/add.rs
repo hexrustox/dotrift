@@ -6,7 +6,7 @@ use normalize_path::NormalizePath;
 
 use crate::{
     cli::{AddFlags, OpenEditor},
-    command::util::{GLOB_OPTION, is_glob, is_literal_dir},
+    command::util::{GLOB_OPTION, copy, is_glob, is_literal_dir},
     config::Config,
     error::{GlobError, IoError},
     global_config::GlobalConfig,
@@ -112,7 +112,7 @@ pub fn run(
         fs::create_dir_all(parent).create_dir_error(parent)?;
     }
     if flags.copy {
-        fs::copy(&file, &destination).copy_file_error(&file, &destination)?;
+        copy(&file, &destination).copy_file_error(&file, &destination)?;
     } else {
         fs::rename(&file, &destination).wrap_err({
             format!(
