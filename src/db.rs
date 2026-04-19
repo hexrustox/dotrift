@@ -8,6 +8,8 @@ use crate::{
     error::{EyreError, IoError},
 };
 
+const TABLE_NAME: &str = "managed_files";
+
 pub struct Db {
     conn: Connection,
 }
@@ -61,12 +63,15 @@ impl Db {
             .wrap_as_db_error()?;
 
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS entries (
+            &format!(
+                "CREATE TABLE IF NOT EXISTS {} (
                 target_path TEXT PRIMARY KEY,
                 deploy_type TEXT NOT NULL,
                 source_path TEXT NOT NULL,
                 hash TEXT
             )",
+                TABLE_NAME
+            ),
             [],
         )
         .wrap_err("Failed to create table")
@@ -80,7 +85,7 @@ impl Db {
 
         self.conn
             .execute(
-                "INSERT OR REPLACE INTO entries (target_path, deploy_type, source_path, hash) VALUES (?1, ?2, ?3, ?4)",
+                &format!("INSERT OR REPLACE INTO {} (target_path, deploy_type, source_path, hash) VALUES (?1, ?2, ?3, ?4)", TABLE_NAME),
                 params![
                     entry.target_path.to_string_lossy(),
                     entry.deploy_type.to_string(),
@@ -97,7 +102,7 @@ impl Db {
     pub fn delete_entry(&self, target: &Path) -> color_eyre::Result<()> {
         self.conn
             .execute(
-                "DELETE FROM entries WHERE target_path = ?1",
+                &format!("DELETE FROM {} WHERE target_path = ?1", TABLE_NAME),
                 params![target.to_string_lossy()],
             )
             .wrap_err("Failed to delete entry")
@@ -108,7 +113,7 @@ impl Db {
     pub fn delete_entry_with_prefix(&self, target: &Path) -> color_eyre::Result<()> {
         self.conn
             .execute(
-                "DELETE FROM entries WHERE target_path like ?1",
+                &format!("DELETE FROM {} WHERE target_path like ?1", TABLE_NAME),
                 params![target.to_string_lossy() + "%"],
             )
             .wrap_err("Failed to delete entries")
@@ -116,11 +121,23 @@ impl Db {
         Ok(())
     }
 
+    pub fn delete_table(&self) -> color_eyre::Result<()> {
+        self.conn
+            .execute(&format!("DROP TABLE IF EXISTS {}", TABLE_NAME), [])
+            .wrap_err("Failed to delete table")
+            .wrap_as_db_error()?;
+        Ok(())
+    }
+
     pub fn get_entry(&self, target: &Path) -> color_eyre::Result<Option<DbEntry>> {
         let mut stmt = self
-        .conn
-        .prepare("SELECT target_path, deploy_type, source_path, hash FROM entries WHERE target_path = ?1")
-        .wrap_err("Failed to prepare statement").wrap_as_db_error()?;
+            .conn
+            .prepare(&format!(
+                "SELECT target_path, deploy_type, source_path, hash FROM {} WHERE target_path = ?1",
+                TABLE_NAME
+            ))
+            .wrap_err("Failed to prepare statement")
+            .wrap_as_db_error()?;
 
         stmt.query_row(params![target.to_string_lossy()], row_to_entry)
             .optional()
@@ -131,7 +148,10 @@ impl Db {
     pub fn get_all_entries(&self) -> color_eyre::Result<Vec<DbEntry>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT target_path, deploy_type, source_path, hash FROM entries")
+            .prepare(&format!(
+                "SELECT target_path, deploy_type, source_path, hash FROM {}",
+                TABLE_NAME
+            ))
             .wrap_err("Failed to prepare statement")
             .wrap_as_db_error()?;
 
@@ -229,5 +249,12 @@ mod tests {
 
         db.delete_entry_with_prefix(Path::new("/a")).unwrap();
         assert_eq!(db.get_all_entries().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_db_delete_table() {
+        let temp_dir = tempdir().unwrap();
+        let db = Db::init(&temp_dir.path().join("db")).unwrap();
+        db.delete_table().unwrap();
     }
 }

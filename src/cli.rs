@@ -72,6 +72,20 @@ pub enum OpenEditor {
 }
 
 #[derive(Subcommand)]
+pub enum StatusSubcommand {
+    /// List all managed files.
+    List {
+        /// Optional path to specify a file to operate on it only.
+        file: Option<PathBuf>,
+    },
+    /// Clear status for all files.
+    Clear {
+        /// Optional path to specify a file to operate on it only.
+        file: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
 pub enum Commands {
     /// Initialized the source directory.
     Init,
@@ -103,9 +117,9 @@ pub enum Commands {
         extra_args: Vec<String>,
     },
 
-    /// Reports management status of target file.
+    /// Reports management status of files in target directory.
     Status {
-        /// Optional path to specific file (omitted: lists all managed files).
-        file: Option<PathBuf>,
+        #[command(subcommand)]
+        command: StatusSubcommand,
     },
 }

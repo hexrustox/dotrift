@@ -14,7 +14,7 @@ pub fn config_path(source_dir: &Path) -> PathBuf {
 
 pub fn db_path() -> PathBuf {
     state_dir()
-        .map(|p| p.join(PKG_NAME).join("state.sqlite"))
+        .map(|p| p.join(PKG_NAME).join("db.sqlite"))
         .unwrap_or_else(|| data_dir().unwrap().join(format!("{}.sqlite", PKG_NAME)))
 }
 

@@ -4,7 +4,7 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use color_eyre::eyre::Context;
 use dotrift::{
-    cli,
+    cli::{self, StatusSubcommand},
     command::{add, apply, init, status, unapply},
     path::{db_path, source_path},
 };
@@ -15,12 +15,9 @@ fn main() -> color_eyre::Result<()> {
 
     let mut cli = Cli::parse();
 
-    if let Some(path) = cli.source {
-        cli.source = Some(full_path(path)?);
-    }
-    if let Some(path) = cli.target {
-        cli.target = Some(full_path(path)?);
-    }
+    cli.source = full_path(cli.source)?;
+    cli.target = full_path(cli.target)?;
+    cli.config = full_path(cli.config)?;
 
     let source_dir = cli.source.unwrap_or(source_path());
 
@@ -41,21 +38,30 @@ fn main() -> color_eyre::Result<()> {
             file,
             destination,
         } => add::run(source_dir, cli.config, file, destination, flags)
-            .wrap_err("Failed to add path")?,
+            .wrap_err("Failed to add file")?,
         Commands::Diff { .. } => {}
-        Commands::Status { file } => {
-            status::run(file, &db_path()).wrap_err("Failed to get status")?;
-        }
+        Commands::Status { command } => match command {
+            StatusSubcommand::List { file } => {
+                status::list(full_path(file)?, &db_path()).wrap_err("Failed to list status")?;
+            }
+            StatusSubcommand::Clear { file } => {
+                status::clear(full_path(file)?, &db_path()).wrap_err("Failed to clear status")?;
+            }
+        },
     }
 
     Ok(())
 }
 
-fn full_path(path: PathBuf) -> color_eyre::Result<PathBuf> {
-    if path.is_absolute() {
-        Ok(path)
+fn full_path(path: Option<PathBuf>) -> color_eyre::Result<Option<PathBuf>> {
+    if let Some(path) = path {
+        if path.is_absolute() {
+            Ok(Some(path))
+        } else {
+            let cwd = current_dir().wrap_err("Failed to get current directory")?;
+            Ok(Some(cwd.join(path).normalize()))
+        }
     } else {
-        let cwd = current_dir().wrap_err("Failed to get current directory")?;
-        Ok(cwd.join(path).normalize())
+        Ok(None)
     }
 }

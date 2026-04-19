@@ -5,7 +5,7 @@ use crate::{
     db::Db,
 };
 
-pub fn run(file: Option<PathBuf>, db_path: &Path) -> color_eyre::Result<()> {
+pub fn list(file: Option<PathBuf>, db_path: &Path) -> color_eyre::Result<()> {
     let db = Db::init(db_path)?;
 
     if let Some(target) = file {
@@ -27,6 +27,18 @@ pub fn run(file: Option<PathBuf>, db_path: &Path) -> color_eyre::Result<()> {
                 print_portal(&entry.target_path, &entry.source_path, entry.deploy_type)
             );
         }
+    }
+
+    Ok(())
+}
+
+pub fn clear(file: Option<PathBuf>, db_path: &Path) -> color_eyre::Result<()> {
+    let db = Db::init(db_path)?;
+
+    if let Some(target) = file {
+        db.delete_entry(&target)?;
+    } else {
+        db.delete_table()?;
     }
 
     Ok(())
