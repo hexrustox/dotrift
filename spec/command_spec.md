@@ -30,7 +30,7 @@ The local database tracks managed files. It is the single source of truth for re
 CREATE TABLE entries (
     target_path TEXT PRIMARY KEY,
     deploy_type TEXT NOT NULL,
-    reference TEXT NOT NULL,
+    source_path TEXT NOT NULL,
     hash TEXT
 );
 ```
@@ -38,7 +38,7 @@ CREATE TABLE entries (
 **Columns:**
 * `target_path`: Absolute path of the managed file (primary key).
 * `deploy_type`: Enum (`symlink` | `copy`).
-* `reference`: Absolute path in `source-dir`. Used to read content for copies, or verify link targets for symlinks.
+* `source_path`: Absolute path in `source-dir`. Used to read content for copies, or verify link targets for symlinks.
 * `hash`: Hex digest using `xxHash` of source content at last apply. NULL for symlinks.
 
 ---
@@ -118,7 +118,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
     * **skip:** Do not touch the filesystem. Continue traversal.
     * **overwrite:** Delete the disk entity. Proceed to writing.
     * **quit:** Immediately terminate the program.
-5. **Write:** If the file is managed AND (symlink target == DB.reference OR copy hash(target) == hash(source)), skip. Else `copy` -> copy + chmod, `symlink` -> explicit `unlink` then `symlink`.
+5. **Write:** If the file is managed AND (symlink target == DB.source_path OR copy hash(target) == hash(source)), skip. Else `copy` -> copy + chmod, `symlink` -> explicit `unlink` then `symlink`.
 
 #### Phase 4: Database Synchronization
 Insert/update DB entry immediately after each successful write during Phase 3 traversal. On quit, DB already reflects all successful operations.
@@ -180,7 +180,7 @@ Prints the content differences between the source file and the target file.
 
 1. **Determine Scope:** Specific file (error if not exist on disk; OK if in DB but modified).
 2. **Filter:** Skip if managed.
-3. **Execute Diff:** Run `diff <source> <TARGET_FILE> [OPTIONS]`, source is `DB.reference`.
+3. **Execute Diff:** Run `diff <source> <TARGET_FILE> [OPTIONS]`, source is `DB.source_path`.
 
 ---
 
