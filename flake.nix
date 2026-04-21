@@ -37,7 +37,6 @@
                 "-e HOME"
                 "-e NIX_PATH"
                 "-v \"$HOME/.cargo\":\"$HOME/.cargo\""
-                "-v home:\"$HOME\""
               ];
               wrappers = [
                 "cargo"

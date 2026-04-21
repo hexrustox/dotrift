@@ -10,7 +10,7 @@ The manager maps files from a source directory (where dotfiles are stored) to a 
 
 ```toml
 # Optional root-level keys
-target-dir = "/absolute/path"
+target-directory = "/absolute/path"
 ignore = ["pattern1", "pattern2"]
 
 [portal]
@@ -24,17 +24,17 @@ ignore = ["pattern1", "pattern2"]
 
 ## Root Keys
 
-### `target-dir`
+### `target-directory`
 * **Type:** String (absolute path)
 * **Default:** `$HOME` (handled in code, not via TOML env var expansion)
-* **Description**: The root directory where files will be mapped to. If omitted, the application defaults to the user's home directory.
+* **Description**: The root directory where files will be mapped to. If omitted, the application defaults to the user's home directory. Can be overridden via CLI argument.
 
 ### `ignore`
 * **Type:** Array of strings
 * **Default:** `[]`
 * **Description:** A list of patterns defining deployment targets to exclude. This is useful for temporarily disabling a mapping or resolving ambiguities when one source file is mapped to multiple locations.
 * **Syntax:** Follows exact **Gitignore-style semantics** (including `!` for negation and trailing `/` for directory-only matching).
-* **Matching Context:** Matched against the **resolved target path**, relative to `target-dir`.
+* **Matching Context:** Matched against the **resolved target path**, relative to `target-directory`.
 
 ---
 
@@ -102,9 +102,11 @@ Defines the deployment method (`type`) and file permissions (`mode`), directory 
 * **Scope:** **File-only.** No implicit recursive directory matching.
 * **Precedence:** Evaluated in exact configuration order (guaranteed via `indexmap`). The properties are shallow-merged.
 
+* **Empty Tables:** Empty `[portal]` or `[rule]` tables are valid and treated as no-ops.
+
 ### Properties
 * `type` (String): `"symlink"` or `"copy"`. Defaults to `"symlink"` if no rule matches.
-* `mode` (String): File permissions represented as an octal string (e.g., `"600"`). Defaults to none (no explicit modification) if omitted.
+* `mode` (String): File permissions represented as an octal string of digits only (e.g., `"600"`, `"0600"`). No `0o` prefix. Must be a valid octal value in the range `000`–`777` (error otherwise). Defaults to none (no explicit modification) if omitted.
 
 ---
 
@@ -112,16 +114,21 @@ Defines the deployment method (`type`) and file permissions (`mode`), directory 
 
 * **`[portal]` Syntax:** Supports standard **bash-like globbing** (`*`, `**`, `?`, `[]`). Uses `glob` crate. Brace expansion (`{}`) is not supported.
 * **`ignore` Syntax:** Supports **Gitignore-style semantics**.
-* **Prefix Normalization:** The `./` prefix is purely cosmetic. `"a" = "b"` and `"./a" = "./b"` are identical.
+* **Prefix Normalization:** The `./` prefix is purely cosmetic. `"a" = "b"` and `"./a" = "./b"` are identical. Absolute paths in `[portal]` keys (e.g., `"/etc/foo"`) are normalized as relative to the source directory (e.g., `"./etc/foo"`).
+* **Path Traversal Clamping (Source):** `../` components that would escape the source directory are clamped to the source root. Paths cannot reference files outside the source directory.
+* **Path Traversal Clamping (Target):** `../` components in `[portal]` values that would escape `target-directory` are clamped to the target root. Paths cannot reference files outside the target directory.
 * **Symlinks in Source:** Symbolic links encountered in the source directory are treated as regular files. The manager does not follow them to resolve their targets during discovery; the symlink itself is deployed.
+  * When `type = "copy"`: the symlink itself is copied — target becomes a symlink pointing to the same destination as the source symlink (e.g., source→`/a/b`, target→`/a/b`).
+  * When `type = "symlink"`: target becomes a symlink pointing to the source symlink path (e.g., source→`/a/b`, target→source).
 
 ---
 
 ## Validation & Error Handling
 
 ### Errors (Halts Execution)
-* **Invalid Target Directory:** If `target-dir` is provided but is not a valid absolute path.
+* **Invalid Target Directory:** If `target-directory` is provided but is not a valid absolute path.
 * **Source-Target Overlap:** Error if `source-dir` equals `target-dir` (prevents self-modification loops).
+* **Target Inside Source:** Error if `target-dir` is inside `source-dir` (prevents self-modification).
 * **Empty Patterns:** If a `[portal]` key or value is an empty string.
 * **Target Collisions:** If two different source paths resolve to the exact same target path. This inherently catches exact duplicate `[portal]` rules after path normalization.
 
