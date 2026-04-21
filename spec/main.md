@@ -280,8 +280,8 @@ Traverse Rose Tree top-down (Pre-order DFS).
       - Query DB for entry at target path. No entry → unmanaged.
       - If DB entry exists:
         - DB type is symlink: target symlink points to `DB.source_path` → managed.
-- DB type is copy with stored hash: target is regular file with on-disk hash matching `DB.hash` → managed.
-         - DB type is copy with `symlink_target`: target is a symlink pointing to `DB.symlink_target` → managed.
+        - DB type is copy with stored hash: target is regular file with on-disk hash matching `DB.hash` → managed.
+        - DB type is copy with `symlink_target`: target is a symlink pointing to `DB.symlink_target` → managed.
         - Otherwise → unmanaged.
    c. **Action:**
       - **Managed:** Proceed to step 4 (write) silently. Safe to overwrite — no external modification detected.
