@@ -1,8 +1,8 @@
 use std::{
     collections::HashMap,
-    fs::{self, File, symlink_metadata},
+    fs::{self, File},
     hash::Hasher,
-    io::{self, BufReader, Read},
+    io::{BufReader, Read},
     os::unix::fs as unix_fs,
     path::{Path, PathBuf},
 };
@@ -70,10 +70,21 @@ pub fn stripping_prefix(glob_pattern: &str) -> String {
     prefix
 }
 
-pub fn is_literal_dir(path: &Path) -> bool {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata.is_dir(),
-        Err(_) => false,
+pub trait PathKind {
+    fn is_file_kind(&self) -> bool;
+    fn is_dir_kind(&self) -> bool;
+    fn is_symlink_kind(&self) -> bool;
+}
+
+impl PathKind for Path {
+    fn is_file_kind(&self) -> bool {
+        fs::symlink_metadata(self).is_ok_and(|m| m.is_file())
+    }
+    fn is_dir_kind(&self) -> bool {
+        fs::symlink_metadata(self).is_ok_and(|m| m.is_dir())
+    }
+    fn is_symlink_kind(&self) -> bool {
+        fs::symlink_metadata(self).is_ok_and(|m| m.is_symlink())
     }
 }
 
@@ -109,7 +120,7 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
         },
         DeployType::Copy => {
             if let Some(hash) = db_entry.hash {
-                symlink_metadata(target).is_ok_and(|m| m.is_file())
+                target.is_file_kind()
                     && hash
                         == target_hash.unwrap_or({
                             let Ok(h) = hash_file(target) else {
@@ -118,29 +129,42 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
                             h
                         })
             } else {
-                symlink_metadata(target).is_ok_and(|m| m.is_symlink())
-                    && fs::read_link(target).is_ok_and(|l| l == db_entry.source_path)
+                target.is_symlink_kind()
+                    && fs::read_link(target).is_ok_and(|l| Some(l) == db_entry.symlink_target)
             }
         }
     }
 }
 
-// TODO wrap errors
-pub fn copy(from: &Path, to: &Path) -> io::Result<()> {
-    let meta = symlink_metadata(from)?;
-    if meta.is_file() {
-        fs::copy(from, to)?;
-    } else if meta.is_symlink() {
-        let _ = fs::remove_file(to);
-        unix_fs::symlink(fs::read_link(from)?, to)?;
-    } else {
-        fs::create_dir_all(to)?;
-        for entry in fs::read_dir(from)?.flatten() {
+pub fn copy_recursive(from: &Path, to: &Path) -> color_eyre::Result<()> {
+    if from.is_dir_kind() {
+        fs::create_dir_all(to).create_dir_error(to)?;
+        for entry in fs::read_dir(from)
+            .wrap_err_with(|| format!("Failed to read `{}`", from.display()))?
+            .flatten()
+        {
             let path = entry.path();
             let suffix = path.strip_prefix(from).unwrap_or(&path);
-            copy(&path, &to.join(suffix))?;
+            copy_recursive(&path, &to.join(suffix))?;
         }
+    } else {
+        clone_file(from, to)?;
     }
+
+    Ok(())
+}
+
+pub fn clone_file(from: &Path, to: &Path) -> color_eyre::Result<()> {
+    if from.is_file_kind() {
+        fs::copy(from, to).copy_file_error(from, to)?;
+    } else if from.is_symlink_kind() {
+        let _ = fs::remove_file(to);
+        unix_fs::symlink(fs::read_link(from)?, to).symlink_error(to)?;
+    } else {
+        #[cfg(test)]
+        panic!("{:?} is not a directory", from);
+    }
+
     Ok(())
 }
 
@@ -239,50 +263,178 @@ pub mod tests {
         (temp_dir, source_dir, target_dir)
     }
 
-    #[test_case(|s, t| {
-        unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
-    },
-    |t| t.join("link"),
-    |s, t| Some(DbEntry { target_path: t.join("link"), deploy_type: DeployType::Symlink, source_path: s.join("file"), hash: None })
-    => true; "symlink_matching_source")]
-    #[test_case(|_, t| {
-        fs::write(t.join("file"), "").unwrap();
-    },
-    |t| t.join("file"),
-    |s, t| Some(DbEntry { target_path: t.join("file"), deploy_type: DeployType::Copy, source_path: s.join("file"), hash: Some(hash_file(&t.join("file")).unwrap()) })
-    => true; "copy_matching_hash")]
-    #[test_case(|s, t| {
-        unix_fs::symlink(s.join("file1"), t.join("link")).unwrap();
-    },
-    |t| t.join("link"),
-    |s, t| Some(DbEntry { target_path: t.join("link"), deploy_type: DeployType::Symlink, source_path: s.join("file2"), hash: None })
-    => false; "symlink_different_source")]
-    #[test_case(|s, t| {
-        fs::write(s.join("file"), "a").unwrap();
-        fs::write(t.join("file"), "b").unwrap();
-    },
-    |t| t.join("file"),
-    |s, t| Some(DbEntry { target_path: t.join("file"), deploy_type: DeployType::Copy, source_path: s.join("file"), hash: Some(hash_file(&s.join("file")).unwrap()) })
-    => false; "copy_different_hash")]
-    #[test_case(|s, t| {
-        fs::write(s.join("file"), "").unwrap();
-        unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
-    },
-    |t| t.join("link"),
-    |s, t| Some(DbEntry { target_path: t.join("link"), deploy_type: DeployType::Copy, source_path: s.join("file"), hash: Some(hash_file(&s.join("file")).unwrap()) })
-    => false; "symlink_db_is_copy")]
-    #[test_case(|_, t| {
-        fs::write(t.join("file"), "").unwrap();
-    },
-    |t| t.join("file"),
-    |s, t| Some(DbEntry { target_path: t.join("file"), deploy_type: DeployType::Symlink, source_path: s.join("file"), hash: None })
-    => false; "copy_db_is_symlink")]
-    #[test_case(|_, t| {
-        fs::write(t.join("file"), "").unwrap();
-    },
-    |t| t.join("file"),
-    |_, _| None
-    => false; "no_db_entry")]
+    // -- Symlink deploy type --
+    #[test_case(
+        |s, t| { unix_fs::symlink(s.join("file"), t.join("link")).unwrap(); },
+        |t| t.join("link"),
+        |s, t| Some(DbEntry {
+            target_path: t.join("link"),
+            deploy_type: DeployType::Symlink,
+            source_path: s.join("file"),
+            hash: None,
+            symlink_target: None,
+        })
+        => true; "symlink_matching_source")]
+    #[test_case(
+        |s, t| { unix_fs::symlink(s.join("file1"), t.join("link")).unwrap(); },
+        |t| t.join("link"),
+        |s, t| Some(DbEntry {
+            target_path: t.join("link"),
+            deploy_type: DeployType::Symlink,
+            source_path: s.join("file2"),
+            hash: None,
+            symlink_target: None,
+        })
+        => false; "symlink_different_source")]
+    #[test_case(
+        |_, _| {},
+        |t| t.join("missing"),
+        |s, t| Some(DbEntry {
+            target_path: t.join("missing"),
+            deploy_type: DeployType::Symlink,
+            source_path: s.join("link"),
+            hash: None,
+            symlink_target: None,
+        })
+        => false; "symlink_target_missing")]
+    // -- Copy deploy type with hash --
+    #[test_case(
+        |_, t| { fs::write(t.join("file"), "").unwrap(); },
+        |t| t.join("file"),
+        |s, t| Some(DbEntry {
+            target_path: t.join("file"),
+            deploy_type: DeployType::Copy,
+            source_path: s.join("file"),
+            hash: Some(hash_file(&t.join("file")).unwrap()),
+            symlink_target: None,
+        })
+        => true; "copy_matching_hash")]
+    #[test_case(
+        |s, t| {
+            fs::write(s.join("file"), "a").unwrap();
+            fs::write(t.join("file"), "b").unwrap();
+        },
+        |t| t.join("file"),
+        |s, t| Some(DbEntry {
+            target_path: t.join("file"),
+            deploy_type: DeployType::Copy,
+            source_path: s.join("file"),
+            hash: Some(hash_file(&s.join("file")).unwrap()),
+            symlink_target: None,
+        })
+        => false; "copy_different_hash")]
+    #[test_case(
+        |s, t| {
+            fs::write(s.join("file"), "a").unwrap();
+            unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
+        },
+        |t| t.join("link"),
+        |s, t| Some(DbEntry {
+            target_path: t.join("link"),
+            deploy_type: DeployType::Copy,
+            source_path: s.join("file"),
+            hash: Some(hash_file(&s.join("file")).unwrap()),
+            symlink_target: None,
+        })
+        => false; "copy_hash_target_is_symlink")]
+    #[test_case(
+        |_, _| {},
+        |t| t.join("missing"),
+        |_, t| Some(DbEntry {
+            target_path: t.join("missing"),
+            deploy_type: DeployType::Copy,
+            source_path: PathBuf::from("/x"),
+            hash: Some(0),
+            symlink_target: None,
+        })
+        => false; "copy_hash_target_missing")]
+    // -- Copy deploy type with symlink_target --
+    #[test_case(
+        |_, t| { unix_fs::symlink(Path::new("/a"), t.join("link")).unwrap(); },
+        |t| t.join("link"),
+        |_, t| Some(DbEntry {
+            target_path: t.join("link"),
+            deploy_type: DeployType::Copy,
+            source_path: PathBuf::from("/x"),
+            hash: None,
+            symlink_target: Some(PathBuf::from("/a")),
+        })
+        => true; "copy_symlink_target_managed")]
+    #[test_case(
+        |_, t| { unix_fs::symlink(Path::new("/b"), t.join("link")).unwrap(); },
+        |t| t.join("link"),
+        |_, t| Some(DbEntry {
+            target_path: t.join("link"),
+            deploy_type: DeployType::Copy,
+            source_path: PathBuf::from("/x"),
+            hash: None,
+            symlink_target: Some(PathBuf::from("/a")),
+        })
+        => false; "copy_symlink_target_mismatch")]
+    #[test_case(
+        |_, t| { fs::write(t.join("file"), "").unwrap(); },
+        |t| t.join("file"),
+        |_, t| Some(DbEntry {
+            target_path: t.join("file"),
+            deploy_type: DeployType::Copy,
+            source_path: PathBuf::from("/x"),
+            hash: None,
+            symlink_target: Some(PathBuf::from("/a")),
+        })
+        => false; "copy_symlink_target_is_file")]
+    #[test_case(
+        |_, _| {},
+        |t| t.join("missing"),
+        |_, t| Some(DbEntry {
+            target_path: t.join("missing"),
+            deploy_type: DeployType::Copy,
+            source_path: PathBuf::from("/x"),
+            hash: None,
+            symlink_target: Some(PathBuf::from("/a")),
+        })
+        => false; "copy_symlink_target_missing")]
+    // -- Cross-type and corrupt --
+    #[test_case(
+        |s, t| {
+            fs::write(s.join("file"), "").unwrap();
+            unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
+        },
+        |t| t.join("link"),
+        |s, t| Some(DbEntry {
+            target_path: t.join("link"),
+            deploy_type: DeployType::Copy,
+            source_path: s.join("file"),
+            hash: Some(hash_file(&s.join("file")).unwrap()),
+            symlink_target: None,
+        })
+        => false; "symlink_db_is_copy")]
+    #[test_case(
+        |_, t| { fs::write(t.join("file"), "").unwrap(); },
+        |t| t.join("file"),
+        |s, t| Some(DbEntry {
+            target_path: t.join("file"),
+            deploy_type: DeployType::Symlink,
+            source_path: s.join("file"),
+            hash: None,
+            symlink_target: None,
+        })
+        => false; "copy_db_is_symlink")]
+    #[test_case(
+        |_, t| { fs::write(t.join("file"), "").unwrap(); },
+        |t| t.join("file"),
+        |_, _| None
+        => false; "no_db_entry")]
+    #[test_case(
+        |_, t| { fs::write(t.join("file"), "").unwrap(); },
+        |t| t.join("file"),
+        |_, t| Some(DbEntry {
+            target_path: t.join("file"),
+            deploy_type: DeployType::Copy,
+            source_path: PathBuf::from("/x"),
+            hash: None,
+            symlink_target: None,
+        })
+        => false; "copy_corrupt_no_hash_no_symlink_target")]
     fn test_is_managed(
         cb: impl FnOnce(&Path, &Path),
         target_path: impl FnOnce(&Path) -> PathBuf,
@@ -291,8 +443,8 @@ pub mod tests {
         let temp_dir = tempdir().unwrap();
         let source_dir = temp_dir.path().join("source");
         let target_dir = temp_dir.path().join("target");
-        fs::create_dir_all(&source_dir).unwrap();
-        fs::create_dir_all(&target_dir).unwrap();
+        fs::create_dir(&source_dir).unwrap();
+        fs::create_dir(&target_dir).unwrap();
 
         cb(&source_dir, &target_dir);
 
@@ -327,10 +479,13 @@ pub mod tests {
         assert!(t.join("file2").exists());
         assert!(t.join("subdir/file3").exists());
     }; "directory")]
-    fn test_copy(setup: impl FnOnce(&Path) -> (PathBuf, PathBuf), assertion: impl FnOnce(&Path)) {
+    fn test_copy_recursive(
+        setup: impl FnOnce(&Path) -> (PathBuf, PathBuf),
+        assertion: impl FnOnce(&Path),
+    ) {
         let temp_dir = tempdir().unwrap();
         let (f, t) = setup(temp_dir.path());
-        copy(&f, &t).unwrap();
+        copy_recursive(&f, &t).unwrap();
         assertion(&t);
     }
 }

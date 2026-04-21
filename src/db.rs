@@ -20,6 +20,7 @@ pub struct DbEntry {
     pub deploy_type: DeployType,
     pub source_path: PathBuf,
     pub hash: Option<u64>,
+    pub symlink_target: Option<PathBuf>,
 }
 
 fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
@@ -27,6 +28,7 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
     let deploy_str: String = row.get(1)?;
     let source_str: String = row.get(2)?;
     let hash_str: Option<String> = row.get(3)?;
+    let symlink_target_str: Option<String> = row.get(4)?;
 
     let deploy_type = match deploy_str.as_str() {
         "symlink" => DeployType::Symlink,
@@ -41,12 +43,14 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
     };
 
     let hash = hash_str.and_then(|s| u64::from_str_radix(&s, 16).ok());
+    let symlink_target = symlink_target_str.map(PathBuf::from);
 
     Ok(DbEntry {
         target_path: PathBuf::from(target_str),
         deploy_type,
         source_path: PathBuf::from(source_str),
         hash,
+        symlink_target,
     })
 }
 
@@ -68,7 +72,8 @@ impl Db {
                 target_path TEXT PRIMARY KEY,
                 deploy_type TEXT NOT NULL,
                 source_path TEXT NOT NULL,
-                hash TEXT
+                hash TEXT,
+                symlink_target TEXT
             )",
                 TABLE_NAME
             ),
@@ -82,15 +87,20 @@ impl Db {
 
     pub fn insert_or_update(&self, entry: &DbEntry) -> color_eyre::Result<()> {
         let hash_str = entry.hash.map(|h| format!("{:x}", h));
+        let symlink_target_str = entry
+            .symlink_target
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned());
 
         self.conn
             .execute(
-                &format!("INSERT OR REPLACE INTO {} (target_path, deploy_type, source_path, hash) VALUES (?1, ?2, ?3, ?4)", TABLE_NAME),
+                &format!("INSERT OR REPLACE INTO {} (target_path, deploy_type, source_path, hash, symlink_target) VALUES (?1, ?2, ?3, ?4, ?5)", TABLE_NAME),
                 params![
                     entry.target_path.to_string_lossy(),
                     entry.deploy_type.to_string(),
                     entry.source_path.to_string_lossy(),
                     hash_str,
+                    symlink_target_str,
                 ],
             )
             .wrap_err("Failed to insert or update entry")
@@ -133,7 +143,7 @@ impl Db {
         let mut stmt = self
             .conn
             .prepare(&format!(
-                "SELECT target_path, deploy_type, source_path, hash FROM {} WHERE target_path = ?1",
+                "SELECT target_path, deploy_type, source_path, hash, symlink_target FROM {} WHERE target_path = ?1",
                 TABLE_NAME
             ))
             .wrap_err("Failed to prepare statement")
@@ -149,7 +159,7 @@ impl Db {
         let mut stmt = self
             .conn
             .prepare(&format!(
-                "SELECT target_path, deploy_type, source_path, hash FROM {}",
+                "SELECT target_path, deploy_type, source_path, hash, symlink_target FROM {}",
                 TABLE_NAME
             ))
             .wrap_err("Failed to prepare statement")

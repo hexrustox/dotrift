@@ -11,7 +11,7 @@ use normalize_path::NormalizePath;
 
 use crate::{
     cli::{AddFlags, OpenEditor},
-    command::util::{GLOB_OPTION, copy, is_glob, is_literal_dir},
+    command::util::{GLOB_OPTION, PathKind, copy_recursive, is_glob},
     config::Config,
     error::{GlobError, IoError},
     global_config::GlobalConfig,
@@ -103,9 +103,9 @@ pub fn run(
         })?;
     }
 
-    if is_literal_dir(&file) {
+    if file.is_dir_kind() {
         if flags.force && destination.exists() {
-            if is_literal_dir(&destination) {
+            if destination.is_dir_kind() {
                 remove_dir_all(&destination).remove_dir_error(&destination)?;
             } else {
                 remove_file(&destination).remove_file_error(&destination)?;
@@ -113,12 +113,12 @@ pub fn run(
         }
     } else if let Some(parent) = destination.parent() {
         if flags.force {
-            if destination.exists() && is_literal_dir(&destination) {
+            if destination.exists() && destination.is_dir_kind() {
                 remove_dir(&destination).remove_dir_error(&destination)?;
             }
             let mut current = Some(parent);
             while let Some(path) = current {
-                if path.exists() && !is_literal_dir(path) {
+                if path.exists() && !path.is_dir_kind() {
                     fs::remove_file(path).remove_file_error(path)?;
                     break;
                 }
@@ -129,7 +129,7 @@ pub fn run(
     }
 
     if flags.copy {
-        copy(&file, &destination).copy_file_error(&file, &destination)?;
+        copy_recursive(&file, &destination)?;
     } else {
         fs::rename(&file, &destination).wrap_err_with(|| {
             format!(

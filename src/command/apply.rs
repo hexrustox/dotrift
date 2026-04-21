@@ -17,7 +17,7 @@ use crate::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
         util::{
-            GLOB_OPTION, clean_up, copy, hash_file, is_glob, is_literal_dir, is_managed,
+            GLOB_OPTION, PathKind, clean_up, clone_file, hash_file, is_glob, is_managed,
             print_portal, resolve_target, stripping_prefix, validate_paths,
         },
     },
@@ -152,7 +152,7 @@ fn resolve_glob_portal(
 
     for entry in glob_with(&full_pattern_str, GLOB_OPTION).glob_error()? {
         let source_path = entry.wrap_err("Failed to read glob match")?;
-        if is_literal_dir(&source_path) {
+        if source_path.is_dir_kind() {
             continue;
         }
 
@@ -196,7 +196,7 @@ fn resolve_literal_portal(
         ));
     }
 
-    if is_literal_dir(&source_path) {
+    if source_path.is_dir_kind() {
         for entry in WalkDir::new(&source_path)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -321,7 +321,7 @@ fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool)
 
 fn create_dir(path: &Path, db: &Db) -> Result<bool> {
     if path.exists() {
-        if is_literal_dir(path) {
+        if path.is_dir_kind() {
             return Ok(false);
         }
         let choice = prompt_collision(path, true)?;
@@ -347,7 +347,7 @@ fn write_file(
     overwrite_identical: bool,
 ) -> Result<()> {
     if target.exists() {
-        if is_literal_dir(target) {
+        if target.is_dir_kind() {
             let choice = prompt_collision(target, false)?;
             match choice {
                 CollisionOptions::Skip => return Ok(()),
@@ -363,7 +363,7 @@ fn write_file(
             let mut target_hash = None;
             let identical = match entry.deploy_type {
                 DeployType::Symlink => {
-                    symlink_metadata(target).is_ok_and(|m| m.is_symlink())
+                    target.is_symlink_kind()
                         && fs::read_link(target).is_ok_and(|l| l == entry.source)
                 }
                 DeployType::Copy => symlink_metadata(target).is_ok_and(|m1| {
@@ -406,13 +406,12 @@ fn write_file(
     match entry.deploy_type {
         DeployType::Symlink => {
             let _ = remove_file(target);
-            unix_fs::symlink(&entry.source, target)
-                .wrap_err_with(|| format!("Failed to create symlink `{}`", target.display()))?;
+            unix_fs::symlink(&entry.source, target).symlink_error(target)?
         }
         DeployType::Copy => {
-            copy(&entry.source, target).copy_file_error(&entry.source, target)?;
+            clone_file(&entry.source, target)?;
             if let Some(mode) = entry.mode
-                && symlink_metadata(target).is_ok_and(|m| m.is_file())
+                && target.is_file_kind()
             {
                 fs::set_permissions(target, fs::Permissions::from_mode(mode.0 as u32))
                     .wrap_err_with(|| {
@@ -429,8 +428,15 @@ fn update_db(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
     db.insert_or_update(&DbEntry {
         deploy_type: entry.deploy_type,
         source_path: entry.source.clone(),
-        hash: if symlink_metadata(target).is_ok_and(|m| m.is_file()) {
+        hash: if target.is_file_kind() {
             Some(hash_file(target)?)
+        } else {
+            None
+        },
+        symlink_target: if entry.deploy_type == DeployType::Copy
+            && symlink_metadata(&entry.source).is_ok_and(|m| m.is_symlink())
+        {
+            Some(std::fs::read_link(&entry.source)?)
         } else {
             None
         },

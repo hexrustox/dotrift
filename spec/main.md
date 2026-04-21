@@ -68,7 +68,8 @@ CREATE TABLE managed_files (
     target_path TEXT PRIMARY KEY,
     deploy_type TEXT NOT NULL,
     source_path TEXT NOT NULL,
-    hash TEXT
+    hash TEXT,
+    symlink_target TEXT
 );
 ```
 
@@ -77,6 +78,7 @@ CREATE TABLE managed_files (
 * `deploy_type`: Enum (`symlink` | `copy`).
 * `source_path`: Absolute path in `source-dir`. Used to read content for copies, or verify link targets for symlinks.
 * `hash`: Hex digest using `xxHash64` of **source** file content at last apply. NULL for symlinks. Used to detect external modifications to the target (managed check compares target-on-disk hash against DB hash).
+* `symlink_target`: The symlink destination stored at deploy time (i.e., `read_link(source_path)`). Present when deploy type is `copy` and source is a symlink. NULL otherwise. Decouples managed check from current source filesystem state.
 
 ---
 
@@ -278,8 +280,8 @@ Traverse Rose Tree top-down (Pre-order DFS).
       - Query DB for entry at target path. No entry → unmanaged.
       - If DB entry exists:
         - DB type is symlink: target symlink points to `DB.source_path` → managed.
-        - DB type is copy with stored hash: target is regular file with on-disk hash matching `DB.hash` → managed.
-        - DB type is copy without hash (NULL): `DB.source_path` is a symlink on disk, and target is symlink pointing to `read_link(DB.source_path)` → managed.
+- DB type is copy with stored hash: target is regular file with on-disk hash matching `DB.hash` → managed.
+         - DB type is copy with `symlink_target`: target is a symlink pointing to `DB.symlink_target` → managed.
         - Otherwise → unmanaged.
    c. **Action:**
       - **Managed:** Proceed to step 4 (write) silently. Safe to overwrite — no external modification detected.
@@ -295,6 +297,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
    - `deploy_type`: `symlink` or `copy` (from rule).
    - `source_path`: absolute source path (from portal entry).
    - `hash`: hex digest of source file content if source is regular file (same hash compared during identical and managed checks), NULL if source is symlink or deploy type is `symlink`.
+   - `symlink_target`: `read_link(source_path)` if source is a symlink and deploy type is `copy`, NULL otherwise.
 
 ---
 
