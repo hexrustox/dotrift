@@ -102,27 +102,30 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
         _ => return false,
     };
 
-    match (db_entry.deploy_type, target.is_symlink()) {
-        (DeployType::Symlink, true) | (DeployType::Copy, false) => {}
-        _ => return false,
-    }
-
     match db_entry.deploy_type {
         DeployType::Symlink => match fs::read_link(target) {
             Ok(p) => p == db_entry.source_path,
             Err(_) => false,
         },
         DeployType::Copy => {
-            Some(target_hash.unwrap_or({
-                let Ok(h) = hash_file(target) else {
-                    return false;
-                };
-                h
-            })) == db_entry.hash
+            if let Some(hash) = db_entry.hash {
+                symlink_metadata(target).is_ok_and(|m| m.is_file())
+                    && hash
+                        == target_hash.unwrap_or({
+                            let Ok(h) = hash_file(target) else {
+                                return false;
+                            };
+                            h
+                        })
+            } else {
+                symlink_metadata(target).is_ok_and(|m| m.is_symlink())
+                    && fs::read_link(target).is_ok_and(|l| l == db_entry.source_path)
+            }
         }
     }
 }
 
+// TODO wrap errors
 pub fn copy(from: &Path, to: &Path) -> io::Result<()> {
     let meta = symlink_metadata(from)?;
     if meta.is_file() {
@@ -306,13 +309,13 @@ pub mod tests {
         (t.join("file1"), t.join("file2"))
     }, |t| {
         assert_eq!(fs::read_to_string(t).unwrap(), "a");
-    })]
+    }; "file")]
     #[test_case(|t| {
         unix_fs::symlink(Path::new("/a"), t.join("file1")).unwrap();
         (t.join("file1"), t.join("file2"))
     }, |t| {
         assert_eq!(fs::read_link(t).unwrap(), Path::new("/a"));
-    })]
+    }; "symlink")]
     #[test_case(|t| {
         fs::create_dir_all(t.join("dir1/subdir")).unwrap();
         fs::write(t.join("dir1/file1"), "").unwrap();
@@ -323,7 +326,7 @@ pub mod tests {
         assert!(t.join("file1").exists());
         assert!(t.join("file2").exists());
         assert!(t.join("subdir/file3").exists());
-    })]
+    }; "directory")]
     fn test_copy(setup: impl FnOnce(&Path) -> (PathBuf, PathBuf), assertion: impl FnOnce(&Path)) {
         let temp_dir = tempdir().unwrap();
         let (f, t) = setup(temp_dir.path());

@@ -1,4 +1,9 @@
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{
+    env,
+    fs::{self, remove_dir, remove_dir_all, remove_file},
+    path::PathBuf,
+    process::Command,
+};
 
 use color_eyre::eyre::{Context, eyre};
 use glob::Pattern;
@@ -98,8 +103,19 @@ pub fn run(
         })?;
     }
 
-    if let Some(parent) = destination.parent() {
+    if is_literal_dir(&file) {
+        if flags.force && destination.exists() {
+            if is_literal_dir(&destination) {
+                remove_dir_all(&destination).remove_dir_error(&destination)?;
+            } else {
+                remove_file(&destination).remove_file_error(&destination)?;
+            }
+        }
+    } else if let Some(parent) = destination.parent() {
         if flags.force {
+            if destination.exists() && is_literal_dir(&destination) {
+                remove_dir(&destination).remove_dir_error(&destination)?;
+            }
             let mut current = Some(parent);
             while let Some(path) = current {
                 if path.exists() && !is_literal_dir(path) {
@@ -111,10 +127,11 @@ pub fn run(
         }
         fs::create_dir_all(parent).create_dir_error(parent)?;
     }
+
     if flags.copy {
         copy(&file, &destination).copy_file_error(&file, &destination)?;
     } else {
-        fs::rename(&file, &destination).wrap_err({
+        fs::rename(&file, &destination).wrap_err_with(|| {
             format!(
                 "Failed to move `{}` to `{}`",
                 file.display(),
@@ -128,7 +145,7 @@ pub fn run(
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, path::Path};
+    use std::{cell::RefCell, os::unix::fs as unix_fs, path::Path};
 
     use crate::command::util::tests::setup_test;
 
@@ -191,12 +208,73 @@ mod tests {
     }
 
     #[test_case(|t, s| {
+        fs::write(t.join("file"), "").unwrap();
+        (t.join("file"), s.join("file"))
+    }, |t, s| {
+        assert!(t.join("file").exists());
+        assert!(s.join("file").exists());
+    }; "1")]
+    #[test_case(|t, s| {
+        unix_fs::symlink(Path::new("/a"), t.join("file")).unwrap();
+        (t.join("file"), s.join("file"))
+    }, |_, s| {
+        assert_eq!(fs::read_link(s.join("file")).unwrap(), Path::new("/a"));
+    }; "2")]
+    #[test_case(|t, s| {
+        fs::create_dir_all(t.join("dir")).unwrap();
+        fs::write(t.join("dir/file"), "").unwrap();
+        (t.join("dir"), s.join("dir"))
+    }, |_, s| {
+        assert!(s.join("dir").exists());
+        assert!(s.join("dir/file").exists());
+    }; "3")]
+    fn test_add_copy(
+        setup: impl FnOnce(&Path, &Path) -> (PathBuf, PathBuf),
+        assertion: impl FnOnce(&Path, &Path),
+    ) {
+        let temp_dir = TempDir::new().unwrap();
+        let source_dir = temp_dir.path().join("source");
+        fs::create_dir_all(&source_dir).unwrap();
+        let (f, d) = setup(temp_dir.path(), &source_dir);
+
+        run(
+            source_dir.clone(),
+            None,
+            f,
+            d,
+            AddFlags {
+                copy: true,
+                force: false,
+                editor: None,
+            },
+        )
+        .unwrap();
+
+        assertion(temp_dir.path(), &source_dir);
+    }
+
+    #[test_case(|t, s| {
         fs::write(t.join("file"), "a").unwrap();
         fs::write(s.join("file"), "b").unwrap();
         (t.join("file"), s.join("file"))
     }, |s| {
         assert_eq!(fs::read_to_string(s.join("file")).unwrap(), "a");
     }; "overwrite_existing")]
+    #[test_case(|t, s| {
+        fs::write(t.join("file"), "").unwrap();
+        fs::create_dir_all(s.join("file")).unwrap();
+        (t.join("file"), s.join("file"))
+    }, |s| {
+        assert!(s.join("file").is_file());
+    }; "overwrite_existing_2")]
+    #[test_case(|t, s| {
+        fs::create_dir_all(t.join("dir")).unwrap();
+        fs::write(t.join("dir/file"), "").unwrap();
+        fs::write(s.join("dir"), "").unwrap();
+        (t.join("dir"), s.join("dir"))
+    }, |s| {
+        assert!(s.join("dir/file").exists());
+    }; "overwrite_existing_3")]
     #[test_case(|t, s| {
         fs::write(t.join("file"), "").unwrap();
         fs::write(s.join("dir"), "").unwrap();

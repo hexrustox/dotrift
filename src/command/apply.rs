@@ -363,18 +363,20 @@ fn write_file(
             let mut target_hash = None;
             let identical = match entry.deploy_type {
                 DeployType::Symlink => {
-                    target.is_symlink() && fs::read_link(target).is_ok_and(|l| l == entry.source)
+                    symlink_metadata(target).is_ok_and(|m| m.is_symlink())
+                        && fs::read_link(target).is_ok_and(|l| l == entry.source)
                 }
-                DeployType::Copy => {
-                    entry
-                        .source
-                        .metadata()
-                        .is_ok_and(|m1| target.metadata().is_ok_and(|m2| m1.len() == m2.len()))
+                DeployType::Copy => symlink_metadata(target).is_ok_and(|m1| {
+                    m1.is_file()
+                        && symlink_metadata(&entry.source)
+                            .is_ok_and(|m2| m2.is_file() && m1.len() == m2.len())
                         && hash_file(target).is_ok_and(|h1| {
                             target_hash = Some(h1);
                             hash_file(&entry.source).is_ok_and(|h2| h1 == h2)
+                                || m1.is_symlink()
+                                    && fs::read_link(target).is_ok_and(|l| l == entry.source)
                         })
-                }
+                }),
             };
             if identical {
                 if overwrite_identical {
@@ -672,6 +674,12 @@ mod tests {
     }, |_, _| {
         assert!(!CHECK_MANAGED.with_borrow(|b| *b));
     }; "identical_file")]
+    #[test_case(|s, t| {
+        unix_fs::symlink(Path::new("/a"), s.join("file")).unwrap();
+        unix_fs::symlink(Path::new("/a"), t.join("file")).unwrap();
+    }, |_, _| {
+        assert!(!CHECK_MANAGED.with_borrow(|b| *b));
+    }; "identical_symlink")]
     fn test_apply_copy(setup: impl FnOnce(&Path, &Path), assert: impl FnOnce(&Path, &Path)) {
         let (temp_dir, source_dir, target_dir) = setup_test(
             r#""" = """#,
