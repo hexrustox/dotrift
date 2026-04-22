@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::Debug,
     fs::{self, File},
     hash::Hasher,
     io::{BufReader, Read},
@@ -50,11 +51,30 @@ pub fn resolve_target(
     Ok(target_dir.to_path_buf())
 }
 
+pub trait SafeStripPrefix<P> {
+    fn safe_strip_prefix(&self, base: P) -> &Path;
+}
+
+impl<P: AsRef<Path> + Debug> SafeStripPrefix<P> for Path {
+    fn safe_strip_prefix(&self, base: P) -> &Path {
+        match self.strip_prefix(&base) {
+            Ok(p) => p,
+            Err(_) => {
+                if cfg!(test) {
+                    panic!("{base:?} is not prefix of {self:?}");
+                } else {
+                    self
+                }
+            }
+        }
+    }
+}
+
 pub fn is_glob(pattern: &str) -> bool {
     pattern.contains(['*', '?', '[', ']'])
 }
 
-pub fn stripping_prefix(glob_pattern: &str) -> String {
+pub fn strip_prefix_filter_glob(glob_pattern: &str) -> String {
     let mut prefix = String::with_capacity(glob_pattern.len());
     for component in glob_pattern.split('/') {
         if is_glob(component) {
@@ -142,7 +162,7 @@ pub fn copy_recursive(from: &Path, to: &Path) -> Result<()> {
             .flatten()
         {
             let path = entry.path();
-            let suffix = path.strip_prefix(from).unwrap_or(&path);
+            let suffix = path.safe_strip_prefix(from);
             copy_recursive(&path, &to.join(suffix))?;
         }
     } else {

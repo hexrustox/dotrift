@@ -17,8 +17,8 @@ use crate::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
         util::{
-            GLOB_OPTION, PathKind, clean_up, clone_file, hash_file, is_glob, is_managed,
-            print_portal, resolve_target, stripping_prefix,
+            GLOB_OPTION, PathKind, SafeStripPrefix, clean_up, clone_file, hash_file, is_glob,
+            is_managed, print_portal, resolve_target, strip_prefix_filter_glob,
         },
     },
     config::{Config, DeployType, FileMode, Rules},
@@ -144,7 +144,7 @@ fn resolve_glob_portal(
     ignore_matcher: &Gitignore,
     portal_entries: &mut HashMap<PathBuf, PortalEntry>,
 ) -> Result<()> {
-    let prefix = stripping_prefix(pattern);
+    let prefix = strip_prefix_filter_glob(pattern);
     let full_pattern = source_dir.join(pattern);
     let full_pattern_str = full_pattern.to_string_lossy();
 
@@ -154,15 +154,12 @@ fn resolve_glob_portal(
             continue;
         }
 
-        let source_rel = source_path.strip_prefix(source_dir).unwrap_or(&source_path);
+        let source_rel = source_path.safe_strip_prefix(source_dir);
 
         let stripped = if prefix.is_empty() {
             source_rel.to_path_buf()
         } else {
-            source_rel
-                .strip_prefix(&prefix)
-                .unwrap_or(source_rel)
-                .to_path_buf()
+            source_rel.safe_strip_prefix(&prefix).to_path_buf()
         };
 
         let target_path = target_dir.join(target_rel).join(stripped);
@@ -202,9 +199,7 @@ fn resolve_literal_portal(
         {
             let file_source = entry.path().to_path_buf();
 
-            let rel_to_pattern = file_source
-                .strip_prefix(&source_path)
-                .unwrap_or(&file_source);
+            let rel_to_pattern = file_source.safe_strip_prefix(&source_path);
 
             let target_path = target_dir.join(target_rel).join(rel_to_pattern);
 
@@ -262,9 +257,7 @@ fn apply_rules(
     for (pattern, rule) in rules.iter() {
         let pattern = Pattern::new(pattern).glob_error()?;
         for (path, portal_entry) in portal_entries.iter_mut() {
-            if !pattern
-                .matches_path_with(path.strip_prefix(target_dir).unwrap_or(path), GLOB_OPTION)
-            {
+            if !pattern.matches_path_with(path.safe_strip_prefix(target_dir), GLOB_OPTION) {
                 continue;
             }
             if let Some(rule_type) = &rule.r#type {
