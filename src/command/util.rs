@@ -136,7 +136,7 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
     }
 }
 
-pub fn copy_recursive(from: &Path, to: &Path) -> color_eyre::Result<()> {
+pub fn copy_recursive(from: &Path, to: &Path) -> Result<()> {
     if from.is_dir_kind() {
         fs::create_dir_all(to).create_dir_error(to)?;
         for entry in fs::read_dir(from)
@@ -154,12 +154,12 @@ pub fn copy_recursive(from: &Path, to: &Path) -> color_eyre::Result<()> {
     Ok(())
 }
 
-pub fn clone_file(from: &Path, to: &Path) -> color_eyre::Result<()> {
+pub fn clone_file(from: &Path, to: &Path) -> Result<()> {
     if from.is_file_kind() {
         fs::copy(from, to).copy_file_error(from, to)?;
     } else if from.is_symlink_kind() {
         let _ = fs::remove_file(to);
-        unix_fs::symlink(fs::read_link(from)?, to).symlink_error(to)?;
+        unix_fs::symlink(fs::read_link(from).read_link_error(from)?, to).symlink_error(to)?;
     } else {
         #[cfg(test)]
         panic!("{:?} is not a directory", from);

@@ -77,7 +77,7 @@ CREATE TABLE managed_files (
 * `target_path`: Absolute path of the managed file (primary key).
 * `deploy_type`: Enum (`symlink` | `copy`).
 * `source_path`: Absolute path in `source-dir`. Used to read content for copies, or verify link targets for symlinks.
-* `hash`: Hex digest using `xxHash64` of **source** file content at last apply. NULL for symlinks. Used to detect external modifications to the target (managed check compares target-on-disk hash against DB hash).
+* `hash`: Hex digest using `xxHash64` of target file content at last apply. NULL for symlinks. Used to detect external modifications to the target (managed check compares target-on-disk hash against DB hash).
 * `symlink_target`: The symlink destination stored at deploy time (i.e., `read_link(source_path)`). Present when deploy type is `copy` and source is a symlink. NULL otherwise. Decouples managed check from current source filesystem state.
 
 ---
@@ -196,11 +196,7 @@ Defines the deployment method (`type`) and file permissions (`mode`), directory 
 * **Invalid Target Directory:** If `target-directory` is provided but is not a valid absolute path.
 * **Source-Target Overlap:** Error if `source-dir` equals `target-dir` (prevents self-modification loops).
 * **Target Inside Source:** Error if `target-dir` is inside `source-dir` (prevents self-modification).
-* **Empty Patterns:** If a `[portal]` key or value is an empty string.
 * **Target Collisions:** If two different source paths resolve to the exact same target path. Show all colliding source paths and the collision target. Halts program.
-
-#### Warnings (Continues Execution)
-* **Invalid Mode on Symlink:** When `[rule]` attempts to apply a `mode` to a `type = "symlink"`.
 
 ---
 
@@ -222,7 +218,6 @@ Evaluates `dotrift.toml` and applies the defined state to the target filesystem.
    * Literal directory keys expand to one entry per contained file (not one entry for the directory itself).
    * *Error:* Target path collision. Show all colliding source paths and the collision target. Halt program.
 3. **Rule Application:** Apply `[rule]` in order, shallow-merging properties to determine final `type` and `mode`. Last rule wins on conflict.
-   * *Warning:* `mode` set on `type = "symlink"` (ignored during execution).
 
 #### Phase 2: Tree Construction
 Build a Rose Tree from the HashMap. 
@@ -238,17 +233,17 @@ If active, the command executes Phases 1 and 2, then simulates the remaining pha
 
 The plan is printed to `stdout` and includes:
 
-1.  **Deployment Plan:** The structured tree of files to be created is printed.
+1.  **Clean-up Plan (if `--clean-up` is also passed):** The dry run simulates the clean-up phase first. It iterates the database and prints `[REMOVE] <path>` for any entry not found in the Phase 1 portal entries HashMap.
+
+2.  **Deployment Plan:** The structured tree of files to be created is printed.
     *   `[CREATE] /path/to/file (symlink)`
     *   `[CREATE] /path/to/file (file)`
-
-2.  **Clean-up Plan (if `--clean-up` is also passed):** After printing the deployment plan, the dry run simulates the clean-up phase. It iterates the database and prints `[REMOVE] <path>` for any entry not found in the planned tree.
 
 **Note:** The dry run does not simulate recursive deletion of empty directories (`--prune-empty-dirs`).
 
 #### `--clean-up` Behavior
-If active, execute after Phase 2, before Phase 3. If `--dry-run` is also active, print planned removals without modifying FS or DB. Otherwise:
-Iterate DB. If a path is NOT in the Phase 2 tree:
+If active, execute after Phase 1, before Phase 2. If `--dry-run` is also active, print planned removals without modifying FS or DB. Otherwise:
+Iterate DB. If a path is NOT in the Phase 1 portal entries HashMap:
 1. Check if file exists on disk and matches DB (symlink check or hash check).
 2. **Managed:** Delete file, delete from DB. If `--prune-empty-dirs` is active, prune empty directories (see Pruning).
 3. **Unmanaged/Missing:** Do not touch disk. Delete from DB.
@@ -296,7 +291,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
    - `target_path`: absolute target path.
    - `deploy_type`: `symlink` or `copy` (from rule).
    - `source_path`: absolute source path (from portal entry).
-   - `hash`: hex digest of source file content if source is regular file (same hash compared during identical and managed checks), NULL if source is symlink or deploy type is `symlink`.
+   - `hash`: hex digest of target file content if source is regular file (same hash compared during identical and managed checks), NULL if source is symlink or deploy type is `symlink`.
    - `symlink_target`: `read_link(source_path)` if source is a symlink and deploy type is `copy`, NULL otherwise.
 
 ---

@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fs::{self, remove_file, symlink_metadata},
+    fs::{self, remove_file},
     os::unix::fs::{self as unix_fs, PermissionsExt},
     path::{Path, PathBuf},
 };
@@ -302,10 +302,9 @@ fn print_tree(path: &Path, node: &Node) -> Result<()> {
 }
 
 fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool) -> Result<()> {
-    println!("{target:?}");
     match node {
         Node::Dir(children) => {
-            if create_dir(target, db)? {
+            if create_parent_dir(target, db)? {
                 return Ok(());
             }
             for (name, child) in children {
@@ -313,13 +312,13 @@ fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool)
             }
         }
         Node::File(entry) => {
-            write_file(target, entry, db, overwrite_identical)?;
+            deploy_file(target, entry, db, overwrite_identical)?;
         }
     }
     Ok(())
 }
 
-fn create_dir(path: &Path, db: &Db) -> Result<bool> {
+fn create_parent_dir(path: &Path, db: &Db) -> Result<bool> {
     if path.exists() {
         if path.is_dir_kind() {
             return Ok(false);
@@ -340,12 +339,39 @@ fn create_dir(path: &Path, db: &Db) -> Result<bool> {
     Ok(false)
 }
 
-fn write_file(
+fn is_identical(
+    target: &Path,
+    source: &Path,
+    deploy_type: DeployType,
+    target_hash: &mut Option<u64>,
+) -> bool {
+    match deploy_type {
+        DeployType::Symlink => {
+            target.is_symlink_kind() && fs::read_link(target).is_ok_and(|l| l == source)
+        }
+        DeployType::Copy if source.is_symlink_kind() => {
+            target.is_symlink_kind()
+                && fs::read_link(source)
+                    .is_ok_and(|src_dest| fs::read_link(target).is_ok_and(|l| l == src_dest))
+        }
+        DeployType::Copy => {
+            target.is_file_kind()
+                && source.is_file_kind()
+                && hash_file(target).is_ok_and(|h1| {
+                    *target_hash = Some(h1);
+                    hash_file(source).is_ok_and(|h2| h1 == h2)
+                })
+        }
+    }
+}
+
+fn deploy_file(
     target: &Path,
     entry: &PortalEntry,
     db: &Db,
     overwrite_identical: bool,
 ) -> Result<()> {
+    let mut target_hash = None;
     if target.exists() {
         if target.is_dir_kind() {
             let choice = prompt_collision(target, false)?;
@@ -360,27 +386,11 @@ fn write_file(
                 }
             }
         } else {
-            let mut target_hash = None;
-            let identical = match entry.deploy_type {
-                DeployType::Symlink => {
-                    target.is_symlink_kind()
-                        && fs::read_link(target).is_ok_and(|l| l == entry.source)
-                }
-                DeployType::Copy => symlink_metadata(target).is_ok_and(|m1| {
-                    m1.is_file()
-                        && symlink_metadata(&entry.source)
-                            .is_ok_and(|m2| m2.is_file() && m1.len() == m2.len())
-                        && hash_file(target).is_ok_and(|h1| {
-                            target_hash = Some(h1);
-                            hash_file(&entry.source).is_ok_and(|h2| h1 == h2)
-                                || m1.is_symlink()
-                                    && fs::read_link(target).is_ok_and(|l| l == entry.source)
-                        })
-                }),
-            };
+            let identical =
+                is_identical(target, &entry.source, entry.deploy_type, &mut target_hash);
             if identical {
                 if overwrite_identical {
-                    update_db(target, entry, db)?;
+                    update_db(target, entry, db, target_hash)?;
                 }
                 return Ok(());
             }
@@ -420,23 +430,21 @@ fn write_file(
             }
         }
     }
-    update_db(target, entry, db)?;
+    update_db(target, entry, db, target_hash)?;
     Ok(())
 }
 
-fn update_db(target: &Path, entry: &PortalEntry, db: &Db) -> Result<()> {
+fn update_db(target: &Path, entry: &PortalEntry, db: &Db, target_hash: Option<u64>) -> Result<()> {
     db.insert_or_update(&DbEntry {
         deploy_type: entry.deploy_type,
         source_path: entry.source.clone(),
         hash: if target.is_file_kind() {
-            Some(hash_file(target)?)
+            Some(target_hash.unwrap_or(hash_file(target)?))
         } else {
             None
         },
-        symlink_target: if entry.deploy_type == DeployType::Copy
-            && symlink_metadata(&entry.source).is_ok_and(|m| m.is_symlink())
-        {
-            Some(std::fs::read_link(&entry.source)?)
+        symlink_target: if entry.deploy_type == DeployType::Copy && entry.source.is_symlink_kind() {
+            Some(fs::read_link(&entry.source).read_link_error(&entry.source)?)
         } else {
             None
         },
@@ -452,6 +460,7 @@ mod tests {
 
     use super::*;
     use std::{cell::RefCell, fs};
+    use tempfile::tempdir;
     use test_case::test_case;
 
     #[macro_export]
@@ -553,144 +562,262 @@ mod tests {
         flatten(portal_entries, temp_dir.path())
     }
 
+    #[test_case(
+        |s, t| {
+            unix_fs::symlink(s.join("src"), t.join("target")).unwrap();
+        },
+        |s, t| (t.join("target"), s.join("src"), DeployType::Symlink)
+        => true; "symlink_identical")]
+    #[test_case(
+        |s, t| {
+            unix_fs::symlink(s.join("other"), t.join("target")).unwrap();
+        },
+        |s, t| (t.join("target"), s.join("src"), DeployType::Symlink)
+        => false; "symlink_not_identical")]
+    #[test_case(
+        |s, _| {
+            fs::write(s.join("src"), "").unwrap();
+        },
+        |s, t| (t.join("target"), s.join("src"), DeployType::Symlink)
+        => false; "symlink_target_not_symlink")]
+    #[test_case(
+        |s, t| {
+            fs::write(s.join("src"), "a").unwrap();
+            fs::write(t.join("target"), "a").unwrap();
+        },
+        |s, t| (t.join("target"), s.join("src"), DeployType::Copy)
+        => true; "copy_file_identical")]
+    #[test_case(
+        |s, t| {
+            fs::write(s.join("src"), "a").unwrap();
+            fs::write(t.join("target"), "b").unwrap();
+        },
+        |s, t| (t.join("target"), s.join("src"), DeployType::Copy)
+        => false; "copy_file_not_identical")]
+    #[test_case(
+        |s, t| {
+            fs::write(s.join("src"), "a").unwrap();
+            unix_fs::symlink(s.join("src"), t.join("target")).unwrap();
+        },
+        |s, t| (t.join("target"), s.join("src"), DeployType::Copy)
+        => false; "copy_file_target_is_symlink")]
+    #[test_case(
+        |s, _| {
+            unix_fs::symlink(Path::new("/a"), s.join("src")).unwrap();
+        },
+        |s, t| (t.join("target"), s.join("src"), DeployType::Copy)
+        => false; "copy_symlink_source_target_missing")]
+    #[test_case(
+        |s, t| {
+            unix_fs::symlink(Path::new("/a"), s.join("src")).unwrap();
+            unix_fs::symlink(Path::new("/a"), t.join("target")).unwrap();
+        },
+        |s, t| (t.join("target"), s.join("src"), DeployType::Copy)
+        => true; "copy_symlink_source_identical")]
+    #[test_case(
+        |s, t| {
+            unix_fs::symlink(Path::new("/a"), s.join("src")).unwrap();
+            unix_fs::symlink(Path::new("/b"), t.join("target")).unwrap();
+        },
+        |s, t| (t.join("target"), s.join("src"), DeployType::Copy)
+        => false; "copy_symlink_source_not_identical")]
+    #[test_case(
+        |s, t| {
+            unix_fs::symlink(Path::new("/a"), s.join("src")).unwrap();
+            fs::write(t.join("target"), "").unwrap();
+        },
+        |s, t| (t.join("target"), s.join("src"), DeployType::Copy)
+        => false; "copy_symlink_source_target_is_file")]
+    fn test_is_identical(
+        setup: impl FnOnce(&Path, &Path),
+        paths: impl FnOnce(&Path, &Path) -> (PathBuf, PathBuf, DeployType),
+    ) -> bool {
+        let temp_dir = tempdir().unwrap();
+        let source_dir = temp_dir.path().join("source");
+        let target_dir = temp_dir.path().join("target");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::create_dir_all(&target_dir).unwrap();
+
+        setup(&source_dir, &target_dir);
+        let (target, source, deploy_type) = paths(&source_dir, &target_dir);
+        let mut target_hash = None;
+        is_identical(&target, &source, deploy_type, &mut target_hash)
+    }
+
     thread_local! {
         pub static CHECK_MANAGED: RefCell<bool> = const { RefCell::new(false) };
     }
 
+    // --- Fresh deploy ---
     #[test_case(|s, _| {
         fs::write(s.join("file"), "").unwrap();
     }, |s, t| {
         assert!(t.join("file").exists());
         assert!(t.join("file").is_symlink());
         assert_eq!(fs::read_link(t.join("file")).unwrap(), s.join("file"));
-    }; "simple")]
+    }, DeployType::Symlink; "symlink_fresh")]
     #[test_case(|s, _| {
         fs::create_dir_all(s.join("dir")).unwrap();
         fs::write(s.join("dir/file"), "").unwrap();
     }, |_, t| {
         assert!(t.join("dir").exists());
         assert!(t.join("dir/file").exists());
-    }; "symlink_nested_dirs")]
-    #[test_case(|s, t| {
-        fs::create_dir_all(s.join("dir")).unwrap();
-        fs::write(s.join("dir/file"), "").unwrap();
-        fs::write(t.join("dir"), "").unwrap();
-    }, |_, t| {
-        assert!(t.join("dir").exists());
-        assert!(t.join("dir").is_file());
-    }; "symlink_dir_blocked_by_file_skip")]
-    #[test_case(|s, t| {
-        PROMPT_SELECTION.set(CollisionOptions::Overwrite);
-        fs::create_dir_all(s.join("dir")).unwrap();
-        fs::write(s.join("dir/file"), "").unwrap();
-        fs::write(t.join("dir"), "").unwrap();
-    }, |_, t| {
-        assert!(t.join("dir").exists());
-        assert!(t.join("dir/file").exists());
-    }; "symlink_dir_blocked_by_file_overwrite")]
-    #[test_case(|s, t| {
-        fs::write(s.join("dir"), "").unwrap();
-        fs::create_dir_all(t.join("dir")).unwrap();
-        fs::write(t.join("dir/file"), "").unwrap();
-    }, |_, t| {
-        assert!(t.join("dir").exists());
-        assert!(t.join("dir/file").exists());
-    }; "symlink_blocked_by_dir_skip")]
-    #[test_case(|s, t| {
-        PROMPT_SELECTION.set(CollisionOptions::Overwrite);
-        fs::write(s.join("dir"), "").unwrap();
-        fs::create_dir_all(t.join("dir")).unwrap();
-        fs::write(t.join("dir/file"), "").unwrap();
-    }, |_, t| {
-        assert!(t.join("dir").exists());
-        assert!(t.join("dir").is_file());
-    }; "symlink_blocked_by_dir_overwrite")]
-    #[test_case(|s, t| {
-        fs::write(s.join("file"), "").unwrap();
-        fs::write(t.join("file"), "").unwrap();
-    }, |_, t| {
-        assert!(!t.join("file").is_symlink());
-    }; "symlink_blocked_by_existing_skip")]
-    #[test_case(|s, t| {
-        PROMPT_SELECTION.set(CollisionOptions::Overwrite);
-        fs::write(s.join("file"), "").unwrap();
-        fs::write(t.join("file"), "").unwrap();
-    }, |_, t| {
-        assert!(t.join("file").is_symlink());
-    }; "symlink_blocked_by_existing_overwrite")]
+    }, DeployType::Symlink; "symlink_nested")]
     #[test_case(|s, _| {
         unix_fs::symlink(Path::new("/a"), s.join("file")).unwrap();
     }, |s, t| {
         assert_eq!(fs::read_link(t.join("file")).unwrap(), s.join("file"));
-    }; "symlink_broken_preserved")]
+    }, DeployType::Symlink; "symlink_broken_source")]
+    #[test_case(|s, _| {
+        unix_fs::symlink(Path::new("/a"), s.join("file")).unwrap();
+    }, |_, t| {
+        assert_eq!(fs::read_link(t.join("file")).unwrap(), Path::new("/a"));
+    }, DeployType::Copy; "copy_symlink_source_fresh")]
+    #[test_case(|s, _| {
+        fs::write(s.join("file"), "").unwrap();
+    }, |_, t| {
+        assert!(t.join("file").exists());
+        assert!(!t.join("file").is_symlink());
+    }, DeployType::Copy; "copy_fresh")]
+    // --- Identical ---
     #[test_case(|s, t| {
         unix_fs::symlink(Path::new("/a"), s.join("file")).unwrap();
         unix_fs::symlink(s.join("file"), t.join("file")).unwrap();
     }, |_, _| {
         assert!(!CHECK_MANAGED.with_borrow(|b| *b));
-    }; "identical_symlink")]
-    fn test_apply_symlink(setup: impl FnOnce(&Path, &Path), assert: impl FnOnce(&Path, &Path)) {
-        let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, "", "", false);
-        setup(&source_dir, &target_dir);
-        run(
-            source_dir.clone(),
-            Some(target_dir.clone()),
-            None,
-            &temp_dir.path().join("db"),
-            ApplyFlags {
-                dry_run: false,
-                clean_up: false,
-                prune_empty_dirs: false,
-            },
-        )
-        .unwrap();
-        assert(&source_dir, &target_dir);
-    }
-
-    #[test_case(|s, _| {
-        fs::write(s.join("file"), "").unwrap();
+    }, DeployType::Symlink; "symlink_identical")]
+    #[test_case(|s, t| {
+        fs::write(s.join("file"), "a").unwrap();
+        fs::write(t.join("file"), "a").unwrap();
+    }, |_, _| {
+        assert!(!CHECK_MANAGED.with_borrow(|b| *b));
+    }, DeployType::Copy; "copy_identical_file")]
+    #[test_case(|s, t| {
+        unix_fs::symlink(Path::new("/a"), s.join("file")).unwrap();
+        unix_fs::symlink(Path::new("/a"), t.join("file")).unwrap();
+    }, |_, _| {
+        assert!(!CHECK_MANAGED.with_borrow(|b| *b));
+    }, DeployType::Copy; "copy_identical_symlink")]
+    // --- Collision: file vs dir ---
+    #[test_case(|s, t| {
+        fs::write(s.join("dir"), "").unwrap();
+        fs::create_dir_all(t.join("dir")).unwrap();
+        fs::write(t.join("dir/file"), "").unwrap();
     }, |_, t| {
-        use std::os::unix::fs::PermissionsExt;
-
-        assert!(t.join("file").exists());
+        assert!(t.join("dir").exists());
+        assert!(t.join("dir/file").exists());
+    }, DeployType::Symlink; "symlink_file_vs_dir_skip")]
+    #[test_case(|s, t| {
+        PROMPT_SELECTION.set(CollisionOptions::Overwrite);
+        fs::write(s.join("dir"), "").unwrap();
+        fs::create_dir_all(t.join("dir")).unwrap();
+        fs::write(t.join("dir/file"), "").unwrap();
+    }, |_, t| {
+        assert!(t.join("dir").exists());
+        assert!(t.join("dir").is_file());
+    }, DeployType::Symlink; "symlink_file_vs_dir_overwrite")]
+    #[test_case(|s, t| {
+        fs::write(s.join("dir"), "").unwrap();
+        fs::create_dir_all(t.join("dir")).unwrap();
+        fs::write(t.join("dir/file"), "").unwrap();
+    }, |_, t| {
+        assert!(t.join("dir").exists());
+        assert!(t.join("dir/file").exists());
+    }, DeployType::Copy; "copy_file_vs_dir_skip")]
+    #[test_case(|s, t| {
+        PROMPT_SELECTION.set(CollisionOptions::Overwrite);
+        fs::write(s.join("dir"), "").unwrap();
+        fs::create_dir_all(t.join("dir")).unwrap();
+        fs::write(t.join("dir/file"), "").unwrap();
+    }, |_, t| {
+        assert!(t.join("dir").exists());
+        assert!(t.join("dir").is_file());
+    }, DeployType::Copy; "copy_file_vs_dir_overwrite")]
+    // --- Collision: dir vs file ---
+    #[test_case(|s, t| {
+        fs::create_dir_all(s.join("dir")).unwrap();
+        fs::write(s.join("dir/file"), "").unwrap();
+        fs::write(t.join("dir"), "").unwrap();
+    }, |_, t| {
+        assert!(t.join("dir").exists());
+        assert!(t.join("dir").is_file());
+    }, DeployType::Symlink; "symlink_dir_vs_file_skip")]
+    #[test_case(|s, t| {
+        PROMPT_SELECTION.set(CollisionOptions::Overwrite);
+        fs::create_dir_all(s.join("dir")).unwrap();
+        fs::write(s.join("dir/file"), "").unwrap();
+        fs::write(t.join("dir"), "").unwrap();
+    }, |_, t| {
+        assert!(t.join("dir").exists());
+        assert!(t.join("dir/file").exists());
+    }, DeployType::Symlink; "symlink_dir_vs_file_overwrite")]
+    #[test_case(|s, t| {
+        fs::create_dir_all(s.join("dir")).unwrap();
+        fs::write(s.join("dir/file"), "").unwrap();
+        fs::write(t.join("dir"), "").unwrap();
+    }, |_, t| {
+        assert!(t.join("dir").exists());
+        assert!(t.join("dir").is_file());
+    }, DeployType::Copy; "copy_dir_vs_file_skip")]
+    #[test_case(|s, t| {
+        PROMPT_SELECTION.set(CollisionOptions::Overwrite);
+        fs::create_dir_all(s.join("dir")).unwrap();
+        fs::write(s.join("dir/file"), "").unwrap();
+        fs::write(t.join("dir"), "").unwrap();
+    }, |_, t| {
+        assert!(t.join("dir").exists());
+        assert!(t.join("dir/file").exists());
+    }, DeployType::Copy; "copy_dir_vs_file_overwrite")]
+    // --- Collision: file vs file ---
+    #[test_case(|s, t| {
+        fs::write(s.join("file"), "").unwrap();
+        fs::write(t.join("file"), "").unwrap();
+    }, |_, t| {
         assert!(!t.join("file").is_symlink());
-        assert_eq!(fs::File::open(t.join("file")).unwrap().metadata().unwrap().permissions().mode(), 0o100123);
-    }; "copy_with_mode")]
+    }, DeployType::Symlink; "symlink_file_vs_file_skip")]
+    #[test_case(|s, t| {
+        PROMPT_SELECTION.set(CollisionOptions::Overwrite);
+        fs::write(s.join("file"), "").unwrap();
+        fs::write(t.join("file"), "").unwrap();
+    }, |_, t| {
+        assert!(t.join("file").is_symlink());
+    }, DeployType::Symlink; "symlink_file_vs_file_overwrite")]
     #[test_case(|s, t| {
         fs::write(s.join("file"), "a").unwrap();
         fs::write(t.join("file"), "b").unwrap();
     }, |_, t| {
         assert_eq!(fs::read_to_string(t.join("file")).unwrap(), "b");
-    }; "copy_blocked_by_existing_skip")]
+    }, DeployType::Copy; "copy_file_vs_file_skip")]
     #[test_case(|s, t| {
         PROMPT_SELECTION.set(CollisionOptions::Overwrite);
         fs::write(s.join("file"), "a").unwrap();
         fs::write(t.join("file"), "b").unwrap();
     }, |_, t| {
         assert_eq!(fs::read_to_string(t.join("file")).unwrap(), "a");
-    }; "copy_blocked_by_existing_overwrite")]
-    #[test_case(|s, _| {
-        unix_fs::symlink(Path::new("/a"), s.join("file")).unwrap();
-    }, |_, t| {
-        assert_eq!(fs::read_link(t.join("file")).unwrap(), Path::new("/a"));
-    }; "copy_overwrites_existing_symlink")]
+    }, DeployType::Copy; "copy_file_vs_file_overwrite")]
+    // --- Collision: quit ---
     #[test_case(|s, t| {
+        PROMPT_SELECTION.set(CollisionOptions::Quit);
+        fs::write(s.join("file"), "").unwrap();
+        fs::write(t.join("file"), "").unwrap();
+    }, |_, _| {}, DeployType::Symlink => panics "Abort"; "quit_symlink")]
+    #[test_case(|s, t| {
+        PROMPT_SELECTION.set(CollisionOptions::Quit);
         fs::write(s.join("file"), "a").unwrap();
-        fs::write(t.join("file"), "a").unwrap();
-    }, |_, _| {
-        assert!(!CHECK_MANAGED.with_borrow(|b| *b));
-    }; "identical_file")]
-    #[test_case(|s, t| {
-        unix_fs::symlink(Path::new("/a"), s.join("file")).unwrap();
-        unix_fs::symlink(Path::new("/a"), t.join("file")).unwrap();
-    }, |_, _| {
-        assert!(!CHECK_MANAGED.with_borrow(|b| *b));
-    }; "identical_symlink")]
-    fn test_apply_copy(setup: impl FnOnce(&Path, &Path), assert: impl FnOnce(&Path, &Path)) {
+        fs::write(t.join("file"), "b").unwrap();
+    }, |_, _| {}, DeployType::Copy => panics "Abort"; "quit_copy")]
+    fn test_deploy(
+        setup: impl FnOnce(&Path, &Path),
+        assert: impl FnOnce(&Path, &Path),
+        deploy_type: DeployType,
+    ) {
         let (temp_dir, source_dir, target_dir) = setup_test(
             r#""" = """#,
             "",
-            r#""**/*" = { type = "copy", mode = "123" }"#,
+            match deploy_type {
+                DeployType::Symlink => "",
+                DeployType::Copy => r#""**/*" = { type = "copy" }"#,
+            },
             false,
         );
         setup(&source_dir, &target_dir);
@@ -707,6 +834,38 @@ mod tests {
         )
         .unwrap();
         assert(&source_dir, &target_dir);
+    }
+
+    #[test]
+    fn test_deploy_permission() {
+        let (temp_dir, source_dir, target_dir) = setup_test(
+            r#""" = """#,
+            "",
+            r#""**/*" = { type = "copy", mode = "123" }"#,
+            false,
+        );
+        fs::write(source_dir.join("file"), "").unwrap();
+        run(
+            source_dir.clone(),
+            Some(target_dir.clone()),
+            None,
+            &temp_dir.path().join("db"),
+            ApplyFlags {
+                dry_run: false,
+                clean_up: false,
+                prune_empty_dirs: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            target_dir
+                .join("file")
+                .metadata()
+                .unwrap()
+                .permissions()
+                .mode(),
+            0o100123
+        );
     }
 
     #[test]
