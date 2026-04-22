@@ -295,7 +295,7 @@ fn print_tree(path: &Path, node: &Node) -> Result<()> {
 fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool) -> Result<()> {
     match node {
         Node::Dir(children) => {
-            if create_parent_dir(target, db)? {
+            if deploy_dir(target, db)? {
                 return Ok(());
             }
             for (name, child) in children {
@@ -309,7 +309,7 @@ fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool)
     Ok(())
 }
 
-fn create_parent_dir(path: &Path, db: &Db) -> Result<bool> {
+fn deploy_dir(path: &Path, db: &Db) -> Result<bool> {
     if path.literal_exists() {
         if path.is_literal_dir() {
             return Ok(false);
@@ -334,6 +334,7 @@ fn is_identical(
     target: &Path,
     source: &Path,
     deploy_type: DeployType,
+    source_hash: &mut Option<u64>,
     target_hash: &mut Option<u64>,
 ) -> bool {
     match deploy_type {
@@ -346,15 +347,13 @@ fn is_identical(
                     .is_ok_and(|src_dest| fs::read_link(target).is_ok_and(|l| l == src_dest))
         }
         DeployType::Copy => {
-            target.is_literal_file()
-                && source.is_literal_file()
-                && hash_file(target).is_ok_and(|h1| {
-                    hash_file(source).is_ok_and(|h2| {
-                        let bool = h1 == h2;
-                        if bool {
-                            *target_hash = Some(h1);
-                        }
-                        bool
+            source.is_literal_file()
+                && target.is_literal_file()
+                && hash_file(source).is_ok_and(|h1| {
+                    *source_hash = Some(h1);
+                    hash_file(target).is_ok_and(|h2| {
+                        *target_hash = Some(h2);
+                        h1 == h2
                     })
                 })
         }
@@ -367,7 +366,9 @@ fn deploy_file(
     db: &Db,
     overwrite_identical: bool,
 ) -> Result<()> {
+    let mut source_hash = None;
     let mut target_hash = None;
+
     if target.literal_exists() {
         if target.is_literal_dir() {
             let choice = prompt_collision(target, false)?;
@@ -382,8 +383,13 @@ fn deploy_file(
                 }
             }
         } else {
-            let identical =
-                is_identical(target, &entry.source, entry.deploy_type, &mut target_hash);
+            let identical = is_identical(
+                target,
+                &entry.source,
+                entry.deploy_type,
+                &mut source_hash,
+                &mut target_hash,
+            );
             if identical {
                 if overwrite_identical {
                     update_db(target, entry, db, target_hash)?;
@@ -426,7 +432,8 @@ fn deploy_file(
             }
         }
     }
-    update_db(target, entry, db, target_hash)?;
+
+    update_db(target, entry, db, source_hash)?;
     Ok(())
 }
 
@@ -638,8 +645,7 @@ mod tests {
 
         setup(&source_dir, &target_dir);
         let (target, source, deploy_type) = paths(&source_dir, &target_dir);
-        let mut target_hash = None;
-        is_identical(&target, &source, deploy_type, &mut target_hash)
+        is_identical(&target, &source, deploy_type, &mut None, &mut None)
     }
 
     const FLAGS: ApplyFlags = ApplyFlags {
