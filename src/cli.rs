@@ -24,7 +24,7 @@ pub struct Cli {
     pub command: Commands,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone, Copy)]
 pub struct ApplyFlags {
     /// Print planned operations without mutating the filesystem.
     #[arg(short, long)]

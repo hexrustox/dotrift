@@ -157,7 +157,7 @@ mod tests {
     use tempfile::TempDir;
     use test_case::test_case;
 
-    // -- simple file moves (destination path variations) --
+    // --- simple file moves (destination path variations) ---
     #[test_case(|t, _| {
         fs::write(t.join("file"), "").unwrap();
         (t.join("file"), "file".into())
@@ -177,7 +177,7 @@ mod tests {
     }, |s, _| {
         assert!(s.join("file").exists());
     }; "move_normalized_path")]
-    // -- source type variations --
+    // --- source type variations ---
     #[test_case(|t, s| {
         fs::write(t.join("real"), "data").unwrap();
         unix_fs::symlink(t.join("real"), t.join("link")).unwrap();
@@ -197,14 +197,14 @@ mod tests {
         assert!(s.join("dir").is_dir());
         assert!(s.join("dir/sub/file").exists());
     }; "move_directory")]
-    // -- destination path depth --
+    // --- destination path depth ---
     #[test_case(|t, s| {
         fs::write(t.join("file"), "data").unwrap();
         (t.join("file"), s.join("a/b/c/file"))
     }, |s, _| {
         assert!(s.join("a/b/c/file").exists());
     }; "move_to_nested_dest")]
-    // -- failure cases --
+    // --- failure cases ---
     #[test_case(|_, s| {
         (s.join("nonexistent"), s.join("dest"))
     }, |_, _| {} => panics "move"; "fail_missing_source")]

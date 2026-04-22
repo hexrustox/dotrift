@@ -178,6 +178,7 @@ pub fn copy_recursive(from: &Path, to: &Path) -> Result<()> {
 
 pub fn clone_file(from: &Path, to: &Path) -> Result<()> {
     if from.is_literal_file() {
+        let _ = fs::remove_file(to);
         fs::copy(from, to).copy_file_error(from, to)?;
     } else if from.is_literal_symlink() {
         let _ = fs::remove_file(to);
@@ -285,7 +286,7 @@ pub mod tests {
         (temp_dir, source_dir, target_dir)
     }
 
-    // -- Symlink deploy type --
+    // --- Symlink deploy type ---
     #[test_case(
         |s, t| { unix_fs::symlink(s.join("file"), t.join("link")).unwrap(); },
         |t| t.join("link"),
@@ -319,7 +320,7 @@ pub mod tests {
             symlink_target: None,
         })
         => false; "symlink_target_missing")]
-    // -- Copy deploy type with hash --
+    // --- Copy deploy type with hash ---
     #[test_case(
         |_, t| { fs::write(t.join("file"), "").unwrap(); },
         |t| t.join("file"),
@@ -370,7 +371,7 @@ pub mod tests {
             symlink_target: None,
         })
         => false; "copy_hash_target_missing")]
-    // -- Copy deploy type with symlink_target --
+    // --- Copy deploy type with symlink_target ---
     #[test_case(
         |_, t| { unix_fs::symlink(Path::new("/a"), t.join("link")).unwrap(); },
         |t| t.join("link"),
@@ -415,7 +416,7 @@ pub mod tests {
             symlink_target: Some(PathBuf::from("/a")),
         })
         => false; "copy_symlink_target_missing")]
-    // -- Cross-type and corrupt --
+    // --- Cross-type and corrupt ---
     #[test_case(
         |s, t| {
             fs::write(s.join("file"), "").unwrap();
@@ -509,5 +510,210 @@ pub mod tests {
         let (f, t) = setup(temp_dir.path());
         copy_recursive(&f, &t).unwrap();
         assertion(&t);
+    }
+
+    // --- Managed entries removed from disk and DB ---
+    #[test_case(
+        |target, db| {
+            let source = target.parent().unwrap().join("source");
+            fs::create_dir_all(&source).unwrap();
+            unix_fs::symlink(source.join("file"), target.join("link")).unwrap();
+            db.insert_or_update(&DbEntry {
+                target_path: target.join("link"),
+                deploy_type: DeployType::Symlink,
+                source_path: source.join("file"),
+                hash: None,
+                symlink_target: None,
+            }).unwrap();
+        },
+        false, false, false,
+        |target, db| {
+            assert!(!target.join("link").is_symlink());
+            assert!(db.get_entry(&target.join("link")).unwrap().is_none());
+        };
+        "managed_symlink_removed"
+    )]
+    #[test_case(
+        |target, db| {
+            fs::write(target.join("file"), "data").unwrap();
+            db.insert_or_update(&DbEntry {
+                target_path: target.join("file"),
+                deploy_type: DeployType::Copy,
+                source_path: PathBuf::from("/src/file"),
+                hash: Some(hash_file(&target.join("file")).unwrap()),
+                symlink_target: None,
+            }).unwrap();
+        },
+        false, false, false,
+        |target, db| {
+            assert!(!target.join("file").exists());
+            assert!(db.get_entry(&target.join("file")).unwrap().is_none());
+        };
+        "managed_copy_removed"
+    )]
+    #[test_case(
+        |target, db| {
+            let source = target.parent().unwrap().join("source");
+            fs::create_dir_all(&source).unwrap();
+            unix_fs::symlink(Path::new("/a"), source.join("file")).unwrap();
+            unix_fs::symlink(Path::new("/a"), target.join("link")).unwrap();
+            db.insert_or_update(&DbEntry {
+                target_path: target.join("link"),
+                deploy_type: DeployType::Copy,
+                source_path: source.join("file"),
+                hash: None,
+                symlink_target: Some(PathBuf::from("/a")),
+            }).unwrap();
+        },
+        false, false, false,
+        |target, db| {
+            assert!(!target.join("link").is_symlink());
+            assert!(db.get_entry(&target.join("link")).unwrap().is_none());
+        };
+        "managed_copy_symlink_source_removed"
+    )]
+    // --- Unmanaged/missing: disk untouched, DB cleaned ---
+    #[test_case(
+        |target, db| {
+            fs::write(target.join("file"), "modified").unwrap();
+            db.insert_or_update(&DbEntry {
+                target_path: target.join("file"),
+                deploy_type: DeployType::Copy,
+                source_path: PathBuf::from("/src/file"),
+                hash: Some(999),
+                symlink_target: None,
+            }).unwrap();
+        },
+        false, false, false,
+        |target, db| {
+            assert!(target.join("file").exists());
+            assert!(db.get_entry(&target.join("file")).unwrap().is_none());
+        };
+        "unmanaged_file_stays"
+    )]
+    #[test_case(
+        |target, db| {
+            db.insert_or_update(&DbEntry {
+                target_path: target.join("ghost"),
+                deploy_type: DeployType::Copy,
+                source_path: PathBuf::from("/src/ghost"),
+                hash: Some(0),
+                symlink_target: None,
+            }).unwrap();
+        },
+        false, false, false,
+        |target, db| {
+            assert!(!target.join("ghost").exists());
+            assert!(db.get_entry(&target.join("ghost")).unwrap().is_none());
+        };
+        "missing_file_db_cleaned"
+    )]
+    // --- Portal entry skipped ---
+    #[test_case(
+        |target, db| {
+            fs::write(target.join("file"), "data").unwrap();
+            db.insert_or_update(&DbEntry {
+                target_path: target.join("file"),
+                deploy_type: DeployType::Copy,
+                source_path: PathBuf::from("/src/file"),
+                hash: Some(hash_file(&target.join("file")).unwrap()),
+                symlink_target: None,
+            }).unwrap();
+        },
+        true, false, false,
+        |target, db| {
+            assert!(target.join("file").exists());
+            assert!(db.get_entry(&target.join("file")).unwrap().is_some());
+        };
+        "portal_entry_skipped"
+    )]
+    // --- Dry run: no changes ---
+    #[test_case(
+        |target, db| {
+            fs::write(target.join("file"), "data").unwrap();
+            db.insert_or_update(&DbEntry {
+                target_path: target.join("file"),
+                deploy_type: DeployType::Copy,
+                source_path: PathBuf::from("/src/file"),
+                hash: Some(hash_file(&target.join("file")).unwrap()),
+                symlink_target: None,
+            }).unwrap();
+        },
+        false, true, false,
+        |target, db| {
+            assert!(target.join("file").exists());
+            assert!(db.get_entry(&target.join("file")).unwrap().is_some());
+        };
+        "dry_run_no_changes"
+    )]
+    // --- Prune empty dirs ---
+    #[test_case(
+        |target, db| {
+            fs::create_dir_all(target.join("a/b")).unwrap();
+            fs::write(target.join("a/b/file"), "data").unwrap();
+            db.insert_or_update(&DbEntry {
+                target_path: target.join("a/b/file"),
+                deploy_type: DeployType::Copy,
+                source_path: PathBuf::from("/src/file"),
+                hash: Some(hash_file(&target.join("a/b/file")).unwrap()),
+                symlink_target: None,
+            }).unwrap();
+        },
+        false, false, true,
+        |target, db| {
+            assert!(!target.join("a/b/file").exists());
+            assert!(!target.join("a/b").exists());
+            assert!(!target.join("a").exists());
+            assert!(db.get_entry(&target.join("a/b/file")).unwrap().is_none());
+        };
+        "prune_empty_dirs"
+    )]
+    #[test_case(
+        |target, db| {
+            fs::create_dir_all(target.join("a/b")).unwrap();
+            fs::write(target.join("a/b/managed"), "data").unwrap();
+            fs::write(target.join("a/b/other"), "keep").unwrap();
+            db.insert_or_update(&DbEntry {
+                target_path: target.join("a/b/managed"),
+                deploy_type: DeployType::Copy,
+                source_path: PathBuf::from("/src/file"),
+                hash: Some(hash_file(&target.join("a/b/managed")).unwrap()),
+                symlink_target: None,
+            }).unwrap();
+        },
+        false, false, true,
+        |target, db| {
+            assert!(!target.join("a/b/managed").exists());
+            assert!(target.join("a/b/other").exists());
+            assert!(target.join("a/b").exists());
+            assert!(db.get_entry(&target.join("a/b/managed")).unwrap().is_none());
+        };
+        "prune_stops_at_nonempty"
+    )]
+    fn test_clean_up(
+        setup: impl FnOnce(&Path, &Db),
+        in_portal: bool,
+        dry_run: bool,
+        prune_empty_dirs: bool,
+        assert: impl FnOnce(&Path, &Db),
+    ) {
+        let temp_dir = tempdir().unwrap();
+        let target_dir = temp_dir.path().join("target");
+        fs::create_dir_all(&target_dir).unwrap();
+        let db = Db::init(&temp_dir.path().join("db")).unwrap();
+        setup(&target_dir, &db);
+        let portal_entries = if in_portal {
+            let entries = db.get_all_entries().unwrap();
+            Some(
+                entries
+                    .into_iter()
+                    .map(|e| (e.target_path.clone(), PortalEntry::default()))
+                    .collect(),
+            )
+        } else {
+            None
+        };
+        clean_up(portal_entries.as_ref(), &db, dry_run, prune_empty_dirs).unwrap();
+        assert(&target_dir, &db);
     }
 }
