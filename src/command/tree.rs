@@ -1,18 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Component, PathBuf};
 
-use color_eyre::eyre::Result;
-use thiserror::Error;
+use color_eyre::eyre::{Result, eyre};
 
 use crate::command::apply::PortalEntry;
-
-#[derive(Debug, Error)]
-pub enum TreeError {
-    #[error("File exists when creating directory at `{0}`")]
-    FileAtDir(PathBuf),
-    #[error("Directory exists when creating file at `{0}`")]
-    DirAtFile(PathBuf),
-}
 
 #[derive(Debug)]
 pub enum Node {
@@ -26,7 +17,7 @@ impl Default for Node {
     }
 }
 
-pub fn build_tree(entries: HashMap<PathBuf, PortalEntry>) -> Result<Node, TreeError> {
+pub fn build_tree(entries: HashMap<PathBuf, PortalEntry>) -> Result<Node> {
     let mut root = Node::default();
 
     for (target_path, entry) in entries {
@@ -36,15 +27,11 @@ pub fn build_tree(entries: HashMap<PathBuf, PortalEntry>) -> Result<Node, TreeEr
     Ok(root)
 }
 
-fn insert_entry(
-    root: &mut Node,
-    target_path: PathBuf,
-    entry: PortalEntry,
-) -> Result<(), TreeError> {
+fn insert_entry(root: &mut Node, target_path: PathBuf, entry: PortalEntry) -> Result<()> {
     let mut components: Vec<_> = target_path.components().collect();
 
     if components.is_empty() {
-        panic!("Cannot insert empty target path")
+        return Err(eyre!("Cannot insert empty target path"));
     }
 
     if let Some(Component::RootDir) = components.first() {
@@ -64,10 +51,16 @@ fn insert_entry(
                     if let Some(existing) = children.get(&name) {
                         match existing {
                             Node::File { .. } => {
-                                todo!()
+                                return Err(eyre!(
+                                    "File already exists at `{}`",
+                                    target_path.display()
+                                ));
                             }
                             Node::Dir(_) => {
-                                return Err(TreeError::DirAtFile(target_path));
+                                return Err(eyre!(
+                                    "Directory exists when creating file at `{}`",
+                                    target_path.display()
+                                ));
                             }
                         }
                     }
@@ -79,7 +72,10 @@ fn insert_entry(
                 current = child;
             }
             Node::File { .. } => {
-                return Err(TreeError::FileAtDir(target_path));
+                return Err(eyre!(
+                    "File exists when creating directory at `{}`",
+                    target_path.display()
+                ));
             }
         }
     }
@@ -137,19 +133,11 @@ mod tests {
         assert_eq!(node_count(&tree), total + 1);
     }
 
-    #[test]
-    fn test_conflict_file_at_dir() {
+    #[test_case("/dir", "/dir/file" => panics "File exist"; "file")]
+    #[test_case("/dir/file", "/dir" => panics "Directory exist"; "directory")]
+    fn test_conflict(e1: &str, e2: &str) {
         let mut t = Node::default();
-        insert_entry(&mut t, "/dir".into(), Default::default()).unwrap();
-        let result = insert_entry(&mut t, "/dir/file".into(), Default::default());
-        assert!(matches!(result, Err(TreeError::FileAtDir(..))));
-    }
-
-    #[test]
-    fn test_conflict_dir_at_file() {
-        let mut t = Node::default();
-        insert_entry(&mut t, "/dir/file".into(), Default::default()).unwrap();
-        let result = insert_entry(&mut t, "/dir".into(), Default::default());
-        assert!(matches!(result, Err(TreeError::DirAtFile(..))));
+        insert_entry(&mut t, e1.into(), Default::default()).unwrap();
+        insert_entry(&mut t, e2.into(), Default::default()).unwrap();
     }
 }
