@@ -54,6 +54,7 @@
                     extensions = [
                       "rust-src"
                       "rust-analyzer"
+                      "llvm-tools-preview"
                     ];
                   }
                 );
@@ -63,6 +64,7 @@
                   cargo-deny
                   cargo-edit
                   cargo-machete
+                  cargo-llvm-cov
                   clang
                   codebook
                   mold
