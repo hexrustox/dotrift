@@ -18,7 +18,7 @@ use crate::{
         tree::{Node, build_tree},
         util::{
             GLOB_OPTION, PathKind, clean_up, clone_file, hash_file, is_glob, is_managed,
-            print_portal, resolve_target, stripping_prefix, validate_paths,
+            print_portal, resolve_target, stripping_prefix,
         },
     },
     config::{Config, DeployType, FileMode, Rules},
@@ -44,9 +44,7 @@ pub fn run(
 ) -> Result<()> {
     let config = Config::read(&source_dir)?;
 
-    let target_dir = resolve_target(target_override, &config)?.normalize();
-
-    validate_paths(&source_dir, &target_dir)?;
+    let target_dir = resolve_target(&source_dir, target_override, &config)?;
 
     let ignore_matcher =
         build_ignore(&config.ignore, &target_dir).wrap_err("Failed to build ignore matcher")?;

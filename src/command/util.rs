@@ -9,6 +9,7 @@ use std::{
 
 use color_eyre::eyre::{Context, Result, eyre};
 use glob::MatchOptions;
+use normalize_path::NormalizePath;
 use twox_hash::XxHash64;
 
 use crate::command::apply::PortalEntry;
@@ -24,36 +25,33 @@ pub const GLOB_OPTION: MatchOptions = MatchOptions {
     require_literal_leading_dot: false,
 };
 
-pub fn resolve_target(target_override: Option<PathBuf>, config: &Config) -> Result<PathBuf> {
-    let path = &target_override
+pub fn resolve_target(
+    source_dir: &Path,
+    target_override: Option<PathBuf>,
+    config: &Config,
+) -> Result<PathBuf> {
+    let target_dir = &target_override
         .or(config.target_dir.clone())
         .or(dirs::home_dir())
-        .ok_or_else(|| eyre!("Cannot determine target directory"))?;
+        .ok_or_else(|| eyre!("Cannot determine target directory"))?
+        .normalize();
 
-    if path.is_absolute() {
-        Ok(path.to_path_buf())
-    } else {
-        Err(eyre!(
+    if !target_dir.is_absolute() {
+        return Err(eyre!(
             "Target directory must be an absolute path: `{}`",
-            path.display()
-        ))
-    }
-}
-
-pub fn validate_paths(source_dir: &Path, target_dir: &Path) -> Result<()> {
-    if source_dir == target_dir {
-        return Err(eyre!("Source directory cannot equal target directory"));
+            target_dir.display()
+        ));
     }
 
     if target_dir.starts_with(source_dir) {
         return Err(eyre!("Target directory cannot be inside source directory"));
     }
 
-    Ok(())
+    Ok(target_dir.to_path_buf())
 }
 
 pub fn is_glob(pattern: &str) -> bool {
-    pattern.contains(['*', '?', '['])
+    pattern.contains(['*', '?', '[', ']'])
 }
 
 pub fn stripping_prefix(glob_pattern: &str) -> String {

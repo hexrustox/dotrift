@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    io::{self, Write},
+    io::{self, IsTerminal, Write},
 };
 
 use crossterm::{
@@ -71,12 +71,18 @@ where
     }
 
     pub fn interact(self) -> io::Result<I> {
+        let mut select = self.default.unwrap_or_default();
+
+        let stdin = io::stdin();
+        if !stdin.is_terminal() {
+            return Ok(select);
+        }
+
         let mut stdout = io::stdout();
         queue!(stdout, cursor::Hide, cursor::SavePosition)?;
         stdout.flush()?;
         crossterm::terminal::enable_raw_mode()?;
 
-        let mut select = self.default.unwrap_or_default();
         loop {
             queue!(
                 stdout,
