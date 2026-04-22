@@ -11,7 +11,7 @@ use normalize_path::NormalizePath;
 
 use crate::{
     cli::{AddFlags, OpenEditor},
-    command::util::{GLOB_OPTION, copy_recursive, is_glob},
+    command::util::{GLOB_OPTION, PathLiteral, copy_recursive, is_glob},
     config::Config,
     error::{GlobError, IoError},
     global_config::GlobalConfig,
@@ -33,7 +33,7 @@ pub fn run(
     let Ok(dest_rel) = destination.strip_prefix(&source_dir) else {
         return Err(eyre!("Destination must be inside source directory"));
     };
-    if destination.exists() && !flags.force {
+    if destination.literal_exists() && !flags.force {
         return Err(eyre!("`{}` already exists", destination.display()));
     }
 

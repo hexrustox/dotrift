@@ -17,7 +17,7 @@ use crate::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
         util::{
-            GLOB_OPTION, PathKind, SafeStripPrefix, clean_up, clone_file, hash_file, is_glob,
+            GLOB_OPTION, PathLiteral, SafeStripPrefix, clean_up, clone_file, hash_file, is_glob,
             is_managed, print_portal, resolve_target, strip_prefix_filter_glob,
         },
     },
@@ -150,7 +150,7 @@ fn resolve_glob_portal(
 
     for entry in glob_with(&full_pattern_str, GLOB_OPTION).glob_error()? {
         let source_path = entry.wrap_err("Failed to read glob match")?;
-        if source_path.is_dir_kind() {
+        if source_path.is_literal_dir() {
             continue;
         }
 
@@ -184,14 +184,14 @@ fn resolve_literal_portal(
 ) -> Result<()> {
     let source_path = source_dir.join(pattern);
 
-    if !source_path.exists() {
+    if !source_path.literal_exists() {
         return Err(eyre!(
             "Source path does not exist: `{}`",
             source_path.display()
         ));
     }
 
-    if source_path.is_dir_kind() {
+    if source_path.is_literal_dir() {
         for entry in WalkDir::new(&source_path)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -310,8 +310,8 @@ fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool)
 }
 
 fn create_parent_dir(path: &Path, db: &Db) -> Result<bool> {
-    if path.exists() {
-        if path.is_dir_kind() {
+    if path.literal_exists() {
+        if path.is_literal_dir() {
             return Ok(false);
         }
         let choice = prompt_collision(path, true)?;
@@ -338,16 +338,16 @@ fn is_identical(
 ) -> bool {
     match deploy_type {
         DeployType::Symlink => {
-            target.is_symlink_kind() && fs::read_link(target).is_ok_and(|l| l == source)
+            target.is_literal_symlink() && fs::read_link(target).is_ok_and(|l| l == source)
         }
-        DeployType::Copy if source.is_symlink_kind() => {
-            target.is_symlink_kind()
+        DeployType::Copy if source.is_literal_symlink() => {
+            target.is_literal_symlink()
                 && fs::read_link(source)
                     .is_ok_and(|src_dest| fs::read_link(target).is_ok_and(|l| l == src_dest))
         }
         DeployType::Copy => {
-            target.is_file_kind()
-                && source.is_file_kind()
+            target.is_literal_file()
+                && source.is_literal_file()
                 && hash_file(target).is_ok_and(|h1| {
                     *target_hash = Some(h1);
                     hash_file(source).is_ok_and(|h2| h1 == h2)
@@ -363,8 +363,8 @@ fn deploy_file(
     overwrite_identical: bool,
 ) -> Result<()> {
     let mut target_hash = None;
-    if target.exists() {
-        if target.is_dir_kind() {
+    if target.literal_exists() {
+        if target.is_literal_dir() {
             let choice = prompt_collision(target, false)?;
             match choice {
                 CollisionOptions::Skip => return Ok(()),
@@ -412,7 +412,7 @@ fn deploy_file(
         DeployType::Copy => {
             clone_file(&entry.source, target)?;
             if let Some(mode) = entry.mode
-                && target.is_file_kind()
+                && target.is_literal_file()
             {
                 fs::set_permissions(target, fs::Permissions::from_mode(mode.0 as u32))
                     .wrap_err_with(|| {
@@ -429,12 +429,14 @@ fn update_db(target: &Path, entry: &PortalEntry, db: &Db, target_hash: Option<u6
     db.insert_or_update(&DbEntry {
         deploy_type: entry.deploy_type,
         source_path: entry.source.clone(),
-        hash: if target.is_file_kind() {
+        hash: if target.is_literal_file() {
             Some(target_hash.unwrap_or(hash_file(target)?))
         } else {
             None
         },
-        symlink_target: if entry.deploy_type == DeployType::Copy && entry.source.is_symlink_kind() {
+        symlink_target: if entry.deploy_type == DeployType::Copy
+            && entry.source.is_literal_symlink()
+        {
             Some(fs::read_link(&entry.source).read_link_error(&entry.source)?)
         } else {
             None
@@ -877,6 +879,6 @@ mod tests {
         )
         .unwrap();
 
-        assert!(!target_dir.join("file").exists(),);
+        assert!(!target_dir.join("file").exists());
     }
 }
