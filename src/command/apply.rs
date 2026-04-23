@@ -437,12 +437,12 @@ fn deploy_file(
     Ok(())
 }
 
-fn update_db(target: &Path, entry: &PortalEntry, db: &Db, target_hash: Option<u64>) -> Result<()> {
+fn update_db(target: &Path, entry: &PortalEntry, db: &Db, source_hash: Option<u64>) -> Result<()> {
     db.insert_or_update(&DbEntry {
         deploy_type: entry.deploy_type,
         source_path: entry.source.clone(),
         hash: if target.is_literal_file() {
-            Some(target_hash.unwrap_or(hash_file(target)?))
+            Some(source_hash.unwrap_or(hash_file(&entry.source)?))
         } else {
             None
         },
@@ -518,6 +518,8 @@ mod tests {
 "a.*" = """# => portal_entries!(("a.txt", "a.txt"), ("a.txt", "A.txt")); "multiple_same_source")]
     #[test_case(r#""a.txt" = "same"
 "b.txt" = "same""# => panics "collision"; "multiple_same_target")]
+    #[test_case(r#""**/*" = "."
+"a.txt" = "a.txt""# => panics "collision"; "literal_glob_same_target")]
     #[test_case(r#""foo" = "bar""# => panics "does not exist"; "non_existing")]
     fn test_resolve_portals(portal: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = setup_test(portal, "", "", true);
@@ -724,6 +726,18 @@ mod tests {
         },
         DeployType::Copy; "copy_fresh"
     )]
+    #[test_case(
+        |s, _| {
+            fs::create_dir_all(s.join("dir/sub")).unwrap();
+            fs::write(s.join("dir/file1"), "a").unwrap();
+            fs::write(s.join("dir/sub/file2"), "b").unwrap();
+        },
+        |_, t| {
+            assert_eq!(fs::read_to_string(t.join("dir/file1")).unwrap(), "a");
+            assert_eq!(fs::read_to_string(t.join("dir/sub/file2")).unwrap(), "b");
+        },
+        DeployType::Copy; "copy_nested_dir_fresh"
+    )]
     // --- Identical ---
     #[test_case(
         |s, t| {
@@ -903,21 +917,52 @@ mod tests {
     // --- Collision: quit ---
     #[test_case(
         |s, t| {
+            fs::write(s.join("file1"), "").unwrap();
             PROMPT_SELECTION.set(CollisionOptions::Quit);
-            fs::write(s.join("file"), "").unwrap();
-            fs::write(t.join("file"), "").unwrap();
+            fs::write(s.join("file2"), "").unwrap();
+            fs::write(t.join("file2"), "").unwrap();
         },
-        |_, _| {},
+        |_, t| {
+            assert!(t.join("file1").exists());
+            assert!(!t.join("file2").exists());
+        },
         DeployType::Symlink => panics "Abort"; "quit_symlink"
     )]
     #[test_case(
         |s, t| {
+            fs::write(s.join("file1"), "").unwrap();
             PROMPT_SELECTION.set(CollisionOptions::Quit);
             fs::write(s.join("file"), "a").unwrap();
             fs::write(t.join("file"), "b").unwrap();
         },
-        |_, _| {},
+        |_, t| {
+            assert!(t.join("file1").exists());
+            assert!(!t.join("file2").exists());
+        },
         DeployType::Copy => panics "Abort"; "quit_copy"
+    )]
+    // --- Symlink to dir ---
+    #[test_case(
+        |s, t| {
+            fs::create_dir_all(t.join("real_dir")).unwrap();
+            unix_fs::symlink(t.join("real_dir"), s.join("link_dir")).unwrap();
+        },
+        |s, t| {
+            assert!(t.join("link_dir").is_symlink());
+            assert_eq!(fs::read_link(t.join("link_dir")).unwrap(), s.join("link_dir"));
+        },
+        DeployType::Symlink; "symlink_to_dir_as_source"
+    )]
+    #[test_case(
+        |s, t| {
+            fs::create_dir_all(t.join("real_dir")).unwrap();
+            unix_fs::symlink(t.join("real_dir"), s.join("link_dir")).unwrap();
+        },
+        |_, t| {
+            assert!(t.join("link_dir").is_symlink());
+            assert_eq!(fs::read_link(t.join("link_dir")).unwrap(), t.join("real_dir"));
+        },
+        DeployType::Copy; "copy_symlink_to_dir_as_source"
     )]
     fn test_apply(
         setup: impl FnOnce(&Path, &Path),

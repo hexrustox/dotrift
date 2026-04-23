@@ -79,37 +79,21 @@ impl TryFrom<String> for FileMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
-    #[test]
-    fn mode_valid_octal() {
-        assert_eq!(
-            FileMode::try_from("000".to_string()).unwrap(),
-            FileMode(0o000)
-        );
-        assert_eq!(
-            FileMode::try_from("600".to_string()).unwrap(),
-            FileMode(0o600)
-        );
-        assert_eq!(
-            FileMode::try_from("755".to_string()).unwrap(),
-            FileMode(0o755)
-        );
-        assert_eq!(
-            FileMode::try_from("777".to_string()).unwrap(),
-            FileMode(0o777)
-        );
+    #[test_case("000", 0o0)]
+    #[test_case("600", 0o600)]
+    #[test_case("755", 0o755)]
+    #[test_case("777", 0o777)]
+    fn test_octal(str: &str, n: u16) {
+        assert_eq!(FileMode::try_from(str.to_string()).unwrap(), FileMode(n));
     }
 
-    #[test]
-    fn mode_invalid_octal() {
-        assert!(FileMode::try_from("abc".to_string()).is_err());
-        assert!(FileMode::try_from("800".to_string()).is_err());
-        assert!(FileMode::try_from("99".to_string()).is_err());
-    }
-
-    #[test]
-    fn mode_exceeds_max() {
-        assert!(FileMode::try_from("1000".to_string()).is_err());
-        assert!(FileMode::try_from("7777".to_string()).is_err());
+    #[test_case("abc")]
+    #[test_case("800")]
+    #[test_case("99")]
+    #[test_case("1000")]
+    fn test_invalid_octal(str: &str) {
+        FileMode::try_from(str.to_string()).unwrap_err();
     }
 }

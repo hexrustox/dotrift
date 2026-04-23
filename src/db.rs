@@ -204,7 +204,10 @@ mod tests {
 
         assert!(db.get_entry(&entry.target_path).unwrap().is_none());
         db.insert_or_update(&entry).unwrap();
-        assert!(db.get_entry(&entry.target_path).unwrap().is_some());
+        assert_eq!(
+            db.get_entry(&entry.target_path).unwrap(),
+            Some(DbEntry::default())
+        );
     }
 
     #[test]
@@ -221,6 +224,24 @@ mod tests {
         }
 
         assert_eq!(db.get_all_entries().unwrap().len(), 26);
+    }
+
+    #[test]
+    fn test_db_update() {
+        let temp_dir = tempdir().unwrap();
+        let db = Db::init(&temp_dir.path().join("db")).unwrap();
+
+        let entry = DbEntry::default();
+        let new_entry = DbEntry {
+            target_path: entry.target_path.clone(),
+            hash: Some(1),
+            ..Default::default()
+        };
+
+        db.insert_or_update(&entry).unwrap();
+        db.insert_or_update(&new_entry).unwrap();
+        assert_eq!(db.get_entry(&entry.target_path).unwrap(), Some(new_entry));
+        assert_eq!(db.get_all_entries().iter().len(), 1);
     }
 
     #[test]
@@ -257,6 +278,8 @@ mod tests {
         })
         .unwrap();
 
+        db.delete_entry_with_prefix(Path::new("/ab")).unwrap();
+        assert_eq!(db.get_all_entries().unwrap().len(), 3);
         db.delete_entry_with_prefix(Path::new("/a")).unwrap();
         assert_eq!(db.get_all_entries().unwrap().len(), 1);
     }

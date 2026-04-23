@@ -41,35 +41,31 @@ pub fn run(
     let mut open_editor = if let Some(open_editor) = flags.editor {
         matches!(open_editor, OpenEditor::Always)
     } else {
-        match Config::read(&source_dir) {
-            Ok(config) => {
-                let mut open_editor = true;
-                for (pattern, _) in config.portal {
-                    if is_glob(&pattern) && {
-                        let glob = Pattern::new(&pattern).glob_error()?;
-                        glob.matches_path_with(dest_rel, GLOB_OPTION)
-                    } || *dest_rel == *pattern
-                        || {
-                            let mut bool = false;
-                            let mut current = dest_rel.parent();
-                            while let Some(parent) = current {
-                                if *parent == *pattern {
-                                    bool = true;
-                                    break;
-                                }
-                                current = parent.parent();
-                            }
-                            bool
+        let config = Config::read(&source_dir)?;
+        let mut open_editor = true;
+        for (pattern, _) in config.portal {
+            if is_glob(&pattern) && {
+                let glob = Pattern::new(&pattern).glob_error()?;
+                glob.matches_path_with(dest_rel, GLOB_OPTION)
+            } || *dest_rel == *pattern
+                || {
+                    let mut bool = false;
+                    let mut current = dest_rel.parent();
+                    while let Some(parent) = current {
+                        if *parent == *pattern {
+                            bool = true;
+                            break;
                         }
-                    {
-                        open_editor = false;
-                        break;
+                        current = parent.parent();
                     }
+                    bool
                 }
-                open_editor
+            {
+                open_editor = false;
+                break;
             }
-            Err(_) => true,
         }
+        open_editor
     };
 
     #[cfg(test)]
@@ -154,91 +150,162 @@ mod tests {
     use crate::command::util::tests::setup_test;
 
     use super::*;
-    use tempfile::TempDir;
     use test_case::test_case;
 
+    const FLAGS: AddFlags = AddFlags {
+        copy: false,
+        force: false,
+        editor: None,
+    };
+
+    fn add(source_dir: &Path, file: &Path, destination: &Path, flags: AddFlags) {
+        run(
+            source_dir.to_path_buf(),
+            None,
+            file.to_path_buf(),
+            destination.to_path_buf(),
+            flags,
+        )
+        .unwrap();
+    }
+
     // --- simple file moves (destination path variations) ---
-    #[test_case(|t, _| {
-        fs::write(t.join("file"), "").unwrap();
-        (t.join("file"), "file".into())
-    }, |s, _| {
-        assert!(s.join("file").exists());
-    }; "move_relative_path")]
-    #[test_case(|t, s| {
-        fs::write(t.join("file"), "").unwrap();
-        (t.join("file"), s.join("file"))
-    }, |s, t| {
-        assert!(!t.join("file").exists());
-        assert!(s.join("file").exists());
-    }; "move_absolute_path")]
-    #[test_case(|t, _| {
-        fs::write(t.join("file"), "").unwrap();
-        (t.join("file"), "./dir/../file".into())
-    }, |s, _| {
-        assert!(s.join("file").exists());
-    }; "move_normalized_path")]
+    #[test_case(
+        |t, _| {
+            fs::write(t.join("file"), "").unwrap();
+            (t.join("file"), "file".into())
+        },
+        |s, t| {
+            assert!(!t.join("file").exists());
+            assert!(s.join("file").exists());
+        }; "move_relative_path"
+    )]
+    #[test_case(
+        |t, s| {
+            fs::write(t.join("file"), "").unwrap();
+            (t.join("file"), s.join("file"))
+        },
+        |s, t| {
+            assert!(!t.join("file").exists());
+            assert!(s.join("file").exists());
+        }; "move_absolute_path"
+    )]
+    #[test_case(
+        |t, _| {
+            fs::write(t.join("file"), "").unwrap();
+            (t.join("file"), "./dir/../file".into())
+        },
+        |s, _| {
+            assert!(s.join("file").exists());
+        }; "move_normalized_path"
+    )]
     // --- source type variations ---
-    #[test_case(|t, s| {
-        fs::write(t.join("real"), "data").unwrap();
-        unix_fs::symlink(t.join("real"), t.join("link")).unwrap();
-        (t.join("link"), s.join("link"))
-    }, |s, t| {
-        assert!(s.join("link").is_symlink());
-        assert_eq!(
-            fs::read_link(s.join("link")).unwrap(),
-            t.join("real")
-        );
-    }; "move_symlink")]
-    #[test_case(|t, s| {
-        fs::create_dir_all(t.join("dir/sub")).unwrap();
-        fs::write(t.join("dir/sub/file"), "data").unwrap();
-        (t.join("dir"), s.join("dir"))
-    }, |s, _| {
-        assert!(s.join("dir").is_dir());
-        assert!(s.join("dir/sub/file").exists());
-    }; "move_directory")]
+    #[test_case(
+        |t, s| {
+            fs::write(t.join("real"), "data").unwrap();
+            unix_fs::symlink(t.join("real"), t.join("link")).unwrap();
+            (t.join("link"), s.join("link"))
+        },
+        |s, t| {
+            assert!(s.join("link").is_symlink());
+            assert_eq!(
+                fs::read_link(s.join("link")).unwrap(),
+                t.join("real")
+            );
+        }; "move_symlink"
+    )]
+    #[test_case(
+        |t, s| {
+            fs::create_dir_all(t.join("dir/sub")).unwrap();
+            fs::write(t.join("dir/sub/file"), "data").unwrap();
+            (t.join("dir"), s.join("dir"))
+        },
+        |s, _| {
+            assert!(s.join("dir").is_dir());
+            assert!(s.join("dir/sub/file").exists());
+        }; "move_directory"
+    )]
     // --- destination path depth ---
-    #[test_case(|t, s| {
-        fs::write(t.join("file"), "data").unwrap();
-        (t.join("file"), s.join("a/b/c/file"))
-    }, |s, _| {
-        assert!(s.join("a/b/c/file").exists());
-    }; "move_to_nested_dest")]
+    #[test_case(
+        |t, s| {
+            fs::write(t.join("file"), "data").unwrap();
+            (t.join("file"), s.join("a/b/c/file"))
+        },
+        |s, _| {
+            assert!(s.join("a/b/c/file").exists());
+        }; "move_to_nested_dest"
+    )]
     // --- failure cases ---
-    #[test_case(|_, s| {
-        (s.join("nonexistent"), s.join("dest"))
-    }, |_, _| {} => panics "move"; "fail_missing_source")]
-    #[test_case(|t, s| {
-        fs::write(t.join("file"), "").unwrap();
-        fs::write(s.join("file"), "").unwrap();
-        (t.join("file"), s.join("file"))
-    }, |_, _| {} => panics "already exists"; "fail_dest_exists")]
-    #[test_case(|t, _| {
-        (t.join("file"), "../file".into())
-    }, |_, _| {} => panics "inside"; "fail_escape_source")]
+    #[test_case(
+        |_, s| {
+            (s.join("nonexistent"), s.join("dest"))
+        },
+        |_, _| {} => panics "move"; "fail_missing_source"
+    )]
+    #[test_case(
+        |t, s| {
+            fs::write(t.join("file"), "").unwrap();
+            fs::write(s.join("file"), "").unwrap();
+            (t.join("file"), s.join("file"))
+        },
+        |_, _| {} => panics "already exists"; "fail_dest_exists"
+    )]
+    #[test_case(
+        |t, _| {
+            (t.join("file"), "../file".into())
+        },
+        |_, _| {} => panics "inside"; "fail_escape_source"
+    )]
     fn test_add_move(
         setup: impl FnOnce(&Path, &Path) -> (PathBuf, PathBuf),
         assertion: impl FnOnce(&Path, &Path),
     ) {
-        let temp_dir = TempDir::new().unwrap();
-        let source_dir = temp_dir.path().join("source");
-        fs::create_dir_all(&source_dir).unwrap();
+        let (temp_dir, source_dir, _) = setup_test("", "", "", false);
         let (f, d) = setup(temp_dir.path(), &source_dir);
 
-        run(
-            source_dir.clone(),
-            None,
-            f,
-            d,
-            AddFlags {
-                copy: false,
-                force: false,
-                editor: None,
-            },
-        )
-        .unwrap();
+        add(&source_dir, &f, &d, FLAGS);
 
         assertion(&source_dir, temp_dir.path());
+    }
+
+    #[test]
+    fn test_add_copy() {
+        let (temp_dir, source_dir, _) = setup_test("", "", "", false);
+
+        let f = temp_dir.path().join("file");
+        let d = source_dir.join("file");
+        fs::write(&f, "").unwrap();
+        add(
+            &source_dir,
+            &f,
+            &d,
+            AddFlags {
+                copy: true,
+                ..FLAGS
+            },
+        );
+        assert!(f.exists());
+        assert!(d.exists());
+    }
+
+    #[test]
+    fn test_add_force() {
+        let (temp_dir, source_dir, _) = setup_test("", "", "", false);
+
+        let f = temp_dir.path().join("file");
+        let d = source_dir.join("file");
+        fs::write(&f, "a").unwrap();
+        fs::write(&d, "b").unwrap();
+        add(
+            &source_dir,
+            &f,
+            &d,
+            AddFlags {
+                force: true,
+                ..FLAGS
+            },
+        );
+        assert_eq!(fs::read_to_string(d).unwrap(), "a");
     }
 
     #[test_case(
@@ -411,18 +478,31 @@ mod tests {
 
         let path = temp_dir.path().join("file");
         fs::write(&path, "").unwrap();
-        run(
-            source_dir.clone(),
-            None,
-            path,
-            source_dir.join(dest.into()),
+
+        add(&source_dir, &path, &source_dir.join(dest.into()), FLAGS);
+
+        OPEN_EDITOR.with_borrow(|b| *b)
+    }
+
+    #[test_case("", "file", OpenEditor::Never => false; "mismatch_never")]
+    #[test_case(r#""" = """#, "file", OpenEditor::Never => false; "match_never")]
+    #[test_case("", "file", OpenEditor::Always => true; "mismatch_always")]
+    #[test_case(r#""" = """#, "file", OpenEditor::Always => true; "match_always")]
+    fn test_open_editor_flag(portal: &str, dest: impl Into<PathBuf>, flag: OpenEditor) -> bool {
+        let (temp_dir, source_dir, _) = setup_test(portal, "", "", false);
+
+        let path = temp_dir.path().join("file");
+        fs::write(&path, "").unwrap();
+
+        add(
+            &source_dir,
+            &path,
+            &source_dir.join(dest.into()),
             AddFlags {
-                copy: false,
-                force: false,
-                editor: None,
+                editor: Some(flag),
+                ..FLAGS
             },
-        )
-        .unwrap();
+        );
 
         OPEN_EDITOR.with_borrow(|b| *b)
     }
