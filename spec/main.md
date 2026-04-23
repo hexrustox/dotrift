@@ -338,14 +338,14 @@ Reverses the `apply` process, removing managed files from the target. Config mus
 
 If PATH is a directory:
 - *Standard mode:* Recursively copy/move directory contents (preserve structure). Apply pipeline to directory as unit.
-- *Re-import mode:* Walk directory (skip subdirs, files only). For each file, apply pipeline individually.
+- *Re-import mode:* Walk directory. For each file, apply pipeline individually.
 
 Otherwise (single file/symlink):
 
 1. **Normalize PATH:** Resolve to absolute path.
 2. **Resolve Destination:**
    - *Standard mode* (DESTINATION provided): If relative, join `source-dir` + DESTINATION. If absolute, use as-is. Normalize. Error if escapes source-dir.
-   - *Re-import mode* (DESTINATION omitted): Query DB for `target_path` == PATH. Error if not found. Set destination to `entry.source_path`.
+   - *Re-import mode* (DESTINATION omitted): Query DB for `target_path` == PATH. Error if not found, warning if PATH is a directory. Set destination to `entry.source_path`.
 3. **Editor Decision:**
    - `--editor never`: skip.
    - `--editor always`: open editor. Error if no editor found.

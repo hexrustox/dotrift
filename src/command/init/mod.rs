@@ -1,3 +1,4 @@
+// TODO print more
 use std::{fs, path::PathBuf};
 
 use color_eyre::eyre::{Context, eyre};

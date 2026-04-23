@@ -45,7 +45,7 @@ pub fn run(
         match db.get_entry(&path)? {
             Some(entry) => entry.source_path,
             None => {
-                return Ok(());
+                return Err(eyre!("todo"));
             }
         }
     };
@@ -105,14 +105,18 @@ fn reimport_directory(
             Some(entry) => {
                 let dest = entry.source_path;
                 if !dest.starts_with(&source_dir) {
-                    return Err(eyre!("Destination must be inside source directory"));
+                    println!("todo");
+                    continue;
                 };
                 if dest.literal_exists() && !flags.force {
-                    return Err(eyre!("`{}` already exists", dest.display()));
+                    println!("todo");
+                    continue;
                 }
                 entries.push((entry_path, dest));
             }
-            None => {}
+            None => {
+                println!("todo");
+            }
         }
     }
 
@@ -216,9 +220,7 @@ fn launch_editor(source_dir: &Path, config_override: &Option<PathBuf>) -> Result
 
 fn walk_files(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
-    for entry in fs::read_dir(dir)
-        .wrap_err_with(|| format!("Failed to read directory `{}`", dir.display()))?
-    {
+    for entry in fs::read_dir(dir).read_dir_error(dir)? {
         let path = entry?.path();
         if path.is_literal_file() || path.is_literal_symlink() {
             files.push(path);
@@ -492,6 +494,7 @@ mod tests {
             ])
         },
         |s| {
+            assert!(!s.join("dir").exists());
             assert!(s.join("file").exists());
         }; "reimport_directory_partial"
     )]

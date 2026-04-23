@@ -273,6 +273,7 @@ fn apply_rules(
 }
 
 fn print_tree(path: &Path, node: &Node) -> Result<()> {
+    // TODO print more
     match node {
         Node::Dir(children) => {
             if path != Path::new("/") {

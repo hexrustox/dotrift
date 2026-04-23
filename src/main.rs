@@ -46,7 +46,6 @@ fn main() -> color_eyre::Result<()> {
             &db_path(),
         )
         .wrap_err("Failed to add file")?,
-        Commands::Diff { .. } => {}
         Commands::Status { command } => match command {
             StatusSubcommand::List { file } => {
                 status::list(full_path(file)?, &db_path()).wrap_err("Failed to list status")?;
@@ -60,6 +59,7 @@ fn main() -> color_eyre::Result<()> {
     Ok(())
 }
 
+// TODO refactor
 fn full_path(path: Option<PathBuf>) -> color_eyre::Result<Option<PathBuf>> {
     if let Some(path) = path {
         if path.is_absolute() {

@@ -8,6 +8,7 @@ use crate::error::{IoError, SerdeError};
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct GlobalConfig {
     pub overwrite_identical: bool,
+    // TODO provide var to expand
     pub editor_command: Option<CommandConfig>,
 }
 
