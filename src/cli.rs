@@ -50,7 +50,7 @@ pub struct UnapplyFlags {
     pub prune_empty_dirs: bool,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone, Copy)]
 pub struct AddFlags {
     /// Copy instead of moving the file or directory to the destination
     #[arg(short, long)]
@@ -65,7 +65,7 @@ pub struct AddFlags {
     pub editor: Option<OpenEditor>,
 }
 
-#[derive(ValueEnum, Clone)]
+#[derive(ValueEnum, Clone, Copy)]
 pub enum OpenEditor {
     Always,
     Never,
@@ -101,10 +101,10 @@ pub enum Commands {
         #[command(flatten)]
         flags: AddFlags,
         /// Path to existing file or directory.
-        file: PathBuf,
+        path: PathBuf,
 
-        /// Path to move the file or directory to. Relative to the source directory if path is not absolute.
-        destination: PathBuf,
+        /// Path to move the file or directory to. Relative to the source directory if path is not absolute. Omit for re-import mode.
+        destination: Option<PathBuf>,
     },
 
     /// Prints content differences between source and target file.

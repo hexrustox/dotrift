@@ -9,6 +9,7 @@ pub trait IoError<T> {
     fn copy_file_error(self, p1: &Path, p2: &Path) -> Result<T>;
     fn symlink_error(self, p: &Path) -> Result<T>;
     fn read_link_error(self, p: &Path) -> Result<T>;
+    fn read_dir_error(self, p: &Path) -> Result<T>;
     fn create_dir_error(self, p: &Path) -> Result<T>;
     fn remove_dir_error(self, p: &Path) -> Result<T>;
 }
@@ -28,6 +29,9 @@ impl<T> IoError<T> for io::Result<T> {
     }
     fn read_link_error(self, p: &Path) -> Result<T> {
         self.wrap_err_with(|| format!("Failed to read symlink `{}`", p.display()))
+    }
+    fn read_dir_error(self, p: &Path) -> Result<T> {
+        self.wrap_err_with(|| format!("Failed to read directory `{}`", p.display()))
     }
     fn create_dir_error(self, p: &Path) -> Result<T> {
         self.wrap_err_with(|| format!("Failed to create directory `{}`", p.display()))

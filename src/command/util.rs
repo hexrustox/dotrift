@@ -161,10 +161,7 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
 pub fn copy_recursive(from: &Path, to: &Path) -> Result<()> {
     if from.is_literal_dir() {
         fs::create_dir_all(to).create_dir_error(to)?;
-        for entry in fs::read_dir(from)
-            .wrap_err_with(|| format!("Failed to read directory `{}`", from.display()))?
-            .flatten()
-        {
+        for entry in fs::read_dir(from).read_dir_error(from)?.flatten() {
             let path = entry.path();
             let suffix = path.safe_strip_prefix(from);
             copy_recursive(&path, &to.join(suffix))?;

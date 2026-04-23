@@ -323,27 +323,37 @@ Reverses the `apply` process, removing managed files from the target. Config mus
 
 ## `add` Command
 
-**Usage:** `dotrift add [OPTIONS] <PATH> <DESTINATION>`
+**Usage:** `dotrift add [OPTIONS] <PATH> [DESTINATION]`
 
 **Arguments:**
-* `<PATH>`: Absolute path to existing file, directory, or symlink on disk. Any file type accepted; move/copy preserves the type.
-* `<DESTINATION>`: Path in source directory. Relative to source-dir if not absolute.
+* `<PATH>`: Path to existing file, directory, or symlink on disk. If relative, resolved against cwd.
+* `[DESTINATION]`: Optional path in source directory. When omitted, re-import mode (destination derived from DB).
 
 **Options:**
-* `-c, --copy`: Copy instead of moving the file or directory to the destination.
-* `-f, --force`: Remove all obstructions (files, directories — recursively including non-empty directories) blocking the move/copy.
-* `-e, --editor <WHEN>`: Whether to open `dotrift.toml` with your editor. Values: `always`, `never`.
+* `-c, --copy`: Copy instead of moving. Implicit in re-import mode.
+* `-f, --force`: Remove obstructions blocking the move/copy.
+* `-e, --editor <WHEN>`: Values: `always`, `never`. Default: open editor if no portal entry matches destination.
 
 ### Execution Pipeline
-1. **Resolve Destination:** If relative, join `source-dir` + `<DESTINATION>`. Normalize path (see Path Normalization).
-2. **Validate:** Error if resolved destination escapes the source directory (see Path Traversal Clamping).
-3. **Collision Check:** Error if resolved destination path already exists on disk (unless `--force`).
-4. **Editor Decision:**
-   - If `--editor never`: skip editor.
-   - If `--editor always`: open editor. Error if no editor found.
-   - If auto (no flag): open editor only if destination does not match any existing portal entry. A match occurs when: a literal key equals the destination path, a literal key is an ancestor of the destination path, or a glob key matches the destination path entirely. Error if no editor found.
-   - Editor command resolved per Global Configuration.
-5. **Clone File:** Create destination parent dirs. If `--copy`, recursively copy source to destination (dirs/symlinks preserved). Else, move source to destination. If the move crosses filesystem boundaries, error (do not fall back to copy+delete).
+
+If PATH is a directory:
+- *Standard mode:* Recursively copy/move directory contents (preserve structure). Apply pipeline to directory as unit.
+- *Re-import mode:* Walk directory (skip subdirs, files only). For each file, apply pipeline individually.
+
+Otherwise (single file/symlink):
+
+1. **Normalize PATH:** Resolve to absolute path.
+2. **Resolve Destination:**
+   - *Standard mode* (DESTINATION provided): If relative, join `source-dir` + DESTINATION. If absolute, use as-is. Normalize. Error if escapes source-dir.
+   - *Re-import mode* (DESTINATION omitted): Query DB for `target_path` == PATH. Error if not found. Set destination to `entry.source_path`.
+3. **Editor Decision:**
+   - `--editor never`: skip.
+   - `--editor always`: open editor. Error if no editor found.
+   - Auto (default): open editor if destination doesn't match any portal entry. Match = literal key equals destination, literal key is prefix of destination (`<key>/...`), or glob matches destination (relative to source-dir). If no portal match and re-import: open editor (user adds entry). Error if no editor found.
+4. **Collision Check:** Error if destination exists on disk (unless `--force`). If `--force`, remove obstructions.
+5. **Clone:**
+   - *Standard mode:* If `--copy`, copy. Else, move. Error if move crosses filesystem boundaries.
+   - *Re-import mode:* Always copy.
 
 ---
 

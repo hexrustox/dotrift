@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env,
     fs::{self, remove_dir_all, remove_file},
     path::{Path, PathBuf},
@@ -13,7 +14,8 @@ use crate::{
     cli::{AddFlags, OpenEditor},
     command::util::{GLOB_OPTION, PathLiteral, copy_recursive, is_glob},
     config::Config,
-    error::{GlobError, IoError},
+    db::Db,
+    error::IoError,
     global_config::GlobalConfig,
     path::{config_path, global_config_path},
 };
@@ -21,15 +23,33 @@ use crate::{
 pub fn run(
     source_dir: PathBuf,
     config_override: Option<PathBuf>,
-    file: PathBuf,
-    destination: PathBuf,
+    path: PathBuf,
+    destination: Option<PathBuf>,
     flags: AddFlags,
+    db_path: &Path,
 ) -> Result<()> {
-    let destination = if destination.is_absolute() {
-        destination
+    let reimport = destination.is_none();
+
+    if path.is_literal_dir() && reimport {
+        return reimport_directory(source_dir, config_override, &path, flags, db_path);
+    }
+
+    let destination = if let Some(dest) = destination {
+        if dest.is_absolute() {
+            dest
+        } else {
+            source_dir.join(dest).normalize()
+        }
     } else {
-        source_dir.join(destination).normalize()
+        let db = Db::init(db_path)?;
+        match db.get_entry(&path)? {
+            Some(entry) => entry.source_path,
+            None => {
+                return Ok(());
+            }
+        }
     };
+
     let Ok(dest_rel) = destination.strip_prefix(&source_dir) else {
         return Err(eyre!("Destination must be inside source directory"));
     };
@@ -37,66 +57,15 @@ pub fn run(
         return Err(eyre!("`{}` already exists", destination.display()));
     }
 
-    #[allow(unused_mut)]
-    let mut open_editor = if let Some(open_editor) = flags.editor {
-        matches!(open_editor, OpenEditor::Always)
-    } else {
-        let config = Config::read(&source_dir)?;
-        let mut open_editor = true;
-        for (pattern, _) in config.portal {
-            if is_glob(&pattern) && {
-                let glob = Pattern::new(&pattern).glob_error()?;
-                glob.matches_path_with(dest_rel, GLOB_OPTION)
-            } || *dest_rel == *pattern
-                || {
-                    let mut bool = false;
-                    let mut current = dest_rel.parent();
-                    while let Some(parent) = current {
-                        if *parent == *pattern {
-                            bool = true;
-                            break;
-                        }
-                        current = parent.parent();
-                    }
-                    bool
-                }
-            {
-                open_editor = false;
-                break;
-            }
-        }
-        open_editor
-    };
+    let should_open = needs_editor(&source_dir, &[dest_rel], flags.editor)?;
 
     #[cfg(test)]
     {
-        tests::OPEN_EDITOR.set(open_editor);
-        open_editor = false;
+        tests::OPEN_EDITOR.set(should_open);
     }
 
-    if open_editor {
-        let specific_config = config_override.is_some();
-        let path = config_override.unwrap_or(global_config_path());
-        let (cmd, mut args) = match GlobalConfig::read(&path) {
-            Ok(GlobalConfig {
-                editor_command: Some(config),
-                ..
-            }) => (config.command, config.args),
-            Err(err) if specific_config => {
-                return Err(err);
-            }
-            _ => match env::var_os("VISUAL").or(env::var_os("EDITOR")) {
-                Some(cmd) => (cmd.to_string_lossy().to_string(), Vec::new()),
-                None => return Err(eyre!("Failed to open editor")),
-            },
-        };
-        args.push(config_path(&source_dir).to_string_lossy().to_string());
-        Command::new(&cmd).args(&args).status().wrap_err_with(|| {
-            format!(
-                "Failed to spawn process `{}`",
-                [vec![cmd], args].concat().join(" ")
-            )
-        })?;
+    if should_open {
+        launch_editor(&source_dir, &config_override)?;
     }
 
     if flags.force {
@@ -106,19 +75,158 @@ pub fn run(
         fs::create_dir_all(parent).create_dir_error(parent)?;
     }
 
-    if flags.copy {
-        copy_recursive(&file, &destination)?;
+    if reimport || flags.copy {
+        copy_recursive(&path, &destination)?;
     } else {
-        fs::rename(&file, &destination).wrap_err_with(|| {
+        fs::rename(&path, &destination).wrap_err_with(|| {
             format!(
                 "Failed to move `{}` to `{}`",
-                file.display(),
+                path.display(),
                 destination.display()
             )
         })?;
     }
 
     Ok(())
+}
+
+fn reimport_directory(
+    source_dir: PathBuf,
+    config_override: Option<PathBuf>,
+    dir: &Path,
+    flags: AddFlags,
+    db_path: &Path,
+) -> Result<()> {
+    let db = Db::init(db_path)?;
+
+    let mut entries = Vec::new();
+    for entry_path in walk_files(dir)? {
+        match db.get_entry(&entry_path)? {
+            Some(entry) => {
+                let dest = entry.source_path;
+                if !dest.starts_with(&source_dir) {
+                    return Err(eyre!("Destination must be inside source directory"));
+                };
+                if dest.literal_exists() && !flags.force {
+                    return Err(eyre!("`{}` already exists", dest.display()));
+                }
+                entries.push((entry_path, dest));
+            }
+            None => {}
+        }
+    }
+
+    let ds = entries
+        .iter()
+        .map(|(_, d)| d.strip_prefix(&source_dir).unwrap())
+        .collect::<Vec<_>>();
+    let should_open = needs_editor(&source_dir, &ds, flags.editor)?;
+
+    #[cfg(test)]
+    {
+        tests::OPEN_EDITOR.set(should_open);
+    }
+
+    if should_open {
+        launch_editor(&source_dir, &config_override)?;
+    }
+
+    for (entry_path, dest) in entries {
+        if flags.force {
+            remove_obstructions(&dest)?;
+        }
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).create_dir_error(parent)?;
+        }
+        copy_recursive(&entry_path, &dest)?;
+    }
+
+    Ok(())
+}
+
+fn needs_editor(
+    source_dir: &Path,
+    destinations: &[&Path],
+    open_editor: Option<OpenEditor>,
+) -> Result<bool> {
+    match open_editor {
+        Some(OpenEditor::Always) => Ok(true),
+        Some(OpenEditor::Never) => Ok(false),
+        None => {
+            let config = Config::read(source_dir)?;
+            Ok(destinations
+                .iter()
+                .any(|p| !portal_matches(p, &config.portal)))
+        }
+    }
+}
+
+fn portal_matches(dest_rel: &Path, portal: &HashMap<String, PathBuf>) -> bool {
+    portal.keys().any(|pattern| {
+        if is_glob(pattern) {
+            Pattern::new(pattern)
+                .ok()
+                .map(|g| g.matches_path_with(dest_rel, GLOB_OPTION))
+                .unwrap_or(false)
+        } else {
+            *dest_rel == *pattern || {
+                let mut current = dest_rel.parent();
+                while let Some(parent) = current {
+                    if parent == Path::new(pattern) {
+                        return true;
+                    }
+                    current = parent.parent();
+                }
+                false
+            }
+        }
+    })
+}
+
+#[allow(unused_variables)]
+fn launch_editor(source_dir: &Path, config_override: &Option<PathBuf>) -> Result<()> {
+    #[cfg(test)]
+    return Ok(());
+
+    #[allow(unreachable_code)]
+    let specific_config = config_override.is_some();
+    let path = config_override.clone().unwrap_or_else(global_config_path);
+    let (cmd, mut args) = match GlobalConfig::read(&path) {
+        Ok(GlobalConfig {
+            editor_command: Some(config),
+            ..
+        }) => (config.command, config.args),
+        Err(err) if specific_config => {
+            return Err(err);
+        }
+        _ => match env::var_os("VISUAL").or(env::var_os("EDITOR")) {
+            Some(cmd) => (cmd.to_string_lossy().to_string(), Vec::new()),
+            None => return Err(eyre!("Failed to open editor")),
+        },
+    };
+    args.push(config_path(source_dir).to_string_lossy().to_string());
+    Command::new(&cmd).args(&args).status().wrap_err_with(|| {
+        format!(
+            "Failed to spawn process `{}`",
+            [vec![cmd], args].concat().join(" ")
+        )
+    })?;
+    Ok(())
+}
+
+fn walk_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir)
+        .wrap_err_with(|| format!("Failed to read directory `{}`", dir.display()))?
+    {
+        let path = entry?.path();
+        if path.is_literal_file() || path.is_literal_symlink() {
+            files.push(path);
+        } else if path.is_literal_dir() {
+            files.extend(walk_files(&path)?);
+        }
+    }
+    Ok(files)
 }
 
 fn remove_obstructions(path: &Path) -> Result<()> {
@@ -147,7 +255,7 @@ fn remove_obstructions(path: &Path) -> Result<()> {
 mod tests {
     use std::{cell::RefCell, os::unix::fs as unix_fs, path::Path};
 
-    use crate::command::util::tests::setup_test;
+    use crate::{command::util::tests::setup_test, config::DeployType, db::DbEntry};
 
     use super::*;
     use test_case::test_case;
@@ -158,13 +266,15 @@ mod tests {
         editor: None,
     };
 
-    fn add(source_dir: &Path, file: &Path, destination: &Path, flags: AddFlags) {
+    fn add(source_dir: &Path, path: &Path, destination: &Path, flags: AddFlags) {
+        let temp_db = tempfile::tempdir().unwrap();
         run(
             source_dir.to_path_buf(),
             None,
-            file.to_path_buf(),
-            destination.to_path_buf(),
+            path.to_path_buf(),
+            Some(destination.to_path_buf()),
             flags,
+            &temp_db.path().join("db"),
         )
         .unwrap();
     }
@@ -309,146 +419,239 @@ mod tests {
     }
 
     #[test_case(
-        |tmp| {
-            fs::write(tmp.join("x"), "data").unwrap();
-            tmp.join("x")
+        |t, s| {
+            fs::write(t.join("file"), "data").unwrap();
+            (t.join("file"), vec![DbEntry {
+                target_path: t.join("file"),
+                deploy_type: DeployType::Copy,
+                source_path: s.join("file"),
+                hash: None,
+                symlink_target: None,
+            }])
         },
-        |tmp| {
-            assert!(!tmp.join("x").exists());
+        |s| {
+            assert_eq!(fs::read_to_string(s.join("file")).unwrap(), "data");
+        }; "reimport_file"
+    )]
+    #[test_case(
+        |t, s| {
+            fs::write(t.join("real"), "data").unwrap();
+            unix_fs::symlink(t.join("real"), t.join("link")).unwrap();
+            (t.join("link"), vec![DbEntry {
+                target_path: t.join("link"),
+                deploy_type: DeployType::Copy,
+                source_path: s.join("link"),
+                hash: None,
+                symlink_target: Some(t.join("real")),
+            }])
+        },
+        |s| {
+            assert!(s.join("link").is_symlink());
+        }; "reimport_symlink"
+    )]
+    #[test_case(
+        |t, s| {
+            fs::create_dir_all(t.join("dir/sub")).unwrap();
+            fs::write(t.join("dir/file1"), "a").unwrap();
+            fs::write(t.join("dir/sub/file2"), "b").unwrap();
+            (t.join("dir"), vec![
+                DbEntry {
+                    target_path: t.join("dir/file1"),
+                    deploy_type: DeployType::Copy,
+                    source_path: s.join("dest/file1"),
+                    hash: None,
+                    symlink_target: None,
+                },
+                DbEntry {
+                    target_path: t.join("dir/sub/file2"),
+                    deploy_type: DeployType::Copy,
+                    source_path: s.join("dest/sub/file2"),
+                    hash: None,
+                    symlink_target: None,
+                },
+            ])
+        },
+        |s| {
+            assert_eq!(fs::read_to_string(s.join("dest/file1")).unwrap(), "a");
+            assert_eq!(fs::read_to_string(s.join("dest/sub/file2")).unwrap(), "b");
+        }; "reimport_directory"
+    )]
+    #[test_case(
+        |t, s| {
+            fs::create_dir_all(t.join("dir")).unwrap();
+            fs::write(t.join("dir/file1"), "").unwrap();
+            fs::write(t.join("dir/file2"), "").unwrap();
+            (t.join("dir"), vec![
+                DbEntry {
+                    target_path: t.join("dir/file1"),
+                    deploy_type: DeployType::Copy,
+                    source_path: s.join("file"),
+                    hash: None,
+                    symlink_target: None,
+                },
+            ])
+        },
+        |s| {
+            assert!(s.join("file").exists());
+        }; "reimport_directory_partial"
+    )]
+    fn test_add_reimport(
+        setup: impl FnOnce(&Path, &Path) -> (PathBuf, Vec<DbEntry>),
+        assertion: impl FnOnce(&Path),
+    ) {
+        let (temp_dir, source_dir, _) = setup_test("", "", "", false);
+        let db_path = &temp_dir.path().join("db");
+        let (p, es) = setup(temp_dir.path(), &source_dir);
+
+        let db = Db::init(db_path).unwrap();
+        for e in es {
+            db.insert_or_update(&e).unwrap();
+        }
+        run(source_dir.clone(), None, p, None, FLAGS, db_path).unwrap();
+        assertion(&source_dir);
+    }
+
+    #[test_case(
+        |t| {
+            fs::write(t.join("x"), "data").unwrap();
+            t.join("x")
+        },
+        |t| {
+            assert!(!t.join("x").exists());
         }
         ; "file_at_dest"
     )]
     #[test_case(
-        |tmp| {
-            fs::create_dir(tmp.join("x")).unwrap();
-            tmp.join("x")
+        |t| {
+            fs::create_dir(t.join("x")).unwrap();
+            t.join("x")
         },
-        |tmp| {
-            assert!(!tmp.join("x").exists());
+        |t| {
+            assert!(!t.join("x").exists());
         }
         ; "empty_dir_at_dest"
     )]
     #[test_case(
-        |tmp| {
-            let x = tmp.join("x");
+        |t| {
+            let x = t.join("x");
             fs::create_dir_all(x.join("sub/nested")).unwrap();
             fs::write(x.join("sub/nested/f"), "data").unwrap();
             x
         },
-        |tmp| {
-            assert!(!tmp.join("x").exists());
+        |t| {
+            assert!(!t.join("x").exists());
         }
         ; "nonempty_dir_at_dest"
     )]
     #[test_case(
-        |tmp| {
-            unix_fs::symlink(Path::new("/nonexistent"), tmp.join("link")).unwrap();
-            tmp.join("link")
+        |t| {
+            unix_fs::symlink(Path::new("/nonexistent"), t.join("link")).unwrap();
+            t.join("link")
         },
-        |tmp| {
-            assert!(!tmp.join("link").is_symlink());
+        |t| {
+            assert!(!t.join("link").is_symlink());
         }
         ; "dangling_symlink_at_dest"
     )]
     #[test_case(
-        |tmp| {
-            let real = tmp.join("real");
+        |t| {
+            let real = t.join("real");
             fs::write(&real, "data").unwrap();
-            unix_fs::symlink(&real, tmp.join("link")).unwrap();
-            tmp.join("link")
+            unix_fs::symlink(&real, t.join("link")).unwrap();
+            t.join("link")
         },
-        |tmp| {
-            assert!(!tmp.join("link").is_symlink());
-            assert!(tmp.join("real").exists());
+        |t| {
+            assert!(!t.join("link").is_symlink());
+            assert!(t.join("real").exists());
         }
         ; "valid_symlink_file_at_dest"
     )]
     #[test_case(
-        |tmp| {
-            let real = tmp.join("dir");
+        |t| {
+            let real = t.join("dir");
             fs::create_dir(&real).unwrap();
             fs::write(real.join("f"), "data").unwrap();
-            unix_fs::symlink(&real, tmp.join("link")).unwrap();
-            tmp.join("link")
+            unix_fs::symlink(&real, t.join("link")).unwrap();
+            t.join("link")
         },
-        |tmp| {
-            assert!(!tmp.join("link").is_symlink());
-            assert!(tmp.join("dir/f").exists());
+        |t| {
+            assert!(!t.join("link").is_symlink());
+            assert!(t.join("dir/f").exists());
         }
         ; "symlink_to_dir_at_dest"
     )]
     #[test_case(
-        |tmp| {
-            tmp.join("ghost")
+        |t| {
+            t.join("ghost")
         },
         |_| {}
         ; "nonexistent_dest"
     )]
     #[test_case(
-        |tmp| {
-            fs::write(tmp.join("a"), "block").unwrap();
-            tmp.join("a/b/c")
+        |t| {
+            fs::write(t.join("a"), "block").unwrap();
+            t.join("a/b/c")
         },
-        |tmp| {
-            assert!(!tmp.join("a").exists());
+        |t| {
+            assert!(!t.join("a").exists());
         }
         ; "file_blocking_parent"
     )]
     #[test_case(
-        |tmp| {
-            unix_fs::symlink(Path::new("/nonexistent"), tmp.join("a")).unwrap();
-            tmp.join("a/b/c")
+        |t| {
+            unix_fs::symlink(Path::new("/nonexistent"), t.join("a")).unwrap();
+            t.join("a/b/c")
         },
-        |tmp| {
-            assert!(!tmp.join("a").is_symlink());
+        |t| {
+            assert!(!t.join("a").is_symlink());
         }
         ; "dangling_symlink_blocking_parent"
     )]
     #[test_case(
-        |tmp| {
-            let real = tmp.join("real");
+        |t| {
+            let real = t.join("real");
             fs::write(&real, "data").unwrap();
-            unix_fs::symlink(&real, tmp.join("a")).unwrap();
-            tmp.join("a/b/c")
+            unix_fs::symlink(&real, t.join("a")).unwrap();
+            t.join("a/b/c")
         },
-        |tmp| {
-            assert!(!tmp.join("a").is_symlink());
-            assert!(tmp.join("real").exists());
+        |t| {
+            assert!(!t.join("a").is_symlink());
+            assert!(t.join("real").exists());
         }
         ; "valid_symlink_blocking_parent"
     )]
     #[test_case(
-        |tmp| {
-            fs::create_dir(tmp.join("dir")).unwrap();
-            tmp.join("dir/target")
+        |t| {
+            fs::create_dir(t.join("dir")).unwrap();
+            t.join("dir/target")
         },
-        |tmp| {
-            assert!(tmp.join("dir").is_dir());
+        |t| {
+            assert!(t.join("dir").is_dir());
         }
         ; "no_obstruction_existing_parent"
     )]
     #[test_case(
-        |tmp| {
-            tmp.join("a/b/c")
+        |t| {
+            t.join("a/b/c")
         },
         |_| {}
         ; "no_obstruction_no_parent"
     )]
     #[test_case(
-        |tmp| {
-            fs::write(tmp.join("x"), "dest_content").unwrap();
-            tmp.join("x")
+        |t| {
+            fs::write(t.join("x"), "dest_content").unwrap();
+            t.join("x")
         },
-        |tmp| {
-            assert!(!tmp.join("x").exists());
+        |t| {
+            assert!(!t.join("x").exists());
         }
         ; "file_at_dest_clean_parent"
     )]
     fn test_remove_obstructions(setup: impl FnOnce(&Path) -> PathBuf, assert: impl FnOnce(&Path)) {
-        let tmp = tempfile::tempdir().unwrap();
-        let target = setup(tmp.path());
+        let t = tempfile::tempdir().unwrap();
+        let target = setup(t.path());
         remove_obstructions(&target).unwrap();
-        assert(tmp.path());
+        assert(t.path());
     }
 
     thread_local! {
@@ -473,37 +676,137 @@ mod tests {
     #[test_case(r#""*.txt" = """#, "file.cfg" => true; "mismatch_glob_extension")]
     #[test_case(r#""file1" = """#, "file2" => true; "mismatch_literal")]
     #[test_case(r#""file" = """#, "file2" => true; "mismatch_prefix")]
-    fn test_open_editor(portal: &str, dest: impl Into<PathBuf>) -> bool {
-        let (temp_dir, source_dir, _) = setup_test(portal, "", "", false);
+    fn test_open_editor(portal: &str, dest: &str) -> bool {
+        let (_temp_dir, source_dir, _) = setup_test(portal, "", "", false);
+        let config = Config::read(&source_dir).unwrap();
 
-        let path = temp_dir.path().join("file");
-        fs::write(&path, "").unwrap();
-
-        add(&source_dir, &path, &source_dir.join(dest.into()), FLAGS);
-
-        OPEN_EDITOR.with_borrow(|b| *b)
+        !portal_matches(Path::new(dest), &config.portal)
     }
 
-    #[test_case("", "file", OpenEditor::Never => false; "mismatch_never")]
-    #[test_case(r#""" = """#, "file", OpenEditor::Never => false; "match_never")]
-    #[test_case("", "file", OpenEditor::Always => true; "mismatch_always")]
-    #[test_case(r#""" = """#, "file", OpenEditor::Always => true; "match_always")]
-    fn test_open_editor_flag(portal: &str, dest: impl Into<PathBuf>, flag: OpenEditor) -> bool {
+    #[test_case(
+        r#""" = """#,
+        |t, _| {
+            fs::write(t.join("file"), "").unwrap();
+            (t.join("file"), "file".into())
+        },
+        |_, _| {
+            OPEN_EDITOR.with_borrow(|b| assert!(!*b));
+        }; "move_editor_portal_match"
+    )]
+    #[test_case(
+        r#""other" = """#,
+        |t, _| {
+            fs::write(t.join("file"), "").unwrap();
+            (t.join("file"), "file".into())
+        },
+        |_, _| {
+            OPEN_EDITOR.with_borrow(|b| assert!(*b));
+        }; "move_editor_portal_mismatch"
+    )]
+    #[test_case(
+        "",
+        |t, _| {
+            fs::write(t.join("file"), "").unwrap();
+            (t.join("file"), "file".into())
+        },
+        |_, _| {
+            OPEN_EDITOR.with_borrow(|b| assert!(*b));
+        }; "move_editor_empty_portal"
+    )]
+    fn test_add_move_editor(
+        portal: &str,
+        setup: impl FnOnce(&Path, &Path) -> (PathBuf, PathBuf),
+        assertion: impl FnOnce(&Path, &Path),
+    ) {
         let (temp_dir, source_dir, _) = setup_test(portal, "", "", false);
+        let (f, d) = setup(temp_dir.path(), &source_dir);
 
-        let path = temp_dir.path().join("file");
-        fs::write(&path, "").unwrap();
+        add(&source_dir, &f, &d, FLAGS);
 
-        add(
-            &source_dir,
-            &path,
-            &source_dir.join(dest.into()),
-            AddFlags {
-                editor: Some(flag),
-                ..FLAGS
-            },
-        );
+        assertion(&source_dir, temp_dir.path());
+    }
 
-        OPEN_EDITOR.with_borrow(|b| *b)
+    #[test_case(
+        r#""" = """#,
+        |t, s| {
+            fs::write(t.join("file"), "data").unwrap();
+            (t.join("file"), vec![DbEntry {
+                target_path: t.join("file"),
+                deploy_type: DeployType::Copy,
+                source_path: s.join("file"),
+                hash: None,
+                symlink_target: None,
+            }])
+        },
+        |_| {
+            OPEN_EDITOR.with_borrow(|b| assert!(!*b));
+        }; "reimport_editor_portal_match"
+    )]
+    #[test_case(
+        r#""other" = """#,
+        |t, s| {
+            fs::write(t.join("file"), "data").unwrap();
+            (t.join("file"), vec![DbEntry {
+                target_path: t.join("file"),
+                deploy_type: DeployType::Copy,
+                source_path: s.join("file"),
+                hash: None,
+                symlink_target: None,
+            }])
+        },
+        |_| {
+            OPEN_EDITOR.with_borrow(|b| assert!(*b));
+        }; "reimport_editor_portal_mismatch"
+    )]
+    #[test_case(
+        "",
+        |t, s| {
+            fs::write(t.join("file"), "data").unwrap();
+            (t.join("file"), vec![DbEntry {
+                target_path: t.join("file"),
+                deploy_type: DeployType::Copy,
+                source_path: s.join("file"),
+                hash: None,
+                symlink_target: None,
+            }])
+        },
+        |_| {
+            OPEN_EDITOR.with_borrow(|b| assert!(*b));
+        }; "reimport_editor_empty_portal"
+    )]
+    #[test_case(
+        r#""" = """#,
+        |t, s| {
+            fs::create_dir_all(t.join("dir")).unwrap();
+            fs::write(t.join("dir/file1"), "a").unwrap();
+            (t.join("dir"), vec![
+                DbEntry {
+                    target_path: t.join("dir/file1"),
+                    deploy_type: DeployType::Copy,
+                    source_path: s.join("file1"),
+                    hash: None,
+                    symlink_target: None,
+                },
+            ])
+        },
+        |_| {
+            OPEN_EDITOR.with_borrow(|b| assert!(!*b));
+        }; "reimport_editor_dir_portal_match"
+    )]
+    fn test_add_reimport_editor(
+        portal: &str,
+        setup: impl FnOnce(&Path, &Path) -> (PathBuf, Vec<DbEntry>),
+        assertion: impl FnOnce(&Path),
+    ) {
+        let (temp_dir, source_dir, _) = setup_test(portal, "", "", false);
+        let db_path = &temp_dir.path().join("db");
+        let (p, es) = setup(temp_dir.path(), &source_dir);
+
+        let db = Db::init(db_path).unwrap();
+        for e in es {
+            db.insert_or_update(&e).unwrap();
+        }
+        run(source_dir.clone(), None, p, None, FLAGS, db_path).unwrap();
+        assertion(&source_dir);
     }
 }

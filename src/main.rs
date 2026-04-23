@@ -35,10 +35,17 @@ fn main() -> color_eyre::Result<()> {
         }
         Commands::Add {
             flags,
-            file,
+            path,
             destination,
-        } => add::run(source_dir, cli.config, file, destination, flags)
-            .wrap_err("Failed to add file")?,
+        } => add::run(
+            source_dir,
+            cli.config,
+            full_path(Some(path))?.unwrap(),
+            destination,
+            flags,
+            &db_path(),
+        )
+        .wrap_err("Failed to add file")?,
         Commands::Diff { .. } => {}
         Commands::Status { command } => match command {
             StatusSubcommand::List { file } => {
