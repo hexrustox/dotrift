@@ -1,3 +1,4 @@
+use dotrift::cli::GlobalFlags;
 use dotrift::{cli::ApplyFlags, command::apply};
 use std::fs;
 use std::path::PathBuf;
@@ -33,9 +34,11 @@ fn test_run() {
     let (_temp_dir, source_dir, target_dir, db_path) = setup_test(config);
 
     apply::run(
-        source_dir.clone(),
-        Some(target_dir.clone()),
-        None,
+        GlobalFlags::new(
+            Some(source_dir.to_path_buf()),
+            Some(target_dir.to_path_buf()),
+            None,
+        ),
         &db_path,
         ApplyFlags {
             dry_run: false,
@@ -71,9 +74,11 @@ fn test_dry_run() {
     let (_temp_dir, source_dir, target_dir, db_path) = setup_test(config);
 
     apply::run(
-        source_dir.clone(),
-        Some(target_dir.clone()),
-        None,
+        GlobalFlags::new(
+            Some(source_dir.to_path_buf()),
+            Some(target_dir.to_path_buf()),
+            None,
+        ),
         &db_path,
         ApplyFlags {
             dry_run: true,
@@ -94,9 +99,11 @@ fn test_clean_up_dry_run() {
     let (_temp_dir, source_dir, target_dir, db_path) = setup_test(config);
 
     apply::run(
-        source_dir.clone(),
-        Some(target_dir.clone()),
-        None,
+        GlobalFlags::new(
+            Some(source_dir.to_path_buf()),
+            Some(target_dir.to_path_buf()),
+            None,
+        ),
         &db_path,
         ApplyFlags {
             dry_run: false,
@@ -113,9 +120,11 @@ fn test_clean_up_dry_run() {
     fs::write(source_dir.join("dotrift.toml"), config).unwrap();
 
     apply::run(
-        source_dir.clone(),
-        Some(target_dir.clone()),
-        None,
+        GlobalFlags::new(
+            Some(source_dir.to_path_buf()),
+            Some(target_dir.to_path_buf()),
+            None,
+        ),
         &db_path,
         ApplyFlags {
             dry_run: true,

@@ -12,7 +12,7 @@ use normalize_path::NormalizePath;
 use walkdir::WalkDir;
 
 use crate::{
-    cli::ApplyFlags,
+    cli::{ApplyFlags, GlobalFlags},
     command::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
@@ -35,13 +35,11 @@ pub struct PortalEntry {
     pub mode: Option<FileMode>,
 }
 
-pub fn run(
-    source_dir: PathBuf,
-    target_override: Option<PathBuf>,
-    config_override: Option<PathBuf>,
-    db_path: &Path,
-    flags: ApplyFlags,
-) -> Result<()> {
+pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Result<()> {
+    let source_dir = global_flags.source()?;
+    let target_override = global_flags.target()?;
+    let config_override = global_flags.config()?;
+
     let config = Config::read(&source_dir)?;
 
     let target_dir = resolve_target(&source_dir, target_override, &config)?;
@@ -657,16 +655,18 @@ mod tests {
         prune_empty_dirs: false,
     };
 
-    fn apply(
+    fn mock_apply(
         source_dir: &Path,
         target_dir: &Path,
         db_path: &Path,
         flags: ApplyFlags,
     ) -> Result<()> {
         run(
-            source_dir.to_path_buf(),
-            Some(target_dir.to_path_buf()),
-            None,
+            GlobalFlags::new(
+                Some(source_dir.to_path_buf()),
+                Some(target_dir.to_path_buf()),
+                None,
+            ),
             db_path,
             flags,
         )
@@ -980,7 +980,7 @@ mod tests {
             false,
         );
         setup(&source_dir, &target_dir);
-        apply(&source_dir, &target_dir, &temp_dir.path().join("db"), FLAGS).unwrap();
+        mock_apply(&source_dir, &target_dir, &temp_dir.path().join("db"), FLAGS).unwrap();
         assert(&source_dir, &target_dir);
     }
 
@@ -1195,9 +1195,9 @@ mod tests {
         );
         setup1(&source_dir, &target_dir);
         let db_path = temp_dir.path().join("db");
-        apply(&source_dir, &target_dir, &db_path, FLAGS).unwrap();
+        mock_apply(&source_dir, &target_dir, &db_path, FLAGS).unwrap();
         setup2(&source_dir, &target_dir);
-        apply(&source_dir, &target_dir, &db_path, FLAGS).unwrap();
+        mock_apply(&source_dir, &target_dir, &db_path, FLAGS).unwrap();
         let db = Db::init(&db_path).unwrap();
         assert(&source_dir, &target_dir, &db);
     }
@@ -1211,7 +1211,7 @@ mod tests {
             false,
         );
         fs::write(source_dir.join("file"), "").unwrap();
-        apply(&source_dir, &target_dir, &temp_dir.path().join("db"), FLAGS).unwrap();
+        mock_apply(&source_dir, &target_dir, &temp_dir.path().join("db"), FLAGS).unwrap();
         assert_eq!(
             target_dir
                 .join("file")
@@ -1228,7 +1228,7 @@ mod tests {
     fn test_apply_deploy(flags: ApplyFlags) {
         let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, "", "", false);
         fs::write(source_dir.join("file"), "").unwrap();
-        apply(&source_dir, &target_dir, &temp_dir.path().join("db"), flags).unwrap();
+        mock_apply(&source_dir, &target_dir, &temp_dir.path().join("db"), flags).unwrap();
         assert_eq!(target_dir.join("file").exists(), !flags.dry_run);
     }
 
@@ -1237,10 +1237,10 @@ mod tests {
     fn test_apply_clean_up(dry_run: bool) {
         let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, "", "", false);
         fs::write(source_dir.join("file"), "").unwrap();
-        apply(&source_dir, &target_dir, &temp_dir.path().join("db"), FLAGS).unwrap();
+        mock_apply(&source_dir, &target_dir, &temp_dir.path().join("db"), FLAGS).unwrap();
         assert!(target_dir.join("file").exists());
         fs::write(source_dir.join("dotrift.toml"), "").unwrap();
-        apply(
+        mock_apply(
             &source_dir,
             &target_dir,
             &temp_dir.path().join("db"),

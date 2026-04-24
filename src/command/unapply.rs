@@ -1,19 +1,21 @@
 // TODO print more
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::{
-    cli::UnapplyFlags,
+    cli::{GlobalFlags, UnapplyFlags},
     command::util::{clean_up, resolve_target},
     config::Config,
     db::Db,
 };
 
 pub fn run(
-    source_dir: PathBuf,
-    target_override: Option<PathBuf>,
+    global_flags: GlobalFlags,
     db_path: &Path,
     flags: UnapplyFlags,
 ) -> color_eyre::Result<()> {
+    let source_dir = global_flags.source()?;
+    let target_override = global_flags.target()?;
+
     let config = Config::read(&source_dir)?;
 
     let _ = resolve_target(&source_dir, target_override, &config)?;

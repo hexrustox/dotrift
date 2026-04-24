@@ -1,24 +1,60 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use color_eyre::Result;
 use std::path::PathBuf;
 
-#[derive(Parser)]
-#[command(
-    name = "dotrift",
-    version,
-    about = "Declarative dotfile manager using TOML configuration"
-)]
-pub struct Cli {
+use crate::{command::to_absolute_path, path::source_path};
+
+#[derive(Args)]
+pub struct GlobalFlags {
     /// Override the source directory. Default: $XDG_DATA_HOME/dotrift or ~/.local/share/dotrift.
     #[arg(short, long, name = "SOURCE_DIRECTORY")]
-    pub source: Option<PathBuf>,
+    source: Option<PathBuf>,
 
     /// Override the target directory.
     #[arg(short, long, name = "TARGET_DIRECTORY")]
-    pub target: Option<PathBuf>,
+    target: Option<PathBuf>,
 
     /// Override the config file. Default: $XDG_CONFIG_HOME/dotrift/config.toml or ~/.config/dotrift/config.toml.
     #[arg(short, long, name = "CONFIG_FILE")]
-    pub config: Option<PathBuf>,
+    config: Option<PathBuf>,
+}
+
+impl GlobalFlags {
+    pub fn new(source: Option<PathBuf>, target: Option<PathBuf>, config: Option<PathBuf>) -> Self {
+        Self {
+            source,
+            target,
+            config,
+        }
+    }
+
+    pub fn source(&self) -> Result<PathBuf> {
+        self.source
+            .as_ref()
+            .map(|p| to_absolute_path(p))
+            .unwrap_or(Ok(source_path()))
+    }
+
+    pub fn target(&self) -> Result<Option<PathBuf>> {
+        self.target
+            .as_ref()
+            .map(|p| to_absolute_path(p))
+            .transpose()
+    }
+
+    pub fn config(&self) -> Result<Option<PathBuf>> {
+        self.config
+            .as_ref()
+            .map(|p| to_absolute_path(p))
+            .transpose()
+    }
+}
+
+#[derive(Parser)]
+#[command(name = "dotrift", version, about)]
+pub struct Cli {
+    #[command(flatten)]
+    pub global: GlobalFlags,
 
     #[command(subcommand)]
     pub command: Commands,

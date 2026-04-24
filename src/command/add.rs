@@ -11,7 +11,7 @@ use glob::Pattern;
 use normalize_path::NormalizePath;
 
 use crate::{
-    cli::{AddFlags, OpenEditor},
+    cli::{AddFlags, GlobalFlags, OpenEditor},
     command::util::{GLOB_OPTION, PathLiteral, copy_recursive, is_glob},
     config::Config,
     db::Db,
@@ -21,13 +21,15 @@ use crate::{
 };
 
 pub fn run(
-    source_dir: PathBuf,
-    config_override: Option<PathBuf>,
+    global_flags: GlobalFlags,
     path: PathBuf,
     destination: Option<PathBuf>,
     flags: AddFlags,
     db_path: &Path,
 ) -> Result<()> {
+    let source_dir = global_flags.source()?;
+    let config_override = global_flags.config()?;
+
     let reimport = destination.is_none();
 
     if path.is_literal_dir() && reimport {
@@ -268,15 +270,25 @@ mod tests {
         editor: None,
     };
 
-    fn add(source_dir: &Path, path: &Path, destination: &Path, flags: AddFlags) {
+    fn mock_add(source_dir: &Path, path: &Path, destination: &Path, flags: AddFlags) {
         let temp_db = tempfile::tempdir().unwrap();
         run(
-            source_dir.to_path_buf(),
-            None,
+            GlobalFlags::new(Some(source_dir.to_path_buf()), None, None),
             path.to_path_buf(),
             Some(destination.to_path_buf()),
             flags,
             &temp_db.path().join("db"),
+        )
+        .unwrap();
+    }
+
+    fn mock_add_reimport(source_dir: &Path, path: &Path, flags: AddFlags, db_path: &Path) {
+        run(
+            GlobalFlags::new(Some(source_dir.to_path_buf()), None, None),
+            path.to_path_buf(),
+            None,
+            flags,
+            db_path,
         )
         .unwrap();
     }
@@ -375,7 +387,7 @@ mod tests {
         let (temp_dir, source_dir, _) = setup_test("", "", "", false);
         let (f, d) = setup(temp_dir.path(), &source_dir);
 
-        add(&source_dir, &f, &d, FLAGS);
+        mock_add(&source_dir, &f, &d, FLAGS);
 
         assertion(&source_dir, temp_dir.path());
     }
@@ -387,7 +399,7 @@ mod tests {
         let f = temp_dir.path().join("file");
         let d = source_dir.join("file");
         fs::write(&f, "").unwrap();
-        add(
+        mock_add(
             &source_dir,
             &f,
             &d,
@@ -408,7 +420,7 @@ mod tests {
         let d = source_dir.join("file");
         fs::write(&f, "a").unwrap();
         fs::write(&d, "b").unwrap();
-        add(
+        mock_add(
             &source_dir,
             &f,
             &d,
@@ -510,7 +522,7 @@ mod tests {
         for e in es {
             db.insert_or_update(&e).unwrap();
         }
-        run(source_dir.clone(), None, p, None, FLAGS, db_path).unwrap();
+        mock_add_reimport(&source_dir, &p, FLAGS, db_path);
         assertion(&source_dir);
     }
 
@@ -724,7 +736,7 @@ mod tests {
         let (temp_dir, source_dir, _) = setup_test(portal, "", "", false);
         let (f, d) = setup(temp_dir.path(), &source_dir);
 
-        add(&source_dir, &f, &d, FLAGS);
+        mock_add(&source_dir, &f, &d, FLAGS);
 
         assertion(&source_dir, temp_dir.path());
     }
@@ -809,7 +821,7 @@ mod tests {
         for e in es {
             db.insert_or_update(&e).unwrap();
         }
-        run(source_dir.clone(), None, p, None, FLAGS, db_path).unwrap();
+        mock_add_reimport(&source_dir, &p, FLAGS, db_path);
         assertion(&source_dir);
     }
 }

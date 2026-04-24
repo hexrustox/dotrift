@@ -2,11 +2,16 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    command::util::{is_managed, print_portal},
+    command::{
+        to_absolute_path,
+        util::{is_managed, print_portal},
+    },
     db::Db,
 };
+use color_eyre::Result;
 
-pub fn list(file: Option<PathBuf>, db_path: &Path) -> color_eyre::Result<()> {
+pub fn list(file: Option<PathBuf>, db_path: &Path) -> Result<()> {
+    let file = file.map(|p| to_absolute_path(&p)).transpose()?;
     let db = Db::init(db_path)?;
 
     if let Some(target) = file {
@@ -33,7 +38,8 @@ pub fn list(file: Option<PathBuf>, db_path: &Path) -> color_eyre::Result<()> {
     Ok(())
 }
 
-pub fn clear(file: Option<PathBuf>, db_path: &Path) -> color_eyre::Result<()> {
+pub fn clear(file: Option<PathBuf>, db_path: &Path) -> Result<()> {
+    let file = file.map(|p| to_absolute_path(&p)).transpose()?;
     let db = Db::init(db_path)?;
 
     if let Some(target) = file {

@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    env,
     fmt::Debug,
     fs::{self, File},
     hash::Hasher,
@@ -13,18 +14,30 @@ use glob::MatchOptions;
 use normalize_path::NormalizePath;
 use twox_hash::XxHash64;
 
-use crate::command::apply::PortalEntry;
-use crate::config::Config;
-use crate::error::IoError;
-use crate::{config::DeployType, db::Db};
+use crate::{
+    command::apply::PortalEntry,
+    config::{Config, DeployType},
+    db::Db,
+    error::IoError,
+};
 
 const SEED: u64 = 42;
 const BUFFER_SIZE: usize = 8192;
+
 pub const GLOB_OPTION: MatchOptions = MatchOptions {
     case_sensitive: true,
     require_literal_separator: true,
     require_literal_leading_dot: false,
 };
+
+pub fn to_absolute_path(path: &Path) -> Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path.normalize())
+    } else {
+        let cwd = env::current_dir().wrap_err("Failed to get current directory")?;
+        Ok(cwd.join(path).normalize())
+    }
+}
 
 pub fn resolve_target(
     source_dir: &Path,
