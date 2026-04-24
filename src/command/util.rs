@@ -101,6 +101,7 @@ pub fn strip_prefix_filter_glob(glob_pattern: &str) -> String {
     prefix
 }
 
+// TODO return result
 pub trait PathLiteral {
     fn literal_exists(&self) -> bool;
     fn is_literal_file(&self) -> bool;

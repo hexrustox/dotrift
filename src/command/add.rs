@@ -7,10 +7,11 @@ use std::{
 use color_eyre::eyre::{Context, Result, eyre};
 use glob::Pattern;
 use normalize_path::NormalizePath;
+use walkdir::WalkDir;
 
 use crate::{
     cli::{AddFlags, GlobalFlags, OpenEditor},
-    command::util::{GLOB_OPTION, PathLiteral, copy_recursive, is_glob},
+    command::util::{GLOB_OPTION, PathLiteral, SafeStripPrefix, copy_recursive, is_glob},
     config::Config,
     db::Db,
     error::IoError,
@@ -29,7 +30,7 @@ pub fn run(
     let reimport = destination.is_none();
 
     if path.is_literal_dir() && reimport {
-        return reimport_directory(source_dir, config_override, &path, flags, db_path);
+        return reimport_directory(&source_dir, &config_override, &path, flags, db_path);
     }
 
     let destination = if let Some(dest) = destination {
@@ -43,7 +44,7 @@ pub fn run(
         match db.get_entry(&path)? {
             Some(entry) => entry.source_path,
             None => {
-                return Err(eyre!("todo"));
+                return Err(eyre!("Path `{}` not found in database", path.display()));
             }
         }
     };
@@ -55,7 +56,7 @@ pub fn run(
         return Err(eyre!("`{}` already exists", destination.display()));
     }
 
-    let should_open = needs_editor(&source_dir, &[dest_rel], flags.editor)?;
+    let should_open = needs_editor(&source_dir, [dest_rel], flags.editor)?;
 
     #[cfg(test)]
     {
@@ -89,8 +90,8 @@ pub fn run(
 }
 
 fn reimport_directory(
-    source_dir: PathBuf,
-    config_override: Option<PathBuf>,
+    source_dir: &Path,
+    config_override: &Option<PathBuf>,
     dir: &Path,
     flags: AddFlags,
     db_path: &Path,
@@ -98,31 +99,39 @@ fn reimport_directory(
     let db = Db::init(db_path)?;
 
     let mut entries = Vec::new();
-    for entry_path in walk_files(dir)? {
-        match db.get_entry(&entry_path)? {
-            Some(entry) => {
-                let dest = entry.source_path;
-                if !dest.starts_with(&source_dir) {
-                    println!("todo");
-                    continue;
-                };
-                if dest.literal_exists() && !flags.force {
-                    println!("todo");
+    for entry in WalkDir::new(dir)
+        .into_iter()
+        .flatten()
+        .filter(|e| !e.file_type().is_dir())
+    {
+        let path = entry.path();
+        match db.get_entry(path)? {
+            Some(db_entry) => {
+                let dest = db_entry.source_path;
+                if !dest.starts_with(source_dir) {
+                    eprintln!(
+                        "Warning: `{}` destination outside source dir, skipping",
+                        path.display()
+                    );
                     continue;
                 }
-                entries.push((entry_path, dest));
+                if dest.literal_exists() && !flags.force {
+                    eprintln!("Warning: `{}` already exists, skipping", dest.display());
+                    continue;
+                }
+                entries.push((path.to_path_buf(), dest));
             }
             None => {
-                println!("todo");
+                eprintln!("Warning: `{}` not in database, skipping", path.display());
             }
         }
     }
 
-    let ds = entries
-        .iter()
-        .map(|(_, d)| d.strip_prefix(&source_dir).unwrap())
-        .collect::<Vec<_>>();
-    let should_open = needs_editor(&source_dir, &ds, flags.editor)?;
+    let should_open = needs_editor(
+        source_dir,
+        entries.iter().map(|(_, p)| p.safe_strip_prefix(source_dir)),
+        flags.editor,
+    )?;
 
     #[cfg(test)]
     {
@@ -130,7 +139,7 @@ fn reimport_directory(
     }
 
     if should_open {
-        launch_editor(&source_dir, &config_override)?;
+        launch_editor(source_dir, config_override)?;
     }
 
     for (entry_path, dest) in entries {
@@ -146,9 +155,9 @@ fn reimport_directory(
     Ok(())
 }
 
-fn needs_editor(
+fn needs_editor<'a>(
     source_dir: &Path,
-    destinations: &[&Path],
+    destinations: impl IntoIterator<Item = &'a Path>,
     open_editor: Option<OpenEditor>,
 ) -> Result<bool> {
     match open_editor {
@@ -157,7 +166,7 @@ fn needs_editor(
         None => {
             let config = Config::read(source_dir)?;
             Ok(destinations
-                .iter()
+                .into_iter()
                 .any(|p| !portal_matches(p, &config.portal)))
         }
     }
@@ -171,16 +180,8 @@ fn portal_matches(dest_rel: &Path, portal: &HashMap<String, PathBuf>) -> bool {
                 .map(|g| g.matches_path_with(dest_rel, GLOB_OPTION))
                 .unwrap_or(false)
         } else {
-            *dest_rel == *pattern || {
-                let mut current = dest_rel.parent();
-                while let Some(parent) = current {
-                    if parent == Path::new(pattern) {
-                        return true;
-                    }
-                    current = parent.parent();
-                }
-                false
-            }
+            let path = Path::new(pattern);
+            dest_rel.ancestors().any(|a| a == path)
         }
     })
 }
@@ -200,8 +201,12 @@ fn launch_editor(source_dir: &Path, config_override: &Option<PathBuf>) -> Result
     };
 
     let specific_config = config_override.is_some();
-    let path = config_override.clone().unwrap_or_else(global_config_path);
-    let (cmd, mut args) = match GlobalConfig::read(&path) {
+    let default_path = global_config_path();
+    let path = config_override
+        .as_ref()
+        .map(|p| p.as_path())
+        .unwrap_or(&default_path);
+    let (cmd, mut args) = match GlobalConfig::read(path) {
         Ok(GlobalConfig {
             editor_command: Some(config),
             ..
@@ -224,19 +229,6 @@ fn launch_editor(source_dir: &Path, config_override: &Option<PathBuf>) -> Result
     Ok(())
 }
 
-fn walk_files(dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-    for entry in fs::read_dir(dir).read_dir_error(dir)? {
-        let path = entry?.path();
-        if path.is_literal_file() || path.is_literal_symlink() {
-            files.push(path);
-        } else if path.is_literal_dir() {
-            files.extend(walk_files(&path)?);
-        }
-    }
-    Ok(files)
-}
-
 fn remove_obstructions(path: &Path) -> Result<()> {
     if let Ok(meta) = fs::symlink_metadata(path) {
         if meta.is_dir() {
@@ -245,16 +237,14 @@ fn remove_obstructions(path: &Path) -> Result<()> {
             remove_file(path).remove_file_error(path)?;
         }
     }
-    let mut current = path.parent();
-    while let Some(dir) = current {
-        if let Ok(meta) = fs::symlink_metadata(dir) {
-            if meta.is_dir() {
-                break;
-            } else {
-                remove_file(dir).remove_file_error(dir)?;
-            }
+    for dir in path.ancestors().skip(1) {
+        let Ok(meta) = fs::symlink_metadata(dir) else {
+            continue;
+        };
+        if meta.is_dir() {
+            break;
         }
-        current = dir.parent();
+        remove_file(dir).remove_file_error(dir)?;
     }
     Ok(())
 }

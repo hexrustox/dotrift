@@ -1,3 +1,4 @@
+// TODO print more
 use std::{
     collections::HashMap,
     fs::{self, remove_file},
@@ -192,7 +193,7 @@ fn resolve_literal_portal(
     if source_path.is_literal_dir() {
         for entry in WalkDir::new(&source_path)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .flatten()
             .filter(|e| !e.file_type().is_dir())
         {
             let file_source = entry.path().to_path_buf();
@@ -271,7 +272,6 @@ fn apply_rules(
 }
 
 fn print_tree(path: &Path, node: &Node) -> Result<()> {
-    // TODO print more
     match node {
         Node::Dir(children) => {
             if path != Path::new("/") {

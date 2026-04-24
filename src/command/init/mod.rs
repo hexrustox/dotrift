@@ -1,4 +1,3 @@
-// TODO print more
 use std::fs;
 
 use color_eyre::eyre::{Context, eyre};
@@ -16,6 +15,7 @@ pub fn run(global_flags: GlobalFlags) -> color_eyre::Result<()> {
         fs::write(&path, include_bytes!("./template.toml"))
             .wrap_err_with(|| format!("Failed to write file `{}`", path.display()))?;
 
+        println!("Initialized at `{}`", path.display());
         Ok(())
     } else {
         Err(eyre!("Source directory already initialized"))
