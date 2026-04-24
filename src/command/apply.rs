@@ -1,4 +1,3 @@
-// TODO print more
 use std::{
     collections::HashMap,
     fs::{self, remove_file},
@@ -45,15 +44,12 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
 
     let target_dir = resolve_target(&source_dir, target_override, &config)?;
 
-    let ignore_matcher =
-        build_ignore(&config.ignore, &target_dir).wrap_err("Failed to build ignore matcher")?;
+    let ignore_matcher = build_ignore(&config.ignore, &target_dir)?;
 
     let mut portal_entries =
-        resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher)
-            .wrap_err("Failed to resolve portals")?;
+        resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher)?;
 
-    apply_rules(&target_dir, &mut portal_entries, &config.rule)
-        .wrap_err("Failed to apply rules")?;
+    apply_rules(&target_dir, &mut portal_entries, &config.rule)?;
 
     let db = Db::init(db_path)?;
 
@@ -66,7 +62,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
         )?;
     }
 
-    let tree = build_tree(portal_entries).wrap_err("Failed to build target file system tree")?;
+    let tree = build_tree(portal_entries)?;
 
     if flags.dry_run {
         print_tree(Path::new("/"), &tree)?;
@@ -147,8 +143,10 @@ fn resolve_glob_portal(
     let full_pattern = source_dir.join(pattern);
     let full_pattern_str = full_pattern.to_string_lossy();
 
-    for entry in glob_with(&full_pattern_str, GLOB_OPTION).glob_error()? {
-        let source_path = entry.wrap_err("Failed to read glob match")?;
+    for source_path in glob_with(&full_pattern_str, GLOB_OPTION)
+        .glob_error()?
+        .flatten()
+    {
         if source_path.path_is_dir() {
             continue;
         }
@@ -271,24 +269,27 @@ fn apply_rules(
     Ok(())
 }
 
-fn print_tree(path: &Path, node: &Node) -> Result<()> {
+fn print_tree(path: &Path, node: &Node) -> Result<usize> {
+    let mut count = 0;
     match node {
         Node::Dir(children) => {
             if path != Path::new("/") {
-                println!("[CREATE] {}", path.display());
+                eprintln!("[CREATE] {}", path.display());
             }
             for (name, child) in children {
-                print_tree(&path.join(name), child)?;
+                count += print_tree(&path.join(name), child)?;
             }
         }
         Node::File(entry) => {
-            println!(
+            count += 1;
+            eprintln!(
                 "[CREATE] {}",
                 print_portal(path, &entry.source, entry.deploy_type)
             );
         }
     }
-    Ok(())
+
+    Ok(count)
 }
 
 fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool) -> Result<()> {

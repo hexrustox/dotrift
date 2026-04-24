@@ -1,4 +1,3 @@
-// TODO print more
 use std::path::Path;
 
 use crate::{
@@ -18,7 +17,7 @@ pub fn run(
 
     let config = Config::read(&source_dir)?;
 
-    let _ = resolve_target(&source_dir, target_override, &config)?;
+    resolve_target(&source_dir, target_override, &config)?;
 
     let db = Db::init(db_path)?;
     clean_up(None, &db, flags.dry_run, flags.prune_empty_dirs)?;

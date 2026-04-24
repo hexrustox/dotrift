@@ -206,9 +206,10 @@ pub fn clean_up(
     db: &Db,
     dry_run: bool,
     prune_empty_dirs: bool,
-) -> Result<()> {
+) -> Result<usize> {
     let db_entries = db.get_all_entries()?;
 
+    let mut count = 0;
     for entry in db_entries {
         let path = &entry.target_path;
         if portal_entries.is_some_and(|m| m.contains_key(path)) {
@@ -219,7 +220,8 @@ pub fn clean_up(
             let managed = is_managed(path, db, None);
             if managed {
                 if dry_run {
-                    println!("[REMOVE] {}", path.display());
+                    count += 1;
+                    eprintln!("[REMOVE] {}", path.display());
                 } else {
                     fs::remove_file(path).remove_file_error(path)?;
 
@@ -245,7 +247,7 @@ pub fn clean_up(
         }
     }
 
-    Ok(())
+    Ok(count)
 }
 
 pub fn print_portal(target: &Path, source: &Path, deploy_type: DeployType) -> String {

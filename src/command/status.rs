@@ -1,4 +1,3 @@
-// TODO print more
 use std::path::{Path, PathBuf};
 
 use crate::{
@@ -17,22 +16,28 @@ pub fn list(file: Option<PathBuf>, db_path: &Path) -> Result<()> {
     if let Some(target) = file {
         match db.get_entry(&target)? {
             Some(entry) if is_managed(&entry.target_path, &db, None) => {
-                println!(
+                eprintln!(
                     "[MANAGED] {}",
                     print_portal(&target, &entry.source_path, entry.deploy_type)
                 );
             }
             _ => {
-                println!("[UNMANAGED] {}", target.display());
+                eprintln!("[UNMANAGED] {}", target.display());
             }
         }
     } else {
-        for entry in db.get_all_entries()? {
-            println!(
+        let entries = db.get_all_entries()?;
+        for entry in &entries {
+            eprintln!(
                 "{}",
                 print_portal(&entry.target_path, &entry.source_path, entry.deploy_type)
             );
         }
+        eprintln!(
+            "Total: {} file{}",
+            entries.len(),
+            if entries.len() > 1 { "s" } else { "" }
+        )
     }
 
     Ok(())
@@ -46,6 +51,7 @@ pub fn clear(file: Option<PathBuf>, db_path: &Path) -> Result<()> {
         db.delete_entry(&target)?;
     } else {
         db.delete_table()?;
+        eprintln!("Cleared all entries");
     }
 
     Ok(())

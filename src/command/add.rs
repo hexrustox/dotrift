@@ -11,7 +11,10 @@ use walkdir::WalkDir;
 
 use crate::{
     cli::{AddFlags, GlobalFlags, OpenEditor},
-    command::util::{GLOB_OPTION, PathLiteral, SafeStripPrefix, copy_recursive, is_glob},
+    command::{
+        to_absolute_path,
+        util::{GLOB_OPTION, PathLiteral, SafeStripPrefix, copy_recursive, is_glob},
+    },
     config::Config,
     db::Db,
     error::IoError,
@@ -26,6 +29,7 @@ pub fn run(
 ) -> Result<()> {
     let source_dir = global_flags.source()?;
     let config_override = global_flags.config()?;
+    let path = to_absolute_path(&path)?;
 
     let reimport = destination.is_none();
 
@@ -110,7 +114,7 @@ fn reimport_directory(
                 let dest = db_entry.source_path;
                 if !dest.starts_with(source_dir) {
                     eprintln!(
-                        "Warning: `{}` destination outside source dir, skipping",
+                        "Warning: `{}` destination outside source directory, skipping",
                         path.display()
                     );
                     continue;
@@ -216,7 +220,7 @@ fn launch_editor(source_dir: &Path, config_override: &Option<PathBuf>) -> Result
         }
         _ => match env::var_os("VISUAL").or(env::var_os("EDITOR")) {
             Some(cmd) => (cmd.to_string_lossy().to_string(), Vec::new()),
-            None => return Err(eyre!("Failed to open editor")),
+            None => return Err(eyre!("Failed to find editor")),
         },
     };
     args.push(config_path(source_dir).to_string_lossy().to_string());
