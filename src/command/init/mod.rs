@@ -9,7 +9,7 @@ pub fn run(global_flags: GlobalFlags) -> color_eyre::Result<()> {
 
     let path = config_path(&source_dir);
 
-    if !path.literal_exists() {
+    if !path.path_exists() {
         let parent = path.parent().unwrap();
         fs::create_dir_all(parent).create_dir_error(parent)?;
         fs::write(&path, include_bytes!("./template.toml"))

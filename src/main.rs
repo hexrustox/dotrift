@@ -12,6 +12,7 @@ fn main() -> color_eyre::Result<()> {
 
     let cli = Cli::parse();
 
+    // TODO better error
     match cli.command {
         Commands::Init => {
             init::run(cli.global).wrap_err("Failed to initialize")?;

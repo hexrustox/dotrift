@@ -101,25 +101,24 @@ pub fn strip_prefix_filter_glob(glob_pattern: &str) -> String {
     prefix
 }
 
-// TODO return result
 pub trait PathLiteral {
-    fn literal_exists(&self) -> bool;
-    fn is_literal_file(&self) -> bool;
-    fn is_literal_dir(&self) -> bool;
-    fn is_literal_symlink(&self) -> bool;
+    fn path_exists(&self) -> bool;
+    fn path_is_file(&self) -> bool;
+    fn path_is_dir(&self) -> bool;
+    fn path_is_symlink(&self) -> bool;
 }
 
 impl PathLiteral for Path {
-    fn literal_exists(&self) -> bool {
+    fn path_exists(&self) -> bool {
         fs::symlink_metadata(self).is_ok()
     }
-    fn is_literal_file(&self) -> bool {
+    fn path_is_file(&self) -> bool {
         fs::symlink_metadata(self).is_ok_and(|m| m.is_file())
     }
-    fn is_literal_dir(&self) -> bool {
+    fn path_is_dir(&self) -> bool {
         fs::symlink_metadata(self).is_ok_and(|m| m.is_dir())
     }
-    fn is_literal_symlink(&self) -> bool {
+    fn path_is_symlink(&self) -> bool {
         fs::symlink_metadata(self).is_ok_and(|m| m.is_symlink())
     }
 }
@@ -156,7 +155,7 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
         },
         DeployType::Copy => {
             if let Some(hash) = db_entry.hash {
-                target.is_literal_file()
+                target.path_is_file()
                     && hash
                         == target_hash.unwrap_or({
                             let Ok(h) = hash_file(target) else {
@@ -165,7 +164,7 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
                             h
                         })
             } else {
-                target.is_literal_symlink()
+                target.path_is_symlink()
                     && fs::read_link(target).is_ok_and(|l| Some(l) == db_entry.symlink_target)
             }
         }
@@ -173,7 +172,7 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
 }
 
 pub fn copy_recursive(from: &Path, to: &Path) -> Result<()> {
-    if from.is_literal_dir() {
+    if from.path_is_dir() {
         fs::create_dir_all(to).create_dir_error(to)?;
         for entry in fs::read_dir(from).read_dir_error(from)?.flatten() {
             let path = entry.path();
@@ -188,10 +187,10 @@ pub fn copy_recursive(from: &Path, to: &Path) -> Result<()> {
 }
 
 pub fn clone_file(from: &Path, to: &Path) -> Result<()> {
-    if from.is_literal_file() {
+    if from.path_is_file() {
         let _ = fs::remove_file(to);
         fs::copy(from, to).copy_file_error(from, to)?;
-    } else if from.is_literal_symlink() {
+    } else if from.path_is_symlink() {
         let _ = fs::remove_file(to);
         unix_fs::symlink(fs::read_link(from).read_link_error(from)?, to).symlink_error(to)?;
     } else {
@@ -216,7 +215,7 @@ pub fn clean_up(
             continue;
         }
 
-        if path.literal_exists() {
+        if path.path_exists() {
             let managed = is_managed(path, db, None);
             if managed {
                 if dry_run {

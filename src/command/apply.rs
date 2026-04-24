@@ -149,7 +149,7 @@ fn resolve_glob_portal(
 
     for entry in glob_with(&full_pattern_str, GLOB_OPTION).glob_error()? {
         let source_path = entry.wrap_err("Failed to read glob match")?;
-        if source_path.is_literal_dir() {
+        if source_path.path_is_dir() {
             continue;
         }
 
@@ -183,14 +183,14 @@ fn resolve_literal_portal(
 ) -> Result<()> {
     let source_path = source_dir.join(pattern);
 
-    if !source_path.literal_exists() {
+    if !source_path.path_exists() {
         return Err(eyre!(
             "Source path does not exist: `{}`",
             source_path.display()
         ));
     }
 
-    if source_path.is_literal_dir() {
+    if source_path.path_is_dir() {
         for entry in WalkDir::new(&source_path)
             .into_iter()
             .flatten()
@@ -309,8 +309,8 @@ fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool)
 }
 
 fn deploy_dir(path: &Path, db: &Db) -> Result<bool> {
-    if path.literal_exists() {
-        if path.is_literal_dir() {
+    if path.path_exists() {
+        if path.path_is_dir() {
             return Ok(false);
         }
         let choice = prompt_collision(path, true)?;
@@ -338,16 +338,16 @@ fn is_identical(
 ) -> bool {
     match deploy_type {
         DeployType::Symlink => {
-            target.is_literal_symlink() && fs::read_link(target).is_ok_and(|l| l == source)
+            target.path_is_symlink() && fs::read_link(target).is_ok_and(|l| l == source)
         }
-        DeployType::Copy if source.is_literal_symlink() => {
-            target.is_literal_symlink()
+        DeployType::Copy if source.path_is_symlink() => {
+            target.path_is_symlink()
                 && fs::read_link(source)
                     .is_ok_and(|src_dest| fs::read_link(target).is_ok_and(|l| l == src_dest))
         }
         DeployType::Copy => {
-            source.is_literal_file()
-                && target.is_literal_file()
+            source.path_is_file()
+                && target.path_is_file()
                 && hash_file(source).is_ok_and(|h1| {
                     *source_hash = Some(h1);
                     hash_file(target).is_ok_and(|h2| {
@@ -368,8 +368,8 @@ fn deploy_file(
     let mut source_hash = None;
     let mut target_hash = None;
 
-    if target.literal_exists() {
-        if target.is_literal_dir() {
+    if target.path_exists() {
+        if target.path_is_dir() {
             let choice = prompt_collision(target, false)?;
             match choice {
                 CollisionOptions::Skip => return Ok(()),
@@ -422,7 +422,7 @@ fn deploy_file(
         DeployType::Copy => {
             clone_file(&entry.source, target)?;
             if let Some(mode) = entry.mode
-                && target.is_literal_file()
+                && target.path_is_file()
             {
                 fs::set_permissions(target, fs::Permissions::from_mode(mode.0 as u32))
                     .wrap_err_with(|| {
@@ -440,14 +440,12 @@ fn update_db(target: &Path, entry: &PortalEntry, db: &Db, source_hash: Option<u6
     db.insert_or_update(&DbEntry {
         deploy_type: entry.deploy_type,
         source_path: entry.source.clone(),
-        hash: if target.is_literal_file() {
+        hash: if target.path_is_file() {
             Some(source_hash.unwrap_or(hash_file(&entry.source)?))
         } else {
             None
         },
-        symlink_target: if entry.deploy_type == DeployType::Copy
-            && entry.source.is_literal_symlink()
-        {
+        symlink_target: if entry.deploy_type == DeployType::Copy && entry.source.path_is_symlink() {
             Some(fs::read_link(&entry.source).read_link_error(&entry.source)?)
         } else {
             None

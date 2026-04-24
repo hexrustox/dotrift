@@ -29,7 +29,7 @@ pub fn run(
 
     let reimport = destination.is_none();
 
-    if path.is_literal_dir() && reimport {
+    if path.path_is_dir() && reimport {
         return reimport_directory(&source_dir, &config_override, &path, flags, db_path);
     }
 
@@ -52,7 +52,7 @@ pub fn run(
     let Ok(dest_rel) = destination.strip_prefix(&source_dir) else {
         return Err(eyre!("Destination must be inside source directory"));
     };
-    if destination.literal_exists() && !flags.force {
+    if destination.path_exists() && !flags.force {
         return Err(eyre!("`{}` already exists", destination.display()));
     }
 
@@ -115,7 +115,7 @@ fn reimport_directory(
                     );
                     continue;
                 }
-                if dest.literal_exists() && !flags.force {
+                if dest.path_exists() && !flags.force {
                     eprintln!("Warning: `{}` already exists, skipping", dest.display());
                     continue;
                 }
