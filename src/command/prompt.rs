@@ -1,12 +1,8 @@
-use std::{
-    fmt::Display,
-    io::{self, IsTerminal},
-    path::Path,
-};
+use std::{fmt::Display, path::Path};
 
-use color_eyre::eyre::Context;
+use color_eyre::Result;
 use strum::EnumIter;
-use tui::prompt::{HotKey, SelectPrompt};
+use tui::prompt::HotKey;
 
 #[derive(Default, Clone, Copy, PartialEq, EnumIter)]
 pub enum CollisionOptions {
@@ -38,18 +34,15 @@ impl HotKey for CollisionOptions {
     }
 }
 
-#[allow(unused_variables)]
-pub fn prompt_collision(path: &Path, is_dir: bool) -> color_eyre::Result<CollisionOptions> {
-    #[cfg(test)]
-    {
-        return Ok(tests::PROMPT_SELECTION.with_borrow(|n| *n));
-    }
+#[cfg(test)]
+pub fn prompt_collision(_: &Path, _: bool) -> Result<CollisionOptions> {
+    Ok(tests::PROMPT_SELECTION.with_borrow(|n| *n))
+}
 
-    #[allow(unreachable_code)]
-    let stdin = io::stdin();
-    if !stdin.is_terminal() {
-        return Ok(CollisionOptions::default());
-    }
+#[cfg(not(test))]
+pub fn prompt_collision(path: &Path, is_dir: bool) -> Result<CollisionOptions> {
+    use color_eyre::eyre::Context;
+    use tui::prompt::SelectPrompt;
 
     let type_str = if is_dir { "directory" } else { "file" };
     SelectPrompt::new()

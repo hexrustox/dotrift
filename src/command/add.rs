@@ -1,9 +1,7 @@
 use std::{
     collections::HashMap,
-    env,
     fs::{self, remove_dir_all, remove_file},
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use color_eyre::eyre::{Context, Result, eyre};
@@ -16,8 +14,6 @@ use crate::{
     config::Config,
     db::Db,
     error::IoError,
-    global_config::GlobalConfig,
-    path::{config_path, global_config_path},
 };
 
 pub fn run(
@@ -189,12 +185,20 @@ fn portal_matches(dest_rel: &Path, portal: &HashMap<String, PathBuf>) -> bool {
     })
 }
 
-#[allow(unused_variables)]
-fn launch_editor(source_dir: &Path, config_override: &Option<PathBuf>) -> Result<()> {
-    #[cfg(test)]
-    return Ok(());
+#[cfg(test)]
+fn launch_editor(_: &Path, _: &Option<PathBuf>) -> Result<()> {
+    Ok(())
+}
 
-    #[allow(unreachable_code)]
+#[cfg(not(test))]
+fn launch_editor(source_dir: &Path, config_override: &Option<PathBuf>) -> Result<()> {
+    use std::{env, process::Command};
+
+    use crate::{
+        global_config::GlobalConfig,
+        path::{config_path, global_config_path},
+    };
+
     let specific_config = config_override.is_some();
     let path = config_override.clone().unwrap_or_else(global_config_path);
     let (cmd, mut args) = match GlobalConfig::read(&path) {
