@@ -21,7 +21,7 @@ use crate::{
             is_managed, print_portal, resolve_target, strip_prefix_filter_glob,
         },
     },
-    config::{Config, DeployType, FileMode, Rules},
+    config::{Config, DeployType, FileMode, Rule, Rules},
     db::{Db, DbEntry},
     error::{GlobError, IoError},
     global_config::GlobalConfig,
@@ -83,9 +83,12 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
 
 fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore> {
     let mut builder = GitignoreBuilder::new(target_dir);
-    builder
-        .add_line(None, "dotrift.toml")
-        .expect("Failed to add dotrift.toml ignore");
+
+    #[allow(unused_variables)]
+    let result = builder.add_line(None, "dotrift.toml");
+    #[cfg(test)]
+    result.unwrap_or_else(|_| panic!("Failed to add dotrift.toml ignore"));
+
     for pattern in patterns {
         builder
             .add_line(None, pattern)
@@ -251,21 +254,26 @@ fn apply_rules(
     portal_entries: &mut HashMap<PathBuf, PortalEntry>,
     rules: &Rules,
 ) -> Result<()> {
-    for (pattern, rule) in rules.iter() {
-        let pattern = Pattern::new(pattern).glob_error()?;
-        for (path, portal_entry) in portal_entries.iter_mut() {
-            if !pattern.matches_path_with(path.safe_strip_prefix(target_dir), GLOB_OPTION) {
+    let compiled: Vec<(Pattern, &Rule)> = rules
+        .iter()
+        .map(|(p, r)| Pattern::new(p).map(|pat| (pat, r)))
+        .collect::<Result<Vec<_>, _>>()
+        .glob_error()?;
+
+    for (path, portal_entry) in portal_entries.iter_mut() {
+        let rel = path.safe_strip_prefix(target_dir); // computed E times (was R×E)
+        for (pattern, rule) in &compiled {
+            if !pattern.matches_path_with(rel, GLOB_OPTION) {
                 continue;
             }
-            if let Some(rule_type) = &rule.r#type {
-                portal_entry.deploy_type = *rule_type;
+            if let Some(t) = &rule.deploy_type {
+                portal_entry.deploy_type = *t;
             }
-            if let Some(rule_mode) = &rule.mode {
-                portal_entry.mode = Some(*rule_mode);
+            if let Some(m) = &rule.mode {
+                portal_entry.mode = Some(*m);
             }
         }
     }
-
     Ok(())
 }
 
@@ -442,7 +450,11 @@ fn update_db(target: &Path, entry: &PortalEntry, db: &Db, source_hash: Option<u6
         deploy_type: entry.deploy_type,
         source_path: entry.source.clone(),
         hash: if target.path_is_file() {
-            Some(source_hash.unwrap_or(hash_file(&entry.source)?))
+            Some(
+                source_hash
+                    .map(Ok)
+                    .unwrap_or_else(|| hash_file(&entry.source))?,
+            )
         } else {
             None
         },
@@ -550,15 +562,58 @@ mod tests {
         flatten(portal_entries, temp_dir.path())
     }
 
-    #[test_case("" => portal_entries!(("a.txt", "a.txt", Symlink, None)); "empty")]
-    #[test_case(r#""*.txt" = { mode = "600" }"# => portal_entries!(("a.txt", "a.txt", Symlink, Some(FileMode(0o600)))); "rule_mode")]
-    #[test_case(r#""*.txt" = { type = "copy" }"# => portal_entries!(("a.txt", "a.txt", Copy, None)); "rule_type")]
+    #[test_case("" => portal_entries!(
+        ("a.txt",         "a.txt",         Symlink, None),
+        ("b.txt",         "b.txt",         Symlink, None),
+        ("subdir/c.txt",  "subdir/c.txt",  Symlink, None),
+        ("subdir/d.txt",  "subdir/d.txt",  Symlink, None)
+    ); "empty")]
+    #[test_case(r#""*.txt" = { type = "copy" }"# => portal_entries!(
+        ("a.txt",         "a.txt",         Copy,    None),
+        ("b.txt",         "b.txt",         Copy,    None),
+        ("subdir/c.txt",  "subdir/c.txt",  Symlink, None),
+        ("subdir/d.txt",  "subdir/d.txt",  Symlink, None)
+    ); "selective_type")]
+    #[test_case(r#""*.txt" = { mode = "600" }"# => portal_entries!(
+        ("a.txt",         "a.txt",         Symlink, Some(FileMode(0o600))),
+        ("b.txt",         "b.txt",         Symlink, Some(FileMode(0o600))),
+        ("subdir/c.txt",  "subdir/c.txt",  Symlink, None),
+        ("subdir/d.txt",  "subdir/d.txt",  Symlink, None)
+    ); "rule_mode")]
     #[test_case(r#""*.txt" = { mode = "600" }
-"a.txt" = { type = "copy" }"# => portal_entries!(("a.txt", "a.txt", Copy, Some(FileMode(0o600)))); "rule_merge")]
+    "a.txt" = { type = "copy" }"# => portal_entries!(
+        ("a.txt",         "a.txt",         Copy,    Some(FileMode(0o600))),
+        ("b.txt",         "b.txt",         Symlink, Some(FileMode(0o600))),
+        ("subdir/c.txt",  "subdir/c.txt",  Symlink, None),
+        ("subdir/d.txt",  "subdir/d.txt",  Symlink, None)
+    ); "rule_merge")]
     #[test_case(r#""*.txt" = { type = "symlink", mode = "600" }
-"a.txt" = { type = "copy", mode = "700" }"# => portal_entries!(("a.txt", "a.txt", Copy, Some(FileMode(0o700)))); "rule_override")]
+    "a.txt" = { type = "copy", mode = "700" }"# => portal_entries!(
+        ("a.txt",         "a.txt",         Copy,    Some(FileMode(0o700))),
+        ("b.txt",         "b.txt",         Symlink, Some(FileMode(0o600))),
+        ("subdir/c.txt",  "subdir/c.txt",  Symlink, None),
+        ("subdir/d.txt",  "subdir/d.txt",  Symlink, None)
+    ); "rule_override")]
+    #[test_case(r#""subdir/*.txt" = { mode = "600" }"# => portal_entries!(
+        ("a.txt",         "a.txt",         Symlink, None),
+        ("b.txt",         "b.txt",         Symlink, None),
+        ("subdir/c.txt",  "subdir/c.txt",  Symlink, Some(FileMode(0o600))),
+        ("subdir/d.txt",  "subdir/d.txt",  Symlink, Some(FileMode(0o600)))
+    ); "subdir_rule")]
+    #[test_case(r#""**/*.txt" = { type = "copy" }"# => portal_entries!(
+        ("a.txt",         "a.txt",         Copy, None),
+        ("b.txt",         "b.txt",         Copy, None),
+        ("subdir/c.txt",  "subdir/c.txt",  Copy, None),
+        ("subdir/d.txt",  "subdir/d.txt",  Copy, None)
+    ); "recursive_glob")]
+    #[test_case(r#""*.rs" = { type = "copy" }"# => portal_entries!(
+        ("a.txt",         "a.txt",         Symlink, None),
+        ("b.txt",         "b.txt",         Symlink, None),
+        ("subdir/c.txt",  "subdir/c.txt",  Symlink, None),
+        ("subdir/d.txt",  "subdir/d.txt",  Symlink, None)
+    ); "no_match")]
     fn test_apply_rules(rule: &str) -> HashMap<PathBuf, PortalEntry> {
-        let (temp_dir, source_dir, target_dir) = setup_test(r#""a.txt" = "a.txt""#, "", rule, true);
+        let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, "", rule, true);
         let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
         let mut portal_entries =
