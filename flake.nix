@@ -6,7 +6,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-parts.url = "github:hercules-ci/flake-parts";
-    nix-capsule.url = "gitlab:codnixus/nix-capsule?ref=v0.2.0";
+    nix-capsule.url = "gitlab:codnixus/nix-capsule?ref=v0.3.0";
   };
 
   outputs =
@@ -20,13 +20,14 @@
         let
           pkgs = import inputs.nixpkgs {
             inherit system;
-            overlays = [ inputs.rust-overlay.overlays.default ];
+            overlays = [
+              inputs.rust-overlay.overlays.default
+              inputs.nix-capsule.overlays.default
+            ];
           };
-          capsule-lib = inputs.nix-capsule.lib { inherit system pkgs; };
+          capsule-lib = inputs.nix-capsule.lib { inherit pkgs; };
         in
         {
-          packages.ncap = pkgs.callPackage ./package.nix { };
-
           devShells = {
             default = capsule-lib.mkShell {
               image = "ubuntu:latest";
@@ -36,6 +37,7 @@
               options = [
                 "-e HOME"
                 "-e NIX_PATH"
+                "-e HOME"
                 "-v \"$HOME/.cargo\":\"$HOME/.cargo\""
               ];
               wrappers = [
@@ -50,11 +52,11 @@
             container =
               let
                 rust = (
-                  pkgs.rust-bin.stable."1.93.1".default.override {
+                  pkgs.rust-bin.stable."1.95.0".default.override {
                     extensions = [
                       "rust-src"
                       "rust-analyzer"
-                      "llvm-tools-preview"
+                      # "llvm-tools-preview"
                     ];
                   }
                 );
@@ -64,7 +66,6 @@
                   cargo-deny
                   cargo-edit
                   cargo-machete
-                  cargo-llvm-cov
                   clang
                   codebook
                   mold
@@ -72,8 +73,6 @@
                   nixfmt
                   rust
                   taplo
-
-                  nano
                 ];
               };
           };
