@@ -1,26 +1,10 @@
 use dotrift::cli::GlobalFlags;
 use dotrift::{cli::ApplyFlags, command::apply};
 use std::fs;
-use std::path::PathBuf;
-use tempfile::TempDir;
 
-fn setup_test(config: &str) -> (TempDir, PathBuf, PathBuf, PathBuf) {
-    let temp_dir = tempfile::tempdir().unwrap();
-    let source_dir = temp_dir.path().join("source");
-    let target_dir = temp_dir.path().join("target");
-    let db_path = temp_dir.path().join("db");
+use crate::common::{flags, setup_test};
 
-    fs::create_dir(&source_dir).unwrap();
-    fs::create_dir(&target_dir).unwrap();
-    fs::write(source_dir.join("dotrift.toml"), config).unwrap();
-    fs::write(source_dir.join("a.txt"), "").unwrap();
-    fs::write(source_dir.join("b.txt"), "").unwrap();
-    fs::create_dir(source_dir.join("subdir")).unwrap();
-    fs::write(source_dir.join("subdir").join("c.txt"), "").unwrap();
-    fs::write(source_dir.join("subdir").join("d.txt"), "").unwrap();
-
-    (temp_dir, source_dir, target_dir, db_path)
-}
+mod common;
 
 #[test]
 fn test_run() {
@@ -74,11 +58,7 @@ fn test_dry_run() {
     let (_temp_dir, source_dir, target_dir, db_path) = setup_test(config);
 
     apply::run(
-        GlobalFlags::new(
-            Some(source_dir.to_path_buf()),
-            Some(target_dir.to_path_buf()),
-            None,
-        ),
+        flags(&source_dir, &target_dir),
         &db_path,
         ApplyFlags {
             dry_run: true,
@@ -99,11 +79,7 @@ fn test_clean_up_dry_run() {
     let (_temp_dir, source_dir, target_dir, db_path) = setup_test(config);
 
     apply::run(
-        GlobalFlags::new(
-            Some(source_dir.to_path_buf()),
-            Some(target_dir.to_path_buf()),
-            None,
-        ),
+        flags(&source_dir, &target_dir),
         &db_path,
         ApplyFlags {
             dry_run: false,
@@ -120,11 +96,7 @@ fn test_clean_up_dry_run() {
     fs::write(source_dir.join("dotrift.toml"), config).unwrap();
 
     apply::run(
-        GlobalFlags::new(
-            Some(source_dir.to_path_buf()),
-            Some(target_dir.to_path_buf()),
-            None,
-        ),
+        flags(&source_dir, &target_dir),
         &db_path,
         ApplyFlags {
             dry_run: true,
