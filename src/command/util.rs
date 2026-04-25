@@ -13,6 +13,7 @@ use color_eyre::eyre::{Context, Result, eyre};
 use glob::MatchOptions;
 use normalize_path::NormalizePath;
 use twox_hash::XxHash64;
+use walkdir::WalkDir;
 
 use crate::{
     command::apply::PortalEntry,
@@ -155,14 +156,13 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
         },
         DeployType::Copy => {
             if let Some(hash) = db_entry.hash {
-                target.path_is_file()
-                    && hash
-                        == target_hash.unwrap_or({
-                            let Ok(h) = hash_file(target) else {
-                                return false;
-                            };
-                            h
-                        })
+                target.path_is_file() && {
+                    if let Ok(h) = target_hash.map(Ok).unwrap_or_else(|| hash_file(target)) {
+                        h == hash
+                    } else {
+                        false
+                    }
+                }
             } else {
                 target.path_is_symlink()
                     && fs::read_link(target).is_ok_and(|l| Some(l) == db_entry.symlink_target)
@@ -173,25 +173,30 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
 
 pub fn copy_recursive(from: &Path, to: &Path) -> Result<()> {
     if from.path_is_dir() {
-        fs::create_dir_all(to).create_dir_error(to)?;
-        for entry in fs::read_dir(from).read_dir_error(from)?.flatten() {
+        // TODO extract walkdir
+        for entry in WalkDir::new(from).into_iter().flatten() {
             let path = entry.path();
-            let suffix = path.safe_strip_prefix(from);
-            copy_recursive(&path, &to.join(suffix))?;
+            let base = path.safe_strip_prefix(from);
+            let new = to.join(base);
+            if path.path_is_dir() {
+                if !new.path_exists() {
+                    fs::create_dir(&new).create_dir_error(&new)?;
+                }
+            } else {
+                clone_file(path, &new)?;
+            }
         }
     } else {
         clone_file(from, to)?;
     }
-
     Ok(())
 }
 
 pub fn clone_file(from: &Path, to: &Path) -> Result<()> {
+    let _ = fs::remove_file(to);
     if from.path_is_file() {
-        let _ = fs::remove_file(to);
         fs::copy(from, to).copy_file_error(from, to)?;
     } else if from.path_is_symlink() {
-        let _ = fs::remove_file(to);
         unix_fs::symlink(fs::read_link(from).read_link_error(from)?, to).symlink_error(to)?;
     } else {
         #[cfg(test)]
@@ -226,8 +231,7 @@ pub fn clean_up(
                     fs::remove_file(path).remove_file_error(path)?;
 
                     if prune_empty_dirs {
-                        let mut current = path.parent();
-                        while let Some(dir) = current {
+                        for dir in path.ancestors().skip(1) {
                             if let Ok(iter) = dir.read_dir()
                                 && iter.count() == 0
                             {
@@ -235,7 +239,6 @@ pub fn clean_up(
                             } else {
                                 break;
                             }
-                            current = dir.parent();
                         }
                     }
                 }
@@ -559,13 +562,83 @@ pub mod tests {
         (t.join("file1"), t.join("file2"))
     }, |t| {
         assert_eq!(fs::read_to_string(t).unwrap(), "a");
-    }; "file")]
+    }; "copy_regular_file")]
+    #[test_case(|t| {
+        fs::write(t.join("file1"), "new").unwrap();
+        fs::write(t.join("file2"), "old").unwrap();
+        (t.join("file1"), t.join("file2"))
+    }, |t| {
+        assert_eq!(fs::read_to_string(t).unwrap(), "new");
+    }; "copy_regular_file_overwrite")]
+    #[test_case(|t| {
+        fs::write(t.join("file1"), "data").unwrap();
+        unix_fs::symlink(Path::new("/x"), t.join("link")).unwrap();
+        (t.join("file1"), t.join("link"))
+    }, |t| {
+        assert!(t.is_file());
+        assert_eq!(fs::read_to_string(t).unwrap(), "data");
+    }; "copy_regular_file_overwrite_symlink")]
     #[test_case(|t| {
         unix_fs::symlink(Path::new("/a"), t.join("file1")).unwrap();
         (t.join("file1"), t.join("file2"))
     }, |t| {
         assert_eq!(fs::read_link(t).unwrap(), Path::new("/a"));
-    }; "symlink")]
+    }; "copy_symlink")]
+    #[test_case(|t| {
+        unix_fs::symlink(Path::new("/a"), t.join("link")).unwrap();
+        fs::write(t.join("file2"), "data").unwrap();
+        (t.join("link"), t.join("file2"))
+    }, |t| {
+        assert!(t.is_symlink());
+        assert_eq!(fs::read_link(t).unwrap(), Path::new("/a"));
+    }; "copy_symlink_overwrite_file")]
+    #[test_case(|t| {
+        unix_fs::symlink(Path::new("/a"), t.join("link1")).unwrap();
+        unix_fs::symlink(Path::new("/b"), t.join("link2")).unwrap();
+        (t.join("link1"), t.join("link2"))
+    }, |t| {
+        assert_eq!(fs::read_link(t).unwrap(), Path::new("/a"));
+    }; "copy_symlink_overwrite_symlink")]
+    #[test_case(|t| {
+        unix_fs::symlink(Path::new("/nonexistent"), t.join("broken")).unwrap();
+        (t.join("broken"), t.join("dest"))
+    }, |t| {
+        assert!(t.is_symlink());
+        assert_eq!(fs::read_link(t).unwrap(), Path::new("/nonexistent"));
+    }; "copy_broken_symlink")]
+    #[test_case(|t| {
+        fs::create_dir(t.join("sub")).unwrap();
+        unix_fs::symlink(Path::new("../other"), t.join("sub/rel")).unwrap();
+        (t.join("sub/rel"), t.join("dest"))
+    }, |t| {
+        assert!(t.is_symlink());
+        assert_eq!(fs::read_link(t).unwrap(), Path::new("../other"));
+    }; "copy_relative_symlink")]
+    #[test_case(|t| {
+        fs::write(t.join("empty"), "").unwrap();
+        (t.join("empty"), t.join("dest"))
+    }, |t| {
+        assert!(t.is_file());
+        assert_eq!(fs::read_to_string(t).unwrap(), "");
+    }; "copy_empty_file")]
+    #[test_case(|t| {
+        (t.join("ghost"), t.join("dest"))
+    }, |_| {} => panics ""; "source_not_exists")]
+    #[test_case(|t| {
+        fs::create_dir(t.join("dir")).unwrap();
+        fs::write(t.join("file"), "a").unwrap();
+        (t.join("file"), t.join("dir"))
+    }, |_| {} => panics ""; "target_is_directory")]
+    fn test_clone_file(
+        setup: impl FnOnce(&Path) -> (PathBuf, PathBuf),
+        assertion: impl FnOnce(&Path),
+    ) {
+        let temp_dir = tempdir().unwrap();
+        let (f, t) = setup(temp_dir.path());
+        clone_file(&f, &t).unwrap();
+        assertion(&t);
+    }
+
     #[test_case(|t| {
         fs::create_dir_all(t.join("dir1/subdir")).unwrap();
         fs::write(t.join("dir1/file1"), "").unwrap();
@@ -578,7 +651,48 @@ pub mod tests {
         assert!(t.join("file2").exists());
         assert!(t.join("subdir/file3").exists());
         assert!(t.join("subdir/file4").is_symlink());
-    }; "directory")]
+    }; "recursive")]
+    #[test_case(|t| {
+        fs::create_dir_all(t.join("dir1/subdir")).unwrap();
+        fs::create_dir_all(t.join("dir2/subdir")).unwrap();
+        fs::write(t.join("dir1/subdir/file1"), "").unwrap();
+        (t.join("dir1"), t.join("dir2"))
+    }, |t| {
+        assert!(t.join("subdir/file1").exists());
+    }; "recursive_merge_into")]
+    #[test_case(|t| {
+        fs::create_dir(t.join("empty")).unwrap();
+        (t.join("empty"), t.join("dest"))
+    }, |t| {
+        assert!(t.is_dir());
+        assert_eq!(t.read_dir().unwrap().count(), 0);
+    }; "recursive_empty_dir")]
+    #[test_case(|t| {
+        fs::create_dir_all(t.join("src/sub")).unwrap();
+        fs::create_dir_all(t.join("dst/sub")).unwrap();
+        fs::write(t.join("src/sub/file"), "new").unwrap();
+        fs::write(t.join("dst/sub/file"), "old").unwrap();
+        (t.join("src"), t.join("dst"))
+    }, |t| {
+        assert_eq!(fs::read_to_string(t.join("sub/file")).unwrap(), "new");
+    }; "recursive_overwrite")]
+    #[test_case(|t| {
+        fs::create_dir_all(t.join("deep/a/b/c")).unwrap();
+        fs::write(t.join("deep/a/b/c/f"), "x").unwrap();
+        (t.join("deep"), t.join("dest"))
+    }, |t| {
+        assert!(t.join("a/b/c/f").exists());
+        assert_eq!(fs::read_to_string(t.join("a/b/c/f")).unwrap(), "x");
+    }; "recursive_deeply_nested")]
+    #[test_case(|t| {
+        fs::create_dir_all(t.join("src/b")).unwrap();
+        fs::write(t.join("src/key name.txt"), "utf8").unwrap();
+        fs::write(t.join("src/b/spaces  here.log"), "x").unwrap();
+        (t.join("src"), t.join("dest"))
+    }, |t| {
+        assert!(t.join("key name.txt").exists());
+        assert!(t.join("b/spaces  here.log").exists());
+    }; "recursive_special_filenames")]
     fn test_copy_recursive(
         setup: impl FnOnce(&Path) -> (PathBuf, PathBuf),
         assertion: impl FnOnce(&Path),
