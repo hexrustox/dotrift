@@ -34,7 +34,7 @@ pub fn run(
     let reimport = destination.is_none();
 
     if path.path_is_dir() && reimport {
-        return reimport_directory(&source_dir, &config_override, &path, flags, db_path);
+        return reimport_directory(&source_dir, config_override, &path, flags, db_path);
     }
 
     let destination = if let Some(dest) = destination {
@@ -68,7 +68,7 @@ pub fn run(
     }
 
     if should_open {
-        launch_editor(&source_dir, &config_override)?;
+        launch_editor(&source_dir, config_override)?;
     }
 
     if flags.force {
@@ -95,7 +95,7 @@ pub fn run(
 
 fn reimport_directory(
     source_dir: &Path,
-    config_override: &Option<PathBuf>,
+    config_override: Option<PathBuf>,
     dir: &Path,
     flags: AddFlags,
     db_path: &Path,
@@ -191,33 +191,21 @@ fn portal_matches(dest_rel: &Path, portal: &HashMap<String, PathBuf>) -> bool {
 }
 
 #[cfg(test)]
-fn launch_editor(_: &Path, _: &Option<PathBuf>) -> Result<()> {
+fn launch_editor(_: &Path, _: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
 #[cfg(not(test))]
-fn launch_editor(source_dir: &Path, config_override: &Option<PathBuf>) -> Result<()> {
+fn launch_editor(source_dir: &Path, config_override: Option<PathBuf>) -> Result<()> {
     use std::{env, process::Command};
 
-    use crate::{
-        global_config::GlobalConfig,
-        path::{config_path, global_config_path},
-    };
+    use crate::{global_config::GlobalConfig, path::config_path};
 
-    let specific_config = config_override.is_some();
-    let default_path = global_config_path();
-    let path = config_override
-        .as_ref()
-        .map(|p| p.as_path())
-        .unwrap_or(&default_path);
-    let (cmd, mut args) = match GlobalConfig::read(path) {
-        Ok(GlobalConfig {
+    let (cmd, mut args) = match GlobalConfig::read(config_override)? {
+        GlobalConfig {
             editor_command: Some(config),
             ..
-        }) => (config.command, config.args),
-        Err(err) if specific_config => {
-            return Err(err);
-        }
+        } => (config.command, config.args),
         _ => match env::var_os("VISUAL").or(env::var_os("EDITOR")) {
             Some(cmd) => (cmd.to_string_lossy().to_string(), Vec::new()),
             None => return Err(eyre!("Failed to find editor")),

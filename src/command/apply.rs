@@ -25,7 +25,6 @@ use crate::{
     db::{Db, DbEntry},
     error::{GlobError, IoError},
     global_config::GlobalConfig,
-    path::global_config_path,
 };
 
 #[derive(Default, Debug, PartialEq)]
@@ -69,13 +68,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
         return Ok(());
     }
 
-    let specific_config = config_override.is_some();
-    let overwrite_identical =
-        match GlobalConfig::read(&config_override.unwrap_or(global_config_path())) {
-            Ok(config) => config.overwrite_identical,
-            Err(e) if specific_config => return Err(e),
-            _ => false,
-        };
+    let overwrite_identical = GlobalConfig::read(config_override)?.overwrite_identical;
     traverse_tree(Path::new("/"), &tree, &db, overwrite_identical)?;
 
     Ok(())
