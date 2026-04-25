@@ -48,9 +48,36 @@ args = ["-f"]
 * `overwrite-identical` (bool): Whether to update the DB entry when a target file already matches what dotrift would write. Default: `false`.
 * `editor-command` (optional table): Command to open `dotrift.toml` for the `add` command.
   * `command` (string): The executable name or path.
-  * `args` (array of strings): Arguments passed to the command.
+  * `args` (array of strings): Arguments passed to the command. Supports parameter expansion (see below).
 
 If `editor-command` is omitted, the `add` command falls back to `$VISUAL`, then `$EDITOR`.
+
+#### Parameter Expansion
+
+The `args` array supports parameter expansion using `{param}` syntax.
+
+| Parameter | Description |
+|-----------|-------------|
+| `{file}` | Absolute path to the file being opened |
+| `{row}` | Line number (1-indexed) |
+| `{col}` | Column number (1-indexed) |
+
+**Rules:**
+* `{param}` in args strings is replaced with the parameter value.
+* All parameters are guaranteed to be set by the program.
+* Unknown parameter: error.
+* Literal braces: `{{` and `}}` produce `{` and `}`.
+* No shell expansion — args passed directly to `Command::new()`.
+
+**Example:**
+
+```toml
+[editor-command]
+command = "vim"
+args = ["-f", "{file}", "+{row}"]
+```
+
+Expands to: `vim -f /path/to/dotrift.toml +42`
 
 ---
 

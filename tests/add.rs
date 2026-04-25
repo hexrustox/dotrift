@@ -73,13 +73,44 @@ fn test_add_reimport() {
 #[test]
 #[ignore]
 fn test_editor_open() {
-    let (temp_dir, source_dir, _, _) = setup_test("# temp config file");
+    let (temp_dir, source_dir, _, _) = setup_test("# test editor open");
 
     let path = temp_dir.path().join("file");
     fs::write(&path, "").unwrap();
 
     add::run(
         flags(source_dir.clone()),
+        path,
+        Some(PathBuf::from("file")),
+        AddFlags {
+            copy: false,
+            force: false,
+            editor: None,
+        },
+        &temp_dir.path().join("db"),
+    )
+    .unwrap();
+
+    assert!(source_dir.join("file").exists());
+}
+
+#[test]
+#[ignore]
+fn test_editor_command_config() {
+    let (temp_dir, source_dir, _, _) = setup_test("# test editor command config");
+
+    let config = r#"[editor-command]
+command = "nano"
+args = ["+{row},{col}", "{file}"]
+"#;
+    let config_path = temp_dir.path().join("config");
+    fs::write(&config_path, config).unwrap();
+
+    let path = temp_dir.path().join("file");
+    fs::write(&path, "").unwrap();
+
+    add::run(
+        GlobalFlags::new(Some(source_dir.clone()), None, Some(config_path)),
         path,
         Some(PathBuf::from("file")),
         AddFlags {

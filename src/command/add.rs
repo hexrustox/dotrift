@@ -199,22 +199,32 @@ fn launch_editor(_: &Path, _: Option<PathBuf>) -> Result<()> {
 fn launch_editor(source_dir: &Path, config_override: Option<PathBuf>) -> Result<()> {
     use std::{env, process::Command};
 
-    use crate::{global_config::GlobalConfig, path::config_path};
+    use crate::{
+        global_config::{GlobalConfig, expand_args},
+        path::config_path,
+    };
 
-    let (cmd, mut args) = match GlobalConfig::read(config_override)? {
+    let file = config_path(source_dir).to_string_lossy().to_string();
+
+    let (cmd, args) = match GlobalConfig::read(config_override)? {
         GlobalConfig {
             editor_command: Some(config),
             ..
-        } => (config.command, config.args),
+        } => {
+            let params = [("file", file.as_str()), ("row", "1"), ("col", "1")];
+            let args = expand_args(&config.args, &params)
+                .wrap_err("Failed to expand editor command parameters")?;
+            (config.command, args)
+        }
         _ => match env::var_os("VISUAL").or(env::var_os("EDITOR")) {
-            Some(cmd) => (cmd.to_string_lossy().to_string(), Vec::new()),
+            Some(cmd) => (cmd.to_string_lossy().to_string(), vec![file]),
             None => return Err(eyre!("Failed to find editor")),
         },
     };
-    args.push(config_path(source_dir).to_string_lossy().to_string());
+
     Command::new(&cmd).args(&args).status().wrap_err_with(|| {
         format!(
-            "Failed to spawn process `{}`",
+            "Failed to launch editor: {}",
             [vec![cmd], args].concat().join(" ")
         )
     })?;
