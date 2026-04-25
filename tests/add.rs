@@ -97,7 +97,15 @@ fn test_editor_open() {
 #[test]
 #[ignore]
 fn test_editor_command_config() {
-    let (temp_dir, source_dir, _, _) = setup_test("# test editor command config");
+    let (temp_dir, source_dir, _, _) = setup_test(
+        r#"# test editor command config
+[portal]
+key = "value"
+
+[rule]
+key = {}
+"#,
+    );
 
     let config = r#"[editor-command]
 command = "nano"

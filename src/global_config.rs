@@ -48,6 +48,27 @@ pub fn expand_arg(arg: &str, params: &[(&str, &str)]) -> Result<String> {
     Ok(result)
 }
 
+pub fn find_portal_cursor(content: &str) -> (u32, u32) {
+    let mut in_portal = false;
+    let mut last = 1;
+
+    for (i, line) in content.lines().enumerate() {
+        let t = line.trim();
+        if t == "[portal]" {
+            in_portal = true;
+            last = i as u32 + 2;
+        } else if in_portal {
+            if t.starts_with('[') {
+                break;
+            }
+            if !t.is_empty() && !t.starts_with('#') {
+                last = i as u32 + 2;
+            }
+        }
+    }
+    (last, 1)
+}
+
 #[derive(Default, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct GlobalConfig {
@@ -105,5 +126,20 @@ mod tests {
     )]
     fn test_expand_args(args: &[String], params: &[(&str, &str)]) -> Vec<String> {
         expand_args(args, params).unwrap()
+    }
+
+    #[test_case("" => (1, 1); "empty")]
+    #[test_case("[rule]\nk = v\n" => (1, 1); "no_portal")]
+    #[test_case("[portal]\n" => (2, 1); "portal_empty")]
+    #[test_case("[portal]\nk = v\n" => (3, 1); "portal_one_entry")]
+    #[test_case("[portal]\na = b\nc = d\n" => (4, 1); "portal_multi_entry")]
+    #[test_case("[portal]\n# note\na = b\n" => (4, 1); "portal_with_comment")]
+    #[test_case("[portal]\n\n\na = b\n" => (5, 1); "portal_with_blanks")]
+    #[test_case("[portal]\na = b\n\n[rule]\n" => (3, 1); "portal_before_other_table")]
+    #[test_case(r#"[portal]
+"a" = b
+"# => (3, 1); "portal_quoted_key")]
+    fn test_find_portal_cursor(content: &str) -> (u32, u32) {
+        find_portal_cursor(content)
     }
 }

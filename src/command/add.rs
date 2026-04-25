@@ -200,18 +200,27 @@ fn launch_editor(source_dir: &Path, config_override: Option<PathBuf>) -> Result<
     use std::{env, process::Command};
 
     use crate::{
-        global_config::{GlobalConfig, expand_args},
+        global_config::{GlobalConfig, expand_args, find_portal_cursor},
         path::config_path,
     };
 
     let file = config_path(source_dir).to_string_lossy().to_string();
+    let (row, col) = if let Ok(content) = fs::read_to_string(&file) {
+        find_portal_cursor(&content)
+    } else {
+        (1, 1)
+    };
 
     let (cmd, args) = match GlobalConfig::read(config_override)? {
         GlobalConfig {
             editor_command: Some(config),
             ..
         } => {
-            let params = [("file", file.as_str()), ("row", "1"), ("col", "1")];
+            let params = [
+                ("file", file.as_str()),
+                ("row", &row.to_string()),
+                ("col", &col.to_string()),
+            ];
             let args = expand_args(&config.args, &params)
                 .wrap_err("Failed to expand editor command parameters")?;
             (config.command, args)
