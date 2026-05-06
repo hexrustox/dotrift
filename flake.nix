@@ -73,6 +73,8 @@
                   nixfmt
                   rust
                   taplo
+
+                  nano
                 ];
               };
           };

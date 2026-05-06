@@ -359,28 +359,68 @@ Reverses the `apply` process, removing managed files from the target. Config mus
 **Options:**
 * `-c, --copy`: Copy instead of moving. Implicit in re-import mode.
 * `-f, --force`: Remove obstructions blocking the move/copy.
-* `-e, --editor <WHEN>`: Values: `always`, `never`. Default: open editor if no portal entry matches destination.
+* `-e, --editor <WHEN>`: Values: `always`, `never`. Default: auto (open editor if conditions below are met).
+* `-n, --no-modify`: Do not modify `dotrift.toml` (skip auto-add and collision annotations). Editor may still open for manual configuration.
 
 ### Execution Pipeline
 
 If PATH is a directory:
-- *Standard mode:* Recursively copy/move directory contents (preserve structure). Apply pipeline to directory as unit.
-- *Re-import mode:* Walk directory. For each file, apply pipeline individually.
+- *Standard mode:* Recursively copy/move directory contents. Apply pipeline to directory as unit. Portal analysis and editor decision work the same as for a single file: `dest_rel` is the directory's destination relative to `source-dir`. Auto-add produces a single literal directory portal entry.
+- *Re-import mode:* Walk directory. For each file, apply pipeline individually. The editor opens once for the entire batch. Files not found in the database are skipped with a warning. Each file that needs one gets its own auto-added portal entry.
 
 Otherwise (single file/symlink):
+
+**Definitions:** `dest_rel` is the resolved destination path relative to `source-dir` (the portal key in auto-added entries). `computed_target` is derived from `<PATH>` by stripping the target directory prefix; if `<PATH>` is not under the target directory, the absolute path is used instead (this triggers the `# WARNING:` comment in step 6).
 
 1. **Normalize PATH:** Resolve to absolute path.
 2. **Resolve Destination:**
    - *Standard mode* (DESTINATION provided): If relative, join `source-dir` + DESTINATION. If absolute, use as-is. Normalize. Error if escapes source-dir.
-   - *Re-import mode* (DESTINATION omitted): Query DB for `target_path` == PATH. Error if not found, warning if PATH is a directory. Set destination to `entry.source_path`.
-3. **Editor Decision:**
-   - `--editor never`: skip.
-   - `--editor always`: open editor. Error if no editor found.
-   - Auto (default): open editor if destination doesn't match any portal entry. Match = literal key equals destination, literal key is prefix of destination (`<key>/...`), or glob matches destination (relative to source-dir). If no portal match and re-import: open editor (user adds entry). Error if no editor found.
-4. **Collision Check:** Error if destination exists on disk (unless `--force`). If `--force`, remove obstructions.
-5. **Clone:**
-   - *Standard mode:* If `--copy`, copy. Else, move. Error if move crosses filesystem boundaries.
+   - *Re-import mode* (DESTINATION omitted): Query DB for `target_path` == PATH. Error if the database does not exist or no entry is found. Set destination to `entry.source_path`.
+3. **Resolve Target Directory:** Determine target directory using full precedence: CLI `-t` > config `target-directory` > `$HOME`.
+4. **Analyze Portal Mapping:** Check whether any existing portal key matches `dest_rel`, and whether the auto-added entry would collide with existing entries:
+   - **Missing key:** No portal key matches `dest_rel` — a new entry is needed.
+   - **Target collision:** Another portal entry (different key) maps some source file to the same target path as `dest_rel` would. This would cause `apply` to halt with a collision error.
+5. **Editor Decision** (based on step 4 — no config modifications yet):
+   - `--editor never`: skip (also suppresses auto-add and annotations).
+   - `--editor always`: open editor.
+   - Auto (default): open editor if **Missing key** or **Target collision** is detected.
+6. **Prepare Config Changes:** Performed only when the editor will open (step 5) and `--no-modify` is not set. Apply changes based on step 4:
+   - **Missing key:** Append `"dest_rel" = "computed_target"` to the end of `[portal]`. Create `dotrift.toml` (with a `[portal]` section) if the file does not exist.
+     - **Warning:** If `computed_target` is outside the target directory, prepend a `# WARNING:` comment above the new entry:
+     ```toml
+     # WARNING: <computed_target> is outside target directory <target_dir>
+     "dest_rel" = "computed_target"
+     ```
+   - **Target collision:** For each unique target path with collisions, assign a sequential ID. Place a `# CONFLICT <ID>` comment directly above every portal entry (including any newly auto-added entry) that resolves to that target:
+   ```toml
+   [portal]
+   # CONFLICT 1
+   "a" = "a"
+   # CONFLICT 1
+   "b" = "a"
+   # CONFLICT 1
+   "c" = "a"
+   # CONFLICT 2
+   "x" = "b"
+   # CONFLICT 2
+   "y" = "b"
+   ```
+
+   Write the modified content to a **temporary file**. If no changes are needed (no missing key and no collision), skip this step — the editor opens on the real config directly.
+7. **Open Editor (if decision was yes):**
+   - If a temp file was prepared: open editor on the temp file. After exit:
+     - **File saved:** copy temp to real config.
+     - **File not saved:** discard temp (config unchanged).
+   - If no temp file: open editor on the real `dotrift.toml` directly.
+
+   When the editor opens, `{file}` is the path to the file being edited (temp file or real `dotrift.toml`). `{row}` positions the cursor at the auto-added portal entry, or at the end of the `[portal]` section if no entry was auto-added.
+
+   If no editor is available (none of `editor-command`, `$VISUAL`, or `$EDITOR` are set), error and halt.
+8. **Collision Check:** Error if the destination path exists on disk — file, directory, or any other type (including an empty directory). If `--force`, remove the obstruction (recursively for directories).
+9. **Clone:**
+   - *Standard mode:* If `--copy`, copy. Else, move.
    - *Re-import mode:* Always copy.
+   - Symlink handling during clone follows the `type = "copy"` behavior (see Symlinks in Source): the symlink itself is copied/moved, preserving its link target. It is never followed.
 
 ---
 
