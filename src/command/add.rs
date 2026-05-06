@@ -4,8 +4,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use color_eyre::eyre::{Context, Result, eyre};
+#[cfg(not(test))]
 use color_eyre::Section;
+use color_eyre::eyre::{Context, Result, eyre};
 use glob::Pattern;
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
@@ -18,6 +19,7 @@ use crate::{
     },
     config::Config,
     db::Db,
+    output,
 };
 
 pub fn run(
@@ -117,20 +119,20 @@ fn reimport_directory(
             Some(db_entry) => {
                 let dest = db_entry.source_path;
                 if !dest.starts_with(source_dir) {
-                    eprintln!(
-                        "Warning: `{}` destination outside source directory, skipping",
+                    output::print_warn(format!(
+                        "destination `{}` is outside source directory, skipping",
                         path.display()
-                    );
+                    ));
                     continue;
                 }
                 if dest.path_exists() && !flags.force {
-                    eprintln!("Warning: `{}` already exists, skipping", dest.display());
+                    output::print_warn(format!("`{}` already exists, skipping", dest.display()));
                     continue;
                 }
                 entries.push((path.to_path_buf(), dest));
             }
             None => {
-                eprintln!("Warning: `{}` not in database, skipping", path.display());
+                output::print_warn(format!("`{}` not in database, skipping", path.display()));
             }
         }
     }
@@ -235,8 +237,9 @@ fn launch_editor(source_dir: &Path, config_override: Option<PathBuf>) -> Result<
                 let config_path = crate::path::global_config_path()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "$XDG_CONFIG_HOME/dotrift/config.toml".into());
-                return Err(eyre!("No editor found")
-                    .suggestion(format!("Set $VISUAL or $EDITOR, or configure editor-command in {config_path}")));
+                return Err(eyre!("No editor found").suggestion(format!(
+                    "Set $VISUAL or $EDITOR, or configure editor-command in {config_path}"
+                )));
             }
         },
     };

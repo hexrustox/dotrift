@@ -18,12 +18,13 @@ use crate::{
         tree::{Node, build_tree},
         util::{
             GLOB_OPTION, PathLiteral, SafeStripPrefix, clean_up, clone_file, hash_file, is_glob,
-            is_managed, print_portal, resolve_target, strip_prefix_filter_glob,
+            is_managed, resolve_target, strip_prefix_filter_glob,
         },
     },
     config::{Config, DeployType, FileMode, Rules},
     db::{Db, DbEntry},
     global_config::GlobalConfig,
+    output,
 };
 
 #[derive(Default, Debug, PartialEq)]
@@ -51,19 +52,39 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
 
     let db = Db::init(db_path)?;
 
-    if flags.clean_up {
+    let remove_count = if flags.clean_up {
         clean_up(
             Some(&portal_entries),
             &db,
             flags.dry_run,
             flags.prune_empty_dirs,
-        )?;
-    }
+        )?
+    } else {
+        0
+    };
 
     let tree = build_tree(portal_entries)?;
 
     if flags.dry_run {
-        print_tree(Path::new("/"), &tree)?;
+        let create_count = print_tree(Path::new("/"), &tree)?;
+        let mut parts = Vec::new();
+        if create_count > 0 {
+            parts.push(if create_count == 1 {
+                "1 create".to_string()
+            } else {
+                format!("{} creates", create_count)
+            });
+        }
+        if remove_count > 0 {
+            parts.push(if remove_count == 1 {
+                "1 removal".to_string()
+            } else {
+                format!("{} removals", remove_count)
+            });
+        }
+        if !parts.is_empty() {
+            output::print_summary(parts.join(", "));
+        }
         return Ok(());
     }
 
@@ -272,7 +293,7 @@ fn print_tree(path: &Path, node: &Node) -> Result<usize> {
     match node {
         Node::Dir(children) => {
             if path != Path::new("/") {
-                eprintln!("[CREATE] {}", path.display());
+                output::print_created_dir(path);
             }
             for (name, child) in children {
                 count += print_tree(&path.join(name), child)?;
@@ -280,10 +301,7 @@ fn print_tree(path: &Path, node: &Node) -> Result<usize> {
         }
         Node::File(entry) => {
             count += 1;
-            eprintln!(
-                "[CREATE] {}",
-                print_portal(path, &entry.source, entry.deploy_type)
-            );
+            output::print_created_file(path, &entry.source, entry.deploy_type);
         }
     }
 

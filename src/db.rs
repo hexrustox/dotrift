@@ -118,7 +118,12 @@ impl Db {
                 // TODO escape meta char
                 params![target.to_string_lossy() + "%"],
             )
-            .wrap_err_with(|| format!("Failed to delete entries with prefix '{}'", target.display()))?;
+            .wrap_err_with(|| {
+                format!(
+                    "Failed to delete entries with prefix '{}'",
+                    target.display()
+                )
+            })?;
         Ok(())
     }
 

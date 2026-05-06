@@ -1,11 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    command::{
-        to_absolute_path,
-        util::{is_managed, print_portal},
-    },
+    command::{to_absolute_path, util::is_managed},
     db::Db,
+    output,
 };
 use color_eyre::Result;
 
@@ -16,13 +14,10 @@ pub fn list(file: Option<PathBuf>, db_path: &Path) -> Result<()> {
     if let Some(target) = file {
         match db.get_entry(&target)? {
             Some(entry) if is_managed(&entry.target_path, &db, None) => {
-                eprintln!(
-                    "[MANAGED] {}",
-                    print_portal(&target, &entry.source_path, entry.deploy_type)
-                );
+                output::print_managed(&target, &entry.source_path, entry.deploy_type);
             }
             _ => {
-                eprintln!("[UNMANAGED] {}", target.display());
+                output::print_unmanaged(&target);
             }
         }
     } else {
@@ -30,14 +25,18 @@ pub fn list(file: Option<PathBuf>, db_path: &Path) -> Result<()> {
         for entry in &entries {
             eprintln!(
                 "{}",
-                print_portal(&entry.target_path, &entry.source_path, entry.deploy_type)
+                output::portal_str(&entry.target_path, &entry.source_path, entry.deploy_type)
             );
         }
-        eprintln!(
-            "Total: {} file{}",
+        output::print_summary(format_args!(
+            "{} {}",
             entries.len(),
-            if entries.len() > 1 { "s" } else { "" }
-        )
+            if entries.len() == 1 {
+                "entry"
+            } else {
+                "entries"
+            },
+        ));
     }
 
     Ok(())
@@ -50,8 +49,9 @@ pub fn clear(file: Option<PathBuf>, db_path: &Path) -> Result<()> {
     if let Some(target) = file {
         db.delete_entry(&target)?;
     } else {
+        let count = db.get_all_entries()?.len();
         db.delete_table()?;
-        eprintln!("Cleared all entries");
+        output::print_ok(format_args!("Cleared {} entries", count));
     }
 
     Ok(())

@@ -4,4 +4,5 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod global_config;
+pub mod output;
 pub mod path;

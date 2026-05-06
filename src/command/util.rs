@@ -9,8 +9,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use color_eyre::eyre::{Context, Result, eyre};
 use color_eyre::Section;
+use color_eyre::eyre::{Context, Result, eyre};
 use glob::MatchOptions;
 use normalize_path::NormalizePath;
 use twox_hash::XxHash64;
@@ -20,6 +20,7 @@ use crate::{
     command::apply::PortalEntry,
     config::{Config, DeployType},
     db::Db,
+    output,
 };
 
 const SEED: u64 = 42;
@@ -48,8 +49,10 @@ pub fn resolve_target(
     let target_dir = &target_override
         .or(config.target_dir.clone())
         .or(dirs::home_dir())
-        .ok_or_else(|| eyre!("Cannot determine target directory")
-            .suggestion("Provide --target flag, set target-directory in config, or set $HOME"))?
+        .ok_or_else(|| {
+            eyre!("Cannot determine target directory")
+                .suggestion("Provide --target flag, set target-directory in config, or set $HOME")
+        })?
         .normalize();
 
     if !target_dir.is_absolute() {
@@ -202,7 +205,11 @@ pub fn clone_file(from: &Path, to: &Path) -> Result<()> {
     if from.path_is_file() {
         crate::copy_file_err!(fs::copy(from, to), from, to)?;
     } else if from.path_is_symlink() {
-        crate::symlink_err!(unix_fs::symlink(crate::read_link_err!(fs::read_link(from), from)?, to), to, from)?;
+        crate::symlink_err!(
+            unix_fs::symlink(crate::read_link_err!(fs::read_link(from), from)?, to),
+            to,
+            from
+        )?;
     } else {
         #[cfg(test)]
         panic!("{:?} is not a directory", from);
@@ -231,7 +238,7 @@ pub fn clean_up(
             if managed {
                 if dry_run {
                     count += 1;
-                    eprintln!("[REMOVE] {}", path.display());
+                    output::print_removed(path);
                 } else {
                     crate::remove_file_err!(fs::remove_file(path), path)?;
 
@@ -256,18 +263,6 @@ pub fn clean_up(
     }
 
     Ok(count)
-}
-
-pub fn print_portal(target: &Path, source: &Path, deploy_type: DeployType) -> String {
-    format!(
-        "{} -> {} ({})",
-        target.display(),
-        source.display(),
-        match deploy_type {
-            DeployType::Symlink => "symlink",
-            _ => "file",
-        },
-    )
 }
 
 #[cfg(test)]

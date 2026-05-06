@@ -23,12 +23,20 @@ pub fn expand_arg(arg: &str, params: &[(&str, &str)]) -> Result<String> {
                     match chars.next() {
                         Some('}') => break,
                         Some(c) => name.push(c),
-                        None => return Err(eyre!("Unclosed parameter in editor command argument: `{arg}`")),
+                        None => {
+                            return Err(eyre!(
+                                "Unclosed parameter in editor command argument: `{arg}`"
+                            ));
+                        }
                     }
                 }
                 match params.iter().find(|(n, _)| *n == name) {
                     Some((_, v)) => result.push_str(v),
-                    None => return Err(eyre!("Unknown parameter `{{{name}}}` in editor command argument")),
+                    None => {
+                        return Err(eyre!(
+                            "Unknown parameter `{{{name}}}` in editor command argument"
+                        ));
+                    }
                 }
             }
         } else if c == '}' {

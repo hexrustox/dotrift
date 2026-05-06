@@ -28,7 +28,13 @@ macro_rules! copy_file_err {
 #[macro_export]
 macro_rules! symlink_err {
     ($result:expr, $target:expr, $source:expr) => {
-        $result.wrap_err_with(|| format!("Failed to create symlink `{}` -> `{}`", $target.display(), $source.display()))
+        $result.wrap_err_with(|| {
+            format!(
+                "Failed to create symlink `{}` -> `{}`",
+                $target.display(),
+                $source.display()
+            )
+        })
     };
 }
 

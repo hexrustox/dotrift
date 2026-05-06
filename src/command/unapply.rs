@@ -5,6 +5,7 @@ use crate::{
     command::util::{clean_up, resolve_target},
     config::Config,
     db::Db,
+    output,
 };
 
 pub fn run(
@@ -20,6 +21,10 @@ pub fn run(
     resolve_target(&source_dir, target_override, &config)?;
 
     let db = Db::init(db_path)?;
-    clean_up(None, &db, flags.dry_run, flags.prune_empty_dirs)?;
+    let n = clean_up(None, &db, flags.dry_run, flags.prune_empty_dirs)?;
+    if flags.dry_run {
+        let label = if n == 1 { "removal" } else { "removals" };
+        output::print_summary(format_args!("{} {}", n, label));
+    }
     Ok(())
 }
