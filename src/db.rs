@@ -3,10 +3,7 @@ use std::path::{Path, PathBuf};
 use color_eyre::eyre::{Context, eyre};
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::{
-    config::DeployType,
-    error::{EyreError, IoError},
-};
+use crate::config::DeployType;
 
 const TABLE_NAME: &str = "managed_files";
 
@@ -37,7 +34,7 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
             return Err(rusqlite::Error::FromSqlConversionFailure(
                 1,
                 rusqlite::types::Type::Text,
-                eyre!(r#"Invalid type: "{other}""#).into(),
+                eyre!("Invalid deploy type '{other}' for '{target_str}'").into(),
             ));
         }
     };
@@ -57,14 +54,11 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
 impl Db {
     pub fn init(path: &Path) -> color_eyre::Result<Self> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .create_dir_error(parent)
-                .wrap_as_db_error()?;
+            crate::create_dir_err!(std::fs::create_dir_all(parent), parent)?;
         }
 
         let conn = Connection::open(path)
-            .wrap_err_with(|| format!("Failed to open connection at `{}`", path.display()))
-            .wrap_as_db_error()?;
+            .wrap_err_with(|| format!("Failed to open connection at `{}`", path.display()))?;
 
         conn.execute(
             &format!(
@@ -79,8 +73,7 @@ impl Db {
             ),
             [],
         )
-        .wrap_err("Failed to create table")
-        .wrap_as_db_error()?;
+        .wrap_err_with(|| format!("Failed to create table '{TABLE_NAME}'"))?;
 
         Ok(Self { conn })
     }
@@ -103,8 +96,7 @@ impl Db {
                     symlink_target_str,
                 ],
             )
-            .wrap_err("Failed to insert or update entry")
-            .wrap_as_db_error()?;
+            .wrap_err_with(|| format!("Failed to insert/update entry for '{}'", entry.target_path.display()))?;
 
         Ok(())
     }
@@ -115,8 +107,7 @@ impl Db {
                 &format!("DELETE FROM {} WHERE target_path = ?1", TABLE_NAME),
                 params![target.to_string_lossy()],
             )
-            .wrap_err("Failed to delete entry")
-            .wrap_as_db_error()?;
+            .wrap_err_with(|| format!("Failed to delete entry for '{}'", target.display()))?;
         Ok(())
     }
 
@@ -124,18 +115,17 @@ impl Db {
         self.conn
             .execute(
                 &format!("DELETE FROM {} WHERE target_path like ?1", TABLE_NAME),
+                // TODO escape meta char
                 params![target.to_string_lossy() + "%"],
             )
-            .wrap_err("Failed to delete entries")
-            .wrap_as_db_error()?;
+            .wrap_err_with(|| format!("Failed to delete entries with prefix '{}'", target.display()))?;
         Ok(())
     }
 
     pub fn delete_table(&self) -> color_eyre::Result<()> {
         self.conn
             .execute(&format!("DROP TABLE IF EXISTS {}", TABLE_NAME), [])
-            .wrap_err("Failed to delete table")
-            .wrap_as_db_error()?;
+            .wrap_err_with(|| format!("Failed to delete table '{TABLE_NAME}'"))?;
         Ok(())
     }
 
@@ -146,13 +136,11 @@ impl Db {
                 "SELECT target_path, deploy_type, source_path, hash, symlink_target FROM {} WHERE target_path = ?1",
                 TABLE_NAME
             ))
-            .wrap_err("Failed to prepare statement")
-            .wrap_as_db_error()?;
+            .wrap_err_with(|| format!("Failed to prepare statement for querying '{}'", target.display()))?;
 
         stmt.query_row(params![target.to_string_lossy()], row_to_entry)
             .optional()
-            .wrap_err("Failed to query entry")
-            .wrap_as_db_error()
+            .wrap_err_with(|| format!("Failed to query entry for '{}'", target.display()))
     }
 
     pub fn get_all_entries(&self) -> color_eyre::Result<Vec<DbEntry>> {
@@ -162,19 +150,17 @@ impl Db {
                 "SELECT target_path, deploy_type, source_path, hash, symlink_target FROM {}",
                 TABLE_NAME
             ))
-            .wrap_err("Failed to prepare statement")
-            .wrap_as_db_error()?;
+            .wrap_err("Failed to prepare statement for listing entries")?;
 
         let entries = stmt
             .query_map([], row_to_entry)
             .optional()
-            .wrap_err("Failed to query entries")
-            .wrap_as_db_error()?;
+            .wrap_err("Failed to query entries from database")?;
 
         let mut result = Vec::new();
         if let Some(entries) = entries {
             for entry in entries {
-                result.push(entry.wrap_err("Failed to query entry").wrap_as_db_error()?);
+                result.push(entry.wrap_err("Failed to read database entry")?);
             }
         }
         Ok(result)

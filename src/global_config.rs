@@ -1,12 +1,9 @@
 use std::{fs, path::PathBuf};
 
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Context, Result, eyre};
 use serde::Deserialize;
 
-use crate::{
-    error::{IoError, SerdeError},
-    path::global_config_path,
-};
+use crate::path::global_config_path;
 
 pub fn expand_args(args: &[String], params: &[(&str, &str)]) -> Result<Vec<String>> {
     args.iter().map(|a| expand_arg(a, params)).collect()
@@ -26,12 +23,12 @@ pub fn expand_arg(arg: &str, params: &[(&str, &str)]) -> Result<String> {
                     match chars.next() {
                         Some('}') => break,
                         Some(c) => name.push(c),
-                        None => return Err(eyre!("Unclosed parameter in `{arg}`")),
+                        None => return Err(eyre!("Unclosed parameter in editor command argument: `{arg}`")),
                     }
                 }
                 match params.iter().find(|(n, _)| *n == name) {
                     Some((_, v)) => result.push_str(v),
-                    None => return Err(eyre!("Unknown parameter `{{{name}}}`")),
+                    None => return Err(eyre!("Unknown parameter `{{{name}}}` in editor command argument")),
                 }
             }
         } else if c == '}' {
@@ -79,15 +76,18 @@ pub struct GlobalConfig {
 impl GlobalConfig {
     pub fn read(path_override: Option<PathBuf>) -> color_eyre::Result<Self> {
         let specific = path_override.is_some();
-        let path = path_override.unwrap_or(global_config_path());
+        let path = match path_override {
+            Some(p) => p,
+            None => global_config_path()?,
+        };
 
         let result = fs::read_to_string(&path);
         if result.is_err() && !specific {
             return Ok(Self::default());
         }
 
-        let content = result.read_file_error(&path)?;
-        toml::from_str(&content).parse_error(&path)
+        let content = crate::read_file_err!(result, &path)?;
+        crate::parse_err!(toml::from_str(&content), &path)
     }
 }
 

@@ -10,6 +10,7 @@ use std::{
 };
 
 use color_eyre::eyre::{Context, Result, eyre};
+use color_eyre::Section;
 use glob::MatchOptions;
 use normalize_path::NormalizePath;
 use twox_hash::XxHash64;
@@ -19,7 +20,6 @@ use crate::{
     command::apply::PortalEntry,
     config::{Config, DeployType},
     db::Db,
-    error::IoError,
 };
 
 const SEED: u64 = 42;
@@ -48,7 +48,8 @@ pub fn resolve_target(
     let target_dir = &target_override
         .or(config.target_dir.clone())
         .or(dirs::home_dir())
-        .ok_or_else(|| eyre!("Cannot determine target directory"))?
+        .ok_or_else(|| eyre!("Cannot determine target directory")
+            .suggestion("Provide --target flag, set target-directory in config, or set $HOME"))?
         .normalize();
 
     if !target_dir.is_absolute() {
@@ -59,7 +60,11 @@ pub fn resolve_target(
     }
 
     if target_dir.starts_with(source_dir) {
-        return Err(eyre!("Target directory cannot be inside source directory"));
+        return Err(eyre!(
+            "Target directory '{}' cannot be inside source directory '{}'",
+            target_dir.display(),
+            source_dir.display()
+        ));
     }
 
     Ok(target_dir.to_path_buf())
@@ -180,7 +185,7 @@ pub fn copy_recursive(from: &Path, to: &Path) -> Result<()> {
             let new = to.join(base);
             if path.path_is_dir() {
                 if !new.path_exists() {
-                    fs::create_dir(&new).create_dir_error(&new)?;
+                    crate::create_dir_err!(fs::create_dir(&new), &new)?;
                 }
             } else {
                 clone_file(path, &new)?;
@@ -195,9 +200,9 @@ pub fn copy_recursive(from: &Path, to: &Path) -> Result<()> {
 pub fn clone_file(from: &Path, to: &Path) -> Result<()> {
     let _ = fs::remove_file(to);
     if from.path_is_file() {
-        fs::copy(from, to).copy_file_error(from, to)?;
+        crate::copy_file_err!(fs::copy(from, to), from, to)?;
     } else if from.path_is_symlink() {
-        unix_fs::symlink(fs::read_link(from).read_link_error(from)?, to).symlink_error(to)?;
+        crate::symlink_err!(unix_fs::symlink(crate::read_link_err!(fs::read_link(from), from)?, to), to, from)?;
     } else {
         #[cfg(test)]
         panic!("{:?} is not a directory", from);
@@ -228,14 +233,14 @@ pub fn clean_up(
                     count += 1;
                     eprintln!("[REMOVE] {}", path.display());
                 } else {
-                    fs::remove_file(path).remove_file_error(path)?;
+                    crate::remove_file_err!(fs::remove_file(path), path)?;
 
                     if prune_empty_dirs {
                         for dir in path.ancestors().skip(1) {
                             if let Ok(iter) = dir.read_dir()
                                 && iter.count() == 0
                             {
-                                fs::remove_dir(dir).remove_dir_error(dir)?;
+                                crate::remove_dir_err!(fs::remove_dir(dir), dir)?;
                             } else {
                                 break;
                             }

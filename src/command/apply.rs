@@ -21,9 +21,8 @@ use crate::{
             is_managed, print_portal, resolve_target, strip_prefix_filter_glob,
         },
     },
-    config::{Config, DeployType, FileMode, Rule, Rules},
+    config::{Config, DeployType, FileMode, Rules},
     db::{Db, DbEntry},
-    error::{GlobError, IoError},
     global_config::GlobalConfig,
 };
 
@@ -85,7 +84,7 @@ fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore> {
     for pattern in patterns {
         builder
             .add_line(None, pattern)
-            .wrap_err("Invalid ignore pattern")?;
+            .wrap_err_with(|| format!("Invalid ignore pattern: '{pattern}'"))?;
     }
     builder.build().wrap_err("Failed to build ignore matcher")
 }
@@ -139,9 +138,8 @@ fn resolve_glob_portal(
     let full_pattern = source_dir.join(pattern);
     let full_pattern_str = full_pattern.to_string_lossy();
 
-    for source_path in glob_with(&full_pattern_str, GLOB_OPTION)
-        .glob_error()?
-        .flatten()
+    for source_path in
+        crate::glob_err!(glob_with(&full_pattern_str, GLOB_OPTION), &full_pattern_str)?.flatten()
     {
         if source_path.path_is_dir() {
             continue;
@@ -247,11 +245,10 @@ fn apply_rules(
     portal_entries: &mut HashMap<PathBuf, PortalEntry>,
     rules: &Rules,
 ) -> Result<()> {
-    let compiled: Vec<(Pattern, &Rule)> = rules
-        .iter()
-        .map(|(p, r)| Pattern::new(p).map(|pat| (pat, r)))
-        .collect::<Result<Vec<_>, _>>()
-        .glob_error()?;
+    let mut compiled = Vec::with_capacity(rules.len());
+    for (p, r) in rules {
+        compiled.push((crate::glob_err!(Pattern::new(p), p)?, r));
+    }
 
     for (path, portal_entry) in portal_entries.iter_mut() {
         let rel = path.safe_strip_prefix(target_dir); // computed E times (was R×E)
@@ -319,15 +316,15 @@ fn deploy_dir(path: &Path, db: &Db) -> Result<bool> {
         match choice {
             CollisionOptions::Skip => return Ok(true),
             CollisionOptions::Overwrite => {
-                fs::remove_file(path).remove_file_error(path)?;
+                crate::remove_file_err!(fs::remove_file(path), path)?;
                 db.delete_entry(path)?;
             }
             CollisionOptions::Quit => {
-                return Err(eyre!("Aborted"));
+                return Err(eyre!("Aborted at '{}'", path.display()));
             }
         }
     }
-    fs::create_dir_all(path).create_dir_error(path)?;
+    crate::create_dir_err!(fs::create_dir_all(path), path)?;
     Ok(false)
 }
 
@@ -376,11 +373,11 @@ fn deploy_file(
             match choice {
                 CollisionOptions::Skip => return Ok(()),
                 CollisionOptions::Overwrite => {
-                    fs::remove_dir_all(target).remove_dir_error(target)?;
+                    crate::remove_dir_err!(fs::remove_dir_all(target), target)?;
                     db.delete_entry_with_prefix(target)?;
                 }
                 CollisionOptions::Quit => {
-                    return Err(eyre!("Aborted"));
+                    return Err(eyre!("Aborted at '{}'", target.display()));
                 }
             }
         } else {
@@ -409,7 +406,7 @@ fn deploy_file(
                     CollisionOptions::Skip => return Ok(()),
                     CollisionOptions::Overwrite => {}
                     CollisionOptions::Quit => {
-                        return Err(eyre!("Aborted"));
+                        return Err(eyre!("Aborted at '{}'", target.display()));
                     }
                 }
             }
@@ -419,7 +416,11 @@ fn deploy_file(
     match entry.deploy_type {
         DeployType::Symlink => {
             let _ = remove_file(target);
-            unix_fs::symlink(&entry.source, target).symlink_error(target)?
+            crate::symlink_err!(
+                unix_fs::symlink(&entry.source, target),
+                target,
+                &entry.source
+            )?
         }
         DeployType::Copy => {
             clone_file(&entry.source, target)?;
@@ -452,7 +453,10 @@ fn update_db(target: &Path, entry: &PortalEntry, db: &Db, source_hash: Option<u6
             None
         },
         symlink_target: if entry.deploy_type == DeployType::Copy && entry.source.path_is_symlink() {
-            Some(fs::read_link(&entry.source).read_link_error(&entry.source)?)
+            Some(crate::read_link_err!(
+                fs::read_link(&entry.source),
+                &entry.source
+            )?)
         } else {
             None
         },

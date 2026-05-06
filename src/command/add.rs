@@ -5,6 +5,7 @@ use std::{
 };
 
 use color_eyre::eyre::{Context, Result, eyre};
+use color_eyre::Section;
 use glob::Pattern;
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
@@ -17,7 +18,6 @@ use crate::{
     },
     config::Config,
     db::Db,
-    error::IoError,
 };
 
 pub fn run(
@@ -54,7 +54,11 @@ pub fn run(
     };
 
     let Ok(dest_rel) = destination.strip_prefix(&source_dir) else {
-        return Err(eyre!("Destination must be inside source directory"));
+        return Err(eyre!(
+            "Destination '{}' must be inside source directory '{}'",
+            destination.display(),
+            source_dir.display()
+        ));
     };
     if destination.path_exists() && !flags.force {
         return Err(eyre!("`{}` already exists", destination.display()));
@@ -75,7 +79,7 @@ pub fn run(
         remove_obstructions(&destination)?;
     }
     if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent).create_dir_error(parent)?;
+        crate::create_dir_err!(fs::create_dir_all(parent), parent)?;
     }
 
     if reimport || flags.copy {
@@ -151,7 +155,7 @@ fn reimport_directory(
             remove_obstructions(&dest)?;
         }
         if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).create_dir_error(parent)?;
+            crate::create_dir_err!(fs::create_dir_all(parent), parent)?;
         }
         copy_recursive(&entry_path, &dest)?;
     }
@@ -227,7 +231,13 @@ fn launch_editor(source_dir: &Path, config_override: Option<PathBuf>) -> Result<
         }
         _ => match env::var_os("VISUAL").or(env::var_os("EDITOR")) {
             Some(cmd) => (cmd.to_string_lossy().to_string(), vec![file]),
-            None => return Err(eyre!("Failed to find editor")),
+            None => {
+                let config_path = crate::path::global_config_path()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| "$XDG_CONFIG_HOME/dotrift/config.toml".into());
+                return Err(eyre!("No editor found")
+                    .suggestion(format!("Set $VISUAL or $EDITOR, or configure editor-command in {config_path}")));
+            }
         },
     };
 
@@ -243,9 +253,9 @@ fn launch_editor(source_dir: &Path, config_override: Option<PathBuf>) -> Result<
 fn remove_obstructions(path: &Path) -> Result<()> {
     if let Ok(meta) = fs::symlink_metadata(path) {
         if meta.is_dir() {
-            remove_dir_all(path).remove_dir_error(path)?;
+            crate::remove_dir_err!(remove_dir_all(path), path)?;
         } else {
-            remove_file(path).remove_file_error(path)?;
+            crate::remove_file_err!(remove_file(path), path)?;
         }
     }
     for dir in path.ancestors().skip(1) {
@@ -255,7 +265,7 @@ fn remove_obstructions(path: &Path) -> Result<()> {
         if meta.is_dir() {
             break;
         }
-        remove_file(dir).remove_file_error(dir)?;
+        crate::remove_file_err!(remove_file(dir), dir)?;
     }
     Ok(())
 }

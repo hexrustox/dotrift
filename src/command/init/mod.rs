@@ -2,7 +2,7 @@ use std::fs;
 
 use color_eyre::eyre::{Context, eyre};
 
-use crate::{cli::GlobalFlags, command::util::PathLiteral, error::IoError, path::config_path};
+use crate::{cli::GlobalFlags, command::util::PathLiteral, path::config_path};
 
 pub fn run(global_flags: GlobalFlags) -> color_eyre::Result<()> {
     let source_dir = global_flags.source()?;
@@ -11,7 +11,7 @@ pub fn run(global_flags: GlobalFlags) -> color_eyre::Result<()> {
 
     if !path.path_exists() {
         let parent = path.parent().unwrap();
-        fs::create_dir_all(parent).create_dir_error(parent)?;
+        crate::create_dir_err!(fs::create_dir_all(parent), parent)?;
         fs::write(&path, include_bytes!("./template.toml"))
             .wrap_err_with(|| format!("Failed to write file `{}`", path.display()))?;
 

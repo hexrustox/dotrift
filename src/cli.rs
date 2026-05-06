@@ -32,7 +32,7 @@ impl GlobalFlags {
         self.source
             .as_ref()
             .map(|p| to_absolute_path(p))
-            .unwrap_or(Ok(source_path()))
+            .unwrap_or_else(source_path)
     }
 
     pub fn target(&self) -> Result<Option<PathBuf>> {
