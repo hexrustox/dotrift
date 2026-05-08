@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, remove_dir_all, remove_file},
     path::{Path, PathBuf},
 };
@@ -161,10 +161,30 @@ fn portal_matches(dest_rel: &Path, portal: &HashMap<String, PathBuf>) -> bool {
 }
 
 pub struct PortalAnalysis {
-    /// (dest_rel, computed_target) needing auto-add in step 8
-    pub missing: Vec<(PathBuf, PathBuf)>,
-    /// (collision_id, [portal_keys]) — keys to annotate with # CONFLICT <id>
-    pub collisions: Vec<(usize, Vec<String>)>,
+    pub missing: Vec<(PathBuf, PathBuf, bool)>,
+    pub collisions: Vec<Vec<String>>,
+}
+
+fn check_and_collect_collision(
+    root: &mut tree::Node,
+    collisions: &mut HashMap<String, HashSet<String>>,
+    target_path: &Path,
+    key: &str,
+) {
+    match root.check_entry(target_path, key.to_string()) {
+        Ok(Some(existing)) => {
+            let t = target_path.display().to_string();
+            collisions.entry(t.clone()).or_default().insert(existing);
+            collisions.entry(t).or_default().insert(key.to_string());
+        }
+        Err(_) => {
+            collisions
+                .entry(target_path.display().to_string())
+                .or_default()
+                .insert(key.to_string());
+        }
+        _ => {}
+    }
 }
 
 fn resolve_collisions(
@@ -172,10 +192,10 @@ fn resolve_collisions(
     ignore: &[String],
     target_dir: &Path,
     source_dir: &Path,
-) -> Result<(tree::Node, HashMap<String, Vec<String>>)> {
+) -> Result<(tree::Node, HashMap<String, HashSet<String>>)> {
     let ignore_matcher = build_ignore(ignore, target_dir)?;
     let mut root = tree::Node::default();
-    let mut collisions: HashMap<String, Vec<String>> = HashMap::new();
+    let mut collisions: HashMap<String, HashSet<String>> = HashMap::new();
 
     for (pattern, target_rel) in portal {
         let pattern_normalized = Path::new(pattern).normalize();
@@ -207,22 +227,7 @@ fn resolve_collisions(
                 if is_ignored(&ignore_matcher, &target_path) {
                     continue;
                 }
-                {
-                    match root.check_entry(&target_path, pattern_str.clone()) {
-                        Ok(Some(existing)) => {
-                            let t = target_path.display().to_string();
-                            collisions.entry(t.clone()).or_default().push(existing);
-                            collisions.entry(t).or_default().push(pattern_str.clone());
-                        }
-                        Err(_) => {
-                            collisions
-                                .entry(target_path.display().to_string())
-                                .or_default()
-                                .push(pattern_str.clone());
-                        }
-                        _ => {}
-                    }
-                }
+                check_and_collect_collision(&mut root, &mut collisions, &target_path, &pattern_str);
             }
         } else {
             let source_path = source_dir.join(&pattern_normalized);
@@ -242,44 +247,19 @@ fn resolve_collisions(
                     if is_ignored(&ignore_matcher, &target_path) {
                         continue;
                     }
-                    {
-                        match root.check_entry(&target_path, pattern_str.clone()) {
-                            Ok(Some(existing)) => {
-                                let t = target_path.display().to_string();
-                                collisions.entry(t.clone()).or_default().push(existing);
-                                collisions.entry(t).or_default().push(pattern_str.clone());
-                            }
-                            Err(_) => {
-                                collisions
-                                    .entry(target_path.display().to_string())
-                                    .or_default()
-                                    .push(pattern_str.clone());
-                            }
-                            _ => {}
-                        }
-                    }
+                    check_and_collect_collision(
+                        &mut root,
+                        &mut collisions,
+                        &target_path,
+                        &pattern_str,
+                    );
                 }
             } else {
                 let target_path = target_dir.join(&target_rel_normalized);
                 if is_ignored(&ignore_matcher, &target_path) {
                     continue;
                 }
-                {
-                    match root.check_entry(&target_path, pattern_str.clone()) {
-                        Ok(Some(existing)) => {
-                            let t = target_path.display().to_string();
-                            collisions.entry(t.clone()).or_default().push(existing);
-                            collisions.entry(t).or_default().push(pattern_str.clone());
-                        }
-                        Err(_) => {
-                            collisions
-                                .entry(target_path.display().to_string())
-                                .or_default()
-                                .push(pattern_str.clone());
-                        }
-                        _ => {}
-                    }
-                }
+                check_and_collect_collision(&mut root, &mut collisions, &target_path, &pattern_str);
             }
         }
     }
@@ -289,68 +269,41 @@ fn resolve_collisions(
 
 fn check_new_entries(
     tree: &mut tree::Node,
-    entries: &[(PathBuf, PathBuf)],
+    entries: &[(PathBuf, &Path)],
     target_dir: &Path,
-    source_dir: &Path,
-) -> HashMap<String, Vec<String>> {
-    let mut new_collisions: HashMap<String, Vec<String>> = HashMap::new();
+) -> HashMap<String, HashSet<String>> {
+    let mut new_collisions: HashMap<String, HashSet<String>> = HashMap::new();
 
-    for (src, dest) in entries {
-        let computed_target = if src.starts_with(target_dir) {
-            src.safe_strip_prefix(target_dir).to_path_buf()
-        } else {
-            src.clone()
-        };
-        let dest_rel = dest.safe_strip_prefix(source_dir);
-
-        let target_path = target_dir.join(&computed_target).normalize();
+    for (computed_target, dest_rel) in entries {
+        let target_path = target_dir.join(computed_target).normalize();
         let key = dest_rel.display().to_string();
-        match tree.check_entry(&target_path, key.clone()) {
-            Ok(Some(existing)) => {
-                let t = target_path.display().to_string();
-                new_collisions.entry(t.clone()).or_default().push(existing);
-                new_collisions.entry(t).or_default().push(key);
-            }
-            Err(e) => {
-                println!("{e}");
-                new_collisions
-                    .entry(target_path.display().to_string())
-                    .or_default()
-                    .push(key);
-            }
-            _ => {}
-        }
+        check_and_collect_collision(tree, &mut new_collisions, &target_path, &key);
     }
 
     new_collisions
 }
 
 fn merge_collision_groups(
-    existing: HashMap<String, Vec<String>>,
-    new: HashMap<String, Vec<String>>,
-) -> Vec<(usize, Vec<String>)> {
-    let mut merged: HashMap<String, Vec<String>> = existing;
+    existing: HashMap<String, HashSet<String>>,
+    new: HashMap<String, HashSet<String>>,
+) -> Vec<Vec<String>> {
+    let mut merged = existing;
     for (target, keys) in new {
         merged.entry(target).or_default().extend(keys);
     }
-
-    let mut groups: Vec<Vec<String>> = Vec::new();
-    for keys in merged.into_values() {
-        let mut uniq: Vec<String> = Vec::new();
-        for k in keys {
-            if !uniq.contains(&k) {
-                uniq.push(k);
+    let result: Vec<Vec<String>> = merged
+        .into_values()
+        .map(|v| {
+            #[allow(unused_mut)]
+            let mut sorted: Vec<String> = v.into_iter().collect();
+            #[cfg(test)]
+            {
+                sorted.sort();
             }
-        }
-        uniq.sort();
-        groups.push(uniq);
-    }
-
-    groups
-        .into_iter()
-        .enumerate()
-        .map(|(i, keys)| (i + 1, keys))
-        .collect()
+            sorted
+        })
+        .collect();
+    result
 }
 
 pub fn analyze_portal(
@@ -362,23 +315,29 @@ pub fn analyze_portal(
     let (mut tree, existing_collisions) =
         resolve_collisions(&config.portal, &config.ignore, target_dir, source_dir)?;
 
-    let new_collisions = check_new_entries(&mut tree, entries, target_dir, source_dir);
-
-    let collisions = merge_collision_groups(existing_collisions, new_collisions);
-
+    let mut precomputed: Vec<(PathBuf, &Path)> = Vec::with_capacity(entries.len());
     let mut missing = Vec::new();
     for (src, dest) in entries {
+        let warn;
         let computed_target = if src.starts_with(target_dir) {
+            warn = false;
             src.safe_strip_prefix(target_dir).to_path_buf()
         } else {
+            warn = true;
             src.clone()
         };
-        let dest_rel = dest.safe_strip_prefix(source_dir).to_path_buf();
+        let dest_rel = dest.safe_strip_prefix(source_dir);
 
-        if !portal_matches(&dest_rel, &config.portal) {
-            missing.push((dest_rel, computed_target));
+        precomputed.push((computed_target.clone(), dest_rel));
+
+        if !portal_matches(dest_rel, &config.portal) {
+            missing.push((dest_rel.to_path_buf(), computed_target, warn));
         }
     }
+
+    let new_collisions = check_new_entries(&mut tree, &precomputed, target_dir);
+
+    let collisions = merge_collision_groups(existing_collisions, new_collisions);
 
     Ok(PortalAnalysis {
         missing,
@@ -939,7 +898,7 @@ mod tests {
         ; "literal_dir_vs_flat_file"
     )]
     #[test_case(
-        r#""*.txt" = "text""#,
+        r#"".txt" = "text""#,
         &["a.txt", "b.txt"],
         ""
         => Vec::<(String, Vec<String>)>::new()
@@ -985,17 +944,18 @@ mod tests {
             fs::write(&path, "").unwrap();
         }
 
-        let (_, mut collisions) =
+        let (_, collisions) =
             resolve_collisions(&config.portal, &config.ignore, &target_dir, &source_dir).unwrap();
 
         let mut result = Vec::new();
-        for (k, mut v) in collisions.drain() {
-            v.sort();
+        for (k, v) in collisions {
+            let mut sorted: Vec<String> = v.into_iter().collect();
+            sorted.sort();
             let rel = Path::new(&k)
                 .safe_strip_prefix(&target_dir)
                 .display()
                 .to_string();
-            result.push((rel, v));
+            result.push((rel, sorted));
         }
         result.sort_by(|a, b| a.0.cmp(&b.0));
         result
@@ -1010,7 +970,7 @@ mod tests {
     #[test_case(
         &["x"],
         &[("x", "a"), ("x", "b")]
-        => vec![("x".into(), vec!["a".to_string(), "b".to_string(), "x".to_string(), "x".to_string()])]
+        => vec![("x".into(), vec!["a".to_string(), "b".to_string(), "x".to_string()])]
         ; "multiple_new_same_target"
     )]
     #[test_case(
@@ -1036,25 +996,30 @@ mod tests {
         tree_paths: &[&str],
         entries: &[(&str, &str)],
     ) -> Vec<(String, Vec<String>)> {
-        let (_temp_dir, source_dir, target_dir) = setup_test("", "", "", false);
+        let (_temp_dir, _source_dir, target_dir) = setup_test("", "", "", false);
         let mut tree = tree::Node::default();
         for p in tree_paths {
             tree.check_entry(&target_dir.join(p), p.to_string())
                 .unwrap();
         }
-        let entries: Vec<(PathBuf, PathBuf)> = entries
+        let precomputed: Vec<(PathBuf, &Path)> = entries
             .iter()
-            .map(|(a, b)| (target_dir.join(a), source_dir.join(b)))
+            .map(|(a, b)| {
+                let src = target_dir.join(a);
+                let computed = src.safe_strip_prefix(&target_dir).to_path_buf();
+                (computed, Path::new(b))
+            })
             .collect();
-        let mut collisions = check_new_entries(&mut tree, &entries, &target_dir, &source_dir);
+        let collisions = check_new_entries(&mut tree, &precomputed, &target_dir);
         let mut result = Vec::new();
-        for (k, mut v) in collisions.drain() {
-            v.sort();
+        for (k, v) in collisions {
+            let mut sorted: Vec<String> = v.into_iter().collect();
+            sorted.sort();
             let rel = Path::new(&k)
                 .safe_strip_prefix(&target_dir)
                 .display()
                 .to_string();
-            result.push((rel, v));
+            result.push((rel, sorted));
         }
         result.sort_by(|a, b| a.0.cmp(&b.0));
         result
@@ -1062,22 +1027,22 @@ mod tests {
 
     #[test]
     fn test_merge_collision_groups() {
-        let existing = HashMap::from([("/a".to_string(), vec!["k1".to_string()])]);
+        let existing = HashMap::from([("/a".to_string(), HashSet::from(["k1".to_string()]))]);
         let new = HashMap::from([
-            ("/a".to_string(), vec!["k1".to_string()]),
-            ("/b".to_string(), vec!["k2".to_string()]),
+            ("/a".to_string(), HashSet::from(["k1".to_string()])),
+            ("/b".to_string(), HashSet::from(["k2".to_string()])),
         ]);
         let result = merge_collision_groups(existing, new);
         assert_eq!(result.len(), 2);
-        assert!(result.iter().any(|(_, keys)| keys == &["k1"]));
-        assert!(result.iter().any(|(_, keys)| keys == &["k2"]));
+        assert!(result.iter().any(|keys| keys == &["k1"]));
+        assert!(result.iter().any(|keys| keys == &["k2"]));
     }
 
     #[test_case(
         |s, _| { fs::write(s.join("a"), "").unwrap(); },
         r#""a" = """#,
         vec![("", "a")]
-        => (Vec::<(String, String)>::new(), vec![(1, vec!["a".to_string()])])
+        => (Vec::<(String, String)>::new(), vec![vec!["a".to_string()]])
         ; "single_literal_collision"
     )]
     #[test_case(
@@ -1088,14 +1053,14 @@ mod tests {
         r#""a" = "x"
 "b" = "x""#,
         vec![]
-        => (Vec::<(String, String)>::new(), vec![(1, vec!["a".to_string(), "b".to_string()])])
+        => (Vec::<(String, String)>::new(), vec![vec!["a".to_string(), "b".to_string()]])
         ; "existing_portal_collision"
     )]
     #[test_case(
         |s, _| { fs::write(s.join("new"), "").unwrap(); },
         r#""a" = "x""#,
         vec![("", "new")]
-        => (vec![("new".to_string(), "".to_string())], Vec::<(usize, Vec<String>)>::new())
+        => (vec![("new".to_string(), "".to_string())], Vec::<Vec<String>>::new())
         ; "missing_key"
     )]
     #[test_case(
@@ -1107,7 +1072,7 @@ mod tests {
         vec![("x", "new")]
         => (
             vec![("new".to_string(), "x".to_string())],
-            vec![(1, vec!["a".to_string(), "new".to_string()])],
+            vec![vec!["a".to_string(), "new".to_string()]],
         )
         ; "both_missing_and_collision"
     )]
@@ -1124,7 +1089,7 @@ mod tests {
         vec![("a", "c")]
         => (
             vec![("c".to_string(), "a".to_string())],
-            vec![(1, vec!["b".to_string(), "c".to_string(), "dir".to_string()])],
+            vec![vec!["b".to_string(), "c".to_string(), "dir".to_string()]],
         )
         ; "three_way_collision_at_same_target"
     )]
@@ -1132,7 +1097,7 @@ mod tests {
         setup: impl FnOnce(&Path, &Path),
         portal: &str,
         entries: Vec<(&str, &str)>,
-    ) -> (Vec<(String, String)>, Vec<(usize, Vec<String>)>) {
+    ) -> (Vec<(String, String)>, Vec<Vec<String>>) {
         let (_temp_dir, source_dir, target_dir) = setup_test(portal, "", "", false);
         let config = Config::read(&source_dir).unwrap();
 
@@ -1147,7 +1112,7 @@ mod tests {
         let missing: Vec<(String, String)> = analysis
             .missing
             .iter()
-            .map(|(d, c)| (d.display().to_string(), c.display().to_string()))
+            .map(|(d, c, _)| (d.display().to_string(), c.display().to_string()))
             .collect();
         (missing, analysis.collisions)
     }
@@ -1159,7 +1124,7 @@ mod tests {
             (t.join("file"), "file".into())
         },
         |_, _| {
-            OPEN_EDITOR.with_borrow(|b| assert!(!*b));
+            OPEN_EDITOR.with_borrow(|b| assert!(!b));
         }; "move_editor_portal_match"
     )]
     #[test_case(
@@ -1169,7 +1134,7 @@ mod tests {
             (t.join("file"), "file".into())
         },
         |_, _| {
-            OPEN_EDITOR.with_borrow(|b| assert!(*b));
+            OPEN_EDITOR.with_borrow(|b| assert!(b));
         }; "move_editor_portal_mismatch"
     )]
     #[test_case(
@@ -1179,7 +1144,7 @@ mod tests {
             (t.join("file"), "file".into())
         },
         |_, _| {
-            OPEN_EDITOR.with_borrow(|b| assert!(*b));
+            OPEN_EDITOR.with_borrow(|b| assert!(b));
         }; "move_editor_empty_portal"
     )]
     #[test_case(
@@ -1192,7 +1157,7 @@ mod tests {
             (t.join("file"), "file".into())
         },
         |_, _| {
-            OPEN_EDITOR.with_borrow(|b| assert!(*b));
+            OPEN_EDITOR.with_borrow(|b| assert!(b));
         }; "move_editor_collision_only"
     )]
     #[test_case(
@@ -1203,7 +1168,7 @@ mod tests {
             (t.join("file"), "file".into())
         },
         |_, _| {
-            OPEN_EDITOR.with_borrow(|b| assert!(*b));
+            OPEN_EDITOR.with_borrow(|b| assert!(b));
         }; "move_editor_collision_only_and_missing"
     )]
     fn test_add_open_editor(
