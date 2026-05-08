@@ -96,9 +96,13 @@ pub struct AddFlags {
     #[arg(short, long)]
     pub force: bool,
 
-    /// When to open `dotrift.toml` in editor. Default: auto (open if no portal entry matches destination).
+    /// When to open `dotrift.toml` in editor. Default: auto (open if Missing key or Target collision is detected).
     #[arg(short, long, name = "WHEN")]
     pub editor: Option<OpenEditor>,
+
+    /// Do not modify `dotrift.toml` (skip auto-add and collision annotations). Editor may still open for manual configuration.
+    #[arg(short = 'n', long)]
+    pub no_modify: bool,
 }
 
 #[derive(ValueEnum, Clone, Copy)]

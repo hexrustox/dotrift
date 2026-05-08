@@ -376,15 +376,20 @@ Otherwise (single file/symlink):
 2. **Resolve Destination:**
    - *Standard mode* (DESTINATION provided): If relative, join `source-dir` + DESTINATION. If absolute, use as-is. Normalize. Error if escapes source-dir.
    - *Re-import mode* (DESTINATION omitted): Query DB for `target_path` == PATH. Error if the database does not exist or no entry is found. Set destination to `entry.source_path`.
-3. **Resolve Target Directory:** Determine target directory using full precedence: CLI `-t` > config `target-directory` > `$HOME`.
-4. **Analyze Portal Mapping:** Check whether any existing portal key matches `dest_rel`, and whether the auto-added entry would collide with existing entries:
+3. **Collision Check:** Error if the destination path exists on disk — file, directory, or any other type (including an empty directory). If `--force`, remove the obstruction (recursively for directories).
+4. **Clone:**
+   - *Standard mode:* If `--copy`, copy. Else, move.
+   - *Re-import mode:* Always copy.
+   - Symlink handling during clone follows the `type = "copy"` behavior (see Symlinks in Source): the symlink itself is copied/moved, preserving its link target. It is never followed.
+5. **Resolve Target Directory:** Determine target directory using full precedence: CLI `-t` > config `target-directory` > `$HOME`.
+6. **Analyze Portal Mapping:** Check whether any existing portal key matches `dest_rel`, and whether the auto-added entry would collide with existing entries:
    - **Missing key:** No portal key matches `dest_rel` — a new entry is needed.
    - **Target collision:** Another portal entry (different key) maps some source file to the same target path as `dest_rel` would. This would cause `apply` to halt with a collision error.
-5. **Editor Decision** (based on step 4 — no config modifications yet):
+7. **Editor Decision** (based on step 4 — no config modifications yet):
    - `--editor never`: skip (also suppresses auto-add and annotations).
    - `--editor always`: open editor.
    - Auto (default): open editor if **Missing key** or **Target collision** is detected.
-6. **Prepare Config Changes:** Performed only when the editor will open (step 5) and `--no-modify` is not set. Apply changes based on step 4:
+8. **Prepare Config Changes:** Performed only when the editor will open (step 5) and `--no-modify` is not set. Apply changes based on step 4:
    - **Missing key:** Append `"dest_rel" = "computed_target"` to the end of `[portal]`. Create `dotrift.toml` (with a `[portal]` section) if the file does not exist.
      - **Warning:** If `computed_target` is outside the target directory, prepend a `# WARNING:` comment above the new entry:
      ```toml
@@ -405,22 +410,14 @@ Otherwise (single file/symlink):
    # CONFLICT 2
    "y" = "b"
    ```
-
    Write the modified content to a **temporary file**. If no changes are needed (no missing key and no collision), skip this step — the editor opens on the real config directly.
-7. **Open Editor (if decision was yes):**
+9. **Open Editor (if decision was yes):**
    - If a temp file was prepared: open editor on the temp file. After exit:
      - **File saved:** copy temp to real config.
      - **File not saved:** discard temp (config unchanged).
    - If no temp file: open editor on the real `dotrift.toml` directly.
-
    When the editor opens, `{file}` is the path to the file being edited (temp file or real `dotrift.toml`). `{row}` positions the cursor at the auto-added portal entry, or at the end of the `[portal]` section if no entry was auto-added.
-
    If no editor is available (none of `editor-command`, `$VISUAL`, or `$EDITOR` are set), error and halt.
-8. **Collision Check:** Error if the destination path exists on disk — file, directory, or any other type (including an empty directory). If `--force`, remove the obstruction (recursively for directories).
-9. **Clone:**
-   - *Standard mode:* If `--copy`, copy. Else, move.
-   - *Re-import mode:* Always copy.
-   - Symlink handling during clone follows the `type = "copy"` behavior (see Symlinks in Source): the symlink itself is copied/moved, preserving its link target. It is never followed.
 
 ---
 

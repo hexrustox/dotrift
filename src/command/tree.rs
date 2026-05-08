@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Component, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use color_eyre::eyre::{Result, eyre};
 
@@ -8,6 +8,7 @@ use crate::command::apply::PortalEntry;
 #[derive(Debug)]
 pub enum Node {
     File(PortalEntry),
+    Marked(String),
     Dir(BTreeMap<String, Node>),
 }
 
@@ -17,70 +18,89 @@ impl Default for Node {
     }
 }
 
+impl Node {
+    fn traverse_and_insert(&mut self, path: &Path, node: Node) -> Result<Option<String>> {
+        let mut comps: Vec<_> = path.components().collect();
+        if comps.is_empty() {
+            return Err(eyre!("Cannot insert empty target path"));
+        }
+        if let Some(Component::RootDir) = comps.first() {
+            comps = comps[1..].to_vec();
+        }
+        let components: Vec<String> = comps
+            .into_iter()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect();
+
+        let count = components.len();
+        let mut current = self;
+
+        for (i, name) in components.iter().enumerate() {
+            let is_last = i == count - 1;
+
+            match current {
+                Node::Dir(children) => {
+                    if is_last {
+                        if let Some(existing) = children.get(name) {
+                            match existing {
+                                Node::Marked(key) => {
+                                    return Ok(Some(key.clone()));
+                                }
+                                Node::File { .. } => {
+                                    return Err(eyre!(
+                                        "File already exists at `{}`",
+                                        path.display()
+                                    ));
+                                }
+                                Node::Dir(_) => {
+                                    return Err(eyre!(
+                                        "Directory exists when creating file at `{}`",
+                                        path.display()
+                                    ));
+                                }
+                            }
+                        }
+                        children.insert(name.clone(), node);
+                        return Ok(None);
+                    }
+                    let child = children.entry(name.clone()).or_default();
+                    current = child;
+                }
+                Node::Marked(_) | Node::File { .. } => {
+                    return Err(eyre!(
+                        "File exists when creating directory at `{}`",
+                        path.display()
+                    ));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn insert_entry(&mut self, target_path: PathBuf, entry: PortalEntry) -> Result<()> {
+        match self.traverse_and_insert(&target_path, Node::File(entry))? {
+            Some(_) => Err(eyre!(
+                "File already exists at `{}`",
+                target_path.display()
+            )),
+            None => Ok(()),
+        }
+    }
+
+    pub fn check_entry(&mut self, path: &Path, key: String) -> Result<Option<String>> {
+        self.traverse_and_insert(path, Node::Marked(key))
+    }
+}
+
 pub fn build_tree(entries: HashMap<PathBuf, PortalEntry>) -> Result<Node> {
     let mut root = Node::default();
 
     for (target_path, entry) in entries {
-        insert_entry(&mut root, target_path, entry)?;
+        root.insert_entry(target_path, entry)?;
     }
 
     Ok(root)
-}
-
-fn insert_entry(root: &mut Node, target_path: PathBuf, entry: PortalEntry) -> Result<()> {
-    let mut components: Vec<_> = target_path.components().collect();
-
-    if components.is_empty() {
-        return Err(eyre!("Cannot insert empty target path"));
-    }
-
-    if let Some(Component::RootDir) = components.first() {
-        components = components[1..].to_vec();
-    }
-
-    let mut current = root;
-    let count = components.len();
-
-    for (i, component) in components.iter().enumerate() {
-        let name = component.as_os_str().to_string_lossy().to_string();
-        let is_last = i == count - 1;
-
-        match current {
-            Node::Dir(children) => {
-                if is_last {
-                    if let Some(existing) = children.get(&name) {
-                        match existing {
-                            Node::File { .. } => {
-                                return Err(eyre!(
-                                    "File already exists at `{}`",
-                                    target_path.display()
-                                ));
-                            }
-                            Node::Dir(_) => {
-                                return Err(eyre!(
-                                    "Directory exists when creating file at `{}`",
-                                    target_path.display()
-                                ));
-                            }
-                        }
-                    }
-                    children.insert(name, Node::File(entry));
-                    return Ok(());
-                }
-
-                let child = children.entry(name).or_default();
-                current = child;
-            }
-            Node::File { .. } => {
-                return Err(eyre!(
-                    "File exists when creating directory at `{}`",
-                    target_path.display()
-                ));
-            }
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -97,6 +117,7 @@ mod tests {
     fn node_count(node: &Node) -> usize {
         match node {
             Node::File(_) => 1,
+            Node::Marked(_) => 1,
             Node::Dir(children) => 1 + children.values().map(node_count).sum::<usize>(),
         }
     }
@@ -108,12 +129,12 @@ mod tests {
                 Node::Dir(children) => {
                     current = children.get(*segment)?;
                 }
-                Node::File(_) => return None,
+                Node::File(_) | Node::Marked(_) => return None,
             }
         }
         match current {
             Node::File(entry) => Some(entry),
-            Node::Dir(_) => None,
+            Node::Marked(_) | Node::Dir(_) => None,
         }
     }
 
@@ -138,7 +159,7 @@ mod tests {
     #[test_case("/dir/file", "/dir" => panics "Directory exist"; "directory")]
     fn test_conflict(e1: &str, e2: &str) {
         let mut t = Node::default();
-        insert_entry(&mut t, e1.into(), Default::default()).unwrap();
-        insert_entry(&mut t, e2.into(), Default::default()).unwrap();
+        t.insert_entry(e1.into(), Default::default()).unwrap();
+        t.insert_entry(e2.into(), Default::default()).unwrap();
     }
 }

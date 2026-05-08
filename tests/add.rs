@@ -28,6 +28,7 @@ fn test_add() {
             copy: false,
             force: false,
             editor: Some(OpenEditor::Never),
+            no_modify: false,
         },
         &temp_dir.path().join("db"),
     )
@@ -62,6 +63,7 @@ fn test_add_reimport() {
             copy: false,
             force: false,
             editor: Some(OpenEditor::Never),
+            no_modify: false,
         },
         db_path,
     )
@@ -86,6 +88,7 @@ fn test_editor_open() {
             copy: false,
             force: false,
             editor: None,
+            no_modify: false,
         },
         &temp_dir.path().join("db"),
     )
@@ -125,6 +128,7 @@ args = ["+{row},{col}", "{file}"]
             copy: false,
             force: false,
             editor: None,
+            no_modify: false,
         },
         &temp_dir.path().join("db"),
     )

@@ -94,7 +94,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
     Ok(())
 }
 
-fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore> {
+pub fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore> {
     let mut builder = GitignoreBuilder::new(target_dir);
 
     #[allow(unused_variables)]
@@ -257,7 +257,7 @@ fn insert_portal_entry(
     Ok(())
 }
 
-fn is_ignored(matcher: &Gitignore, path: &Path) -> bool {
+pub fn is_ignored(matcher: &Gitignore, path: &Path) -> bool {
     matcher.matched_path_or_any_parents(path, false).is_ignore()
 }
 
@@ -303,6 +303,8 @@ fn print_tree(path: &Path, node: &Node) -> Result<usize> {
             count += 1;
             output::print_created_file(path, &entry.source, entry.deploy_type);
         }
+        // TODO panic
+        Node::Marked(_) => {}
     }
 
     Ok(count)
@@ -321,6 +323,7 @@ fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool)
         Node::File(entry) => {
             deploy_file(target, entry, db, overwrite_identical)?;
         }
+        Node::Marked(_) => {}
     }
     Ok(())
 }
