@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Component, Path, PathBuf};
 
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{eyre, Result};
 
 use crate::command::apply::PortalEntry;
 
@@ -43,9 +43,6 @@ impl Node {
                     if is_last {
                         if let Some(existing) = children.get(name) {
                             match existing {
-                                Node::Marked(key) => {
-                                    return Ok(Some(key.clone()));
-                                }
                                 Node::File { .. } => {
                                     return Err(eyre!(
                                         "File already exists at `{}`",
@@ -58,6 +55,9 @@ impl Node {
                                         path.display()
                                     ));
                                 }
+                                Node::Marked(key) => {
+                                    return Ok(Some(key.clone()));
+                                }
                             }
                         }
                         children.insert(name.clone(), node);
@@ -66,11 +66,14 @@ impl Node {
                     let child = children.entry(name.clone()).or_default();
                     current = child;
                 }
-                Node::Marked(_) | Node::File { .. } => {
+                Node::File { .. } => {
                     return Err(eyre!(
                         "File exists when creating directory at `{}`",
                         path.display()
                     ));
+                }
+                Node::Marked(key) => {
+                    return Ok(Some(key.clone()));
                 }
             }
         }
@@ -80,10 +83,7 @@ impl Node {
 
     fn insert_entry(&mut self, target_path: PathBuf, entry: PortalEntry) -> Result<()> {
         match self.traverse_and_insert(&target_path, Node::File(entry))? {
-            Some(_) => Err(eyre!(
-                "File already exists at `{}`",
-                target_path.display()
-            )),
+            Some(_) => Err(eyre!("File already exists at `{}`", target_path.display())),
             None => Ok(()),
         }
     }

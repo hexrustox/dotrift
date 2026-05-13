@@ -898,7 +898,7 @@ mod tests {
         ; "literal_dir_vs_flat_file"
     )]
     #[test_case(
-        r#"".txt" = "text""#,
+        r#""*.txt" = """#,
         &["a.txt", "b.txt"],
         ""
         => Vec::<(String, Vec<String>)>::new()
@@ -988,9 +988,15 @@ mod tests {
     // TODO add note when collide with dir
     #[test_case(
         &["dir/file"],
-        &[("dir", "z")]
-        => vec![("dir".into(), vec!["z".into()])]
+        &[("dir", "a")]
+        => vec![("dir".into(), vec!["a".into()])]
         ; "file_collides_with_dir"
+    )]
+    #[test_case(
+        &["file"],
+        &[("file/a", "a")]
+        => vec![("file/a".into(), vec!["a".into(), "file".into()])]
+        ; "dir_collides_with_file"
     )]
     fn test_check_new_entries(
         tree_paths: &[&str],
@@ -1040,10 +1046,17 @@ mod tests {
 
     #[test_case(
         |s, _| { fs::write(s.join("a"), "").unwrap(); },
-        r#""a" = """#,
-        vec![("", "a")]
+        r#""a" = "a""#,
+        vec![("a", "a")]
         => (Vec::<(String, String)>::new(), vec![vec!["a".to_string()]])
         ; "single_literal_collision"
+    )]
+    #[test_case(
+        |s, _| { fs::write(s.join("a"), "").unwrap(); },
+        r#""*" = """#,
+        vec![("a", "a")]
+        => (Vec::<(String, String)>::new(), vec![vec!["*".to_string(), "a".to_string()]])
+        ; "glob_collision"
     )]
     #[test_case(
         |s, _| {
@@ -1057,10 +1070,13 @@ mod tests {
         ; "existing_portal_collision"
     )]
     #[test_case(
-        |s, _| { fs::write(s.join("new"), "").unwrap(); },
+        |s, _| {
+            fs::write(s.join("a"), "").unwrap();
+            fs::write(s.join("new"), "").unwrap();
+        },
         r#""a" = "x""#,
-        vec![("", "new")]
-        => (vec![("new".to_string(), "".to_string())], Vec::<Vec<String>>::new())
+        vec![("y", "new")]
+        => (vec![("new".to_string(), "y".to_string())], Vec::<Vec<String>>::new())
         ; "missing_key"
     )]
     #[test_case(
