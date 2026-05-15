@@ -20,8 +20,11 @@ use crate::{
         },
     },
     config::Config,
+    create_dir_err,
     db::Db,
     output,
+    path::config_path,
+    read_file_err, write_file_err,
 };
 
 pub fn run(
@@ -32,7 +35,6 @@ pub fn run(
     db_path: &Path,
 ) -> Result<()> {
     let source_dir = global_flags.source()?;
-    let config_override = global_flags.config()?;
     let path = to_absolute_path(&path)?;
 
     let reimport = destination.is_none();
@@ -139,10 +141,32 @@ pub fn run(
         tests::OPEN_EDITOR.set(should_open);
     }
 
-    if should_open {
-        launch_editor(&source_dir, config_override)?;
-    }
+    #[cfg(not(test))]
+    {
+        use crate::copy_file_err;
 
+        let config_override = global_flags.config()?;
+        let temp_config = if !flags.no_modify && should_open {
+            prepare_config(&source_dir, &analysis, &target_dir)?
+        } else {
+            None
+        };
+
+        if should_open {
+            let config_path = config_path(&source_dir);
+            if let Some(ref temp) = temp_config {
+                // TODO skip if error
+                let before = fs::metadata(temp)?.modified()?;
+                launch_editor(temp, config_override)?;
+                if fs::metadata(temp)?.modified()? != before {
+                    copy_file_err!(fs::copy(temp, &config_path), temp, config_path)?;
+                }
+                let _ = fs::remove_file(temp);
+            } else {
+                launch_editor(&config_path, config_override)?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -345,21 +369,157 @@ pub fn analyze_portal(
     })
 }
 
-#[cfg(test)]
-fn launch_editor(_: &Path, _: Option<PathBuf>) -> Result<()> {
-    Ok(())
+fn toml_quote(s: &str) -> String {
+    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{}\"", escaped)
 }
 
-#[cfg(not(test))]
-fn launch_editor(source_dir: &Path, config_override: Option<PathBuf>) -> Result<()> {
-    use crate::{
-        global_config::{GlobalConfig, expand_args, find_portal_cursor},
-        path::config_path,
+fn annotate_portal_key(content: &mut String, key: &str, annotation: &str) -> bool {
+    let quoted = toml_quote(key);
+    let mut in_portal = false;
+    let mut found = false;
+    let mut insert_at = 0;
+
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let line_start = i;
+        while i < bytes.len() && bytes[i] != b'\n' {
+            i += 1;
+        }
+        let line = &content[line_start..i];
+        if i < bytes.len() {
+            i += 1; // skip \n
+        }
+
+        if !in_portal {
+            if line.trim() == "[portal]" {
+                in_portal = true;
+            }
+        } else if line.trim().starts_with('[') && line.trim() != "[portal]" {
+            break;
+        } else {
+            let trimmed = line.trim();
+            if !trimmed.is_empty()
+                && !trimmed.starts_with('#')
+                && let Some(eq) = trimmed.find('=')
+            {
+                let lhs = trimmed[..eq].trim();
+                if lhs == key || lhs == quoted {
+                    found = true;
+                    insert_at = line_start;
+                    break;
+                }
+            }
+        }
+    }
+
+    if found {
+        content.insert_str(insert_at, &format!("{}\n", annotation));
+        true
+    } else {
+        false
+    }
+}
+
+fn apply_config_changes(
+    content: &str,
+    analysis: &PortalAnalysis,
+    target_dir: &Path,
+) -> Option<String> {
+    if analysis.missing.is_empty() && analysis.collisions.is_empty() {
+        return None;
+    }
+
+    let mut result = if content.is_empty() {
+        "[portal]".to_string()
+    } else {
+        content.to_string()
     };
+
+    if !result.contains("[portal]") {
+        result.push_str("\n[portal]\n");
+    }
+
+    let mut auto_add_lines: Vec<String> = Vec::new();
+    let mut auto_add_keys: HashSet<String> = HashSet::new();
+
+    for (dest_rel, computed_target, warn) in &analysis.missing {
+        let key_str = dest_rel.display().to_string();
+        auto_add_keys.insert(key_str.clone());
+
+        if *warn {
+            auto_add_lines.push(format!(
+                "# WARNING: {} is outside target directory {}",
+                computed_target.display(),
+                target_dir.display()
+            ));
+        }
+        auto_add_lines.push(format!(
+            "{} = {}",
+            toml_quote(&key_str),
+            toml_quote(&computed_target.display().to_string())
+        ));
+    }
+
+    for (i, group) in analysis.collisions.iter().enumerate() {
+        let id = i + 1;
+        for key in group {
+            if auto_add_keys.contains(key) {
+                for (li, line) in auto_add_lines.iter_mut().enumerate() {
+                    if line.trim().starts_with(&toml_quote(key))
+                        || line.trim().starts_with(key.as_str())
+                    {
+                        auto_add_lines.insert(li, format!("# CONFLICT {}", id));
+                        break;
+                    }
+                }
+            } else {
+                annotate_portal_key(&mut result, key, &format!("# CONFLICT {}", id));
+            }
+        }
+    }
+
+    result.push('\n');
+    for line in &auto_add_lines {
+        result.push_str(line);
+        result.push('\n');
+    }
+
+    Some(result)
+}
+
+fn prepare_config(
+    source_dir: &Path,
+    analysis: &PortalAnalysis,
+    target_dir: &Path,
+) -> Result<Option<PathBuf>> {
+    let config_path = config_path(source_dir);
+    let content = if config_path.exists() {
+        read_file_err!(fs::read_to_string(&config_path), config_path)?
+    } else {
+        String::new()
+    };
+
+    match apply_config_changes(&content, analysis, target_dir) {
+        Some(modified) => {
+            let temp_dir = std::env::temp_dir();
+            create_dir_err!(fs::create_dir_all(&temp_dir), temp_dir)?;
+            // TODO better temp file location
+            let temp_path = temp_dir.join("dotrift-config.toml");
+            write_file_err!(fs::write(&temp_path, modified), temp_path)?;
+            Ok(Some(temp_path))
+        }
+        None => Ok(None),
+    }
+}
+
+fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<()> {
+    use crate::global_config::{GlobalConfig, expand_args, find_portal_cursor};
     use color_eyre::Section;
     use std::{env, process::Command};
 
-    let file = config_path(source_dir).to_string_lossy().to_string();
+    let file = file_path.display().to_string();
     let (row, col) = if let Ok(content) = fs::read_to_string(&file) {
         find_portal_cursor(&content)
     } else {
@@ -1131,6 +1291,103 @@ mod tests {
             .map(|(d, c, _)| (d.display().to_string(), c.display().to_string()))
             .collect();
         (missing, analysis.collisions)
+    }
+
+    #[test_case(
+        PortalAnalysis { missing: vec![], collisions: vec![] },
+        "" => None
+        ; "no_changes_returns_none"
+    )]
+    #[test_case(
+        PortalAnalysis {
+            missing: vec![("file".into(), "file".into(), false)],
+            collisions: vec![],
+        },
+        "" => Some("[portal]\n\"file\" = \"file\"\n".to_string())
+        ; "missing_key_empty_content_creates_portal"
+    )]
+    #[test_case(
+        PortalAnalysis {
+            missing: vec![("file".into(), "file".into(), false)],
+            collisions: vec![],
+        },
+        "[portal]\n\"existing\" = \"existing\"\n" =>
+        Some("[portal]\n\"existing\" = \"existing\"\n\n\"file\" = \"file\"\n".to_string())
+        ; "missing_key_appended_to_existing_portal"
+    )]
+    #[test_case(
+        PortalAnalysis {
+            missing: vec![("file".into(), "/absolute/path".into(), true)],
+            collisions: vec![],
+        },
+        "[portal]\n" =>
+        Some("[portal]\n\n# WARNING: /absolute/path is outside target directory /target\n\"file\" = \"/absolute/path\"\n".to_string())
+        ; "missing_key_with_warning"
+    )]
+    #[test_case(
+        PortalAnalysis {
+            missing: vec![],
+            collisions: vec![vec!["a".into(), "b".into()]],
+        },
+        "[portal]\n\"a\" = \"x\"\n\"b\" = \"x\"\n" =>
+        Some("[portal]\n# CONFLICT 1\n\"a\" = \"x\"\n# CONFLICT 1\n\"b\" = \"x\"\n\n".to_string())
+        ; "collision_annotates_existing_keys"
+    )]
+    #[test_case(
+        PortalAnalysis {
+            missing: vec![],
+            collisions: vec![vec!["file".into()]],
+        },
+        "[portal]\n\"file\" = \"x\"\n" =>
+        Some("[portal]\n# CONFLICT 1\n\"file\" = \"x\"\n\n".to_string())
+        ; "single_collision_single_key"
+    )]
+    #[test_case(
+        PortalAnalysis {
+            missing: vec![],
+            collisions: vec![vec!["a".into()], vec!["b".into()]],
+        },
+        "[portal]\n\"a\" = \"x\"\n\"b\" = \"y\"\n" =>
+        Some("[portal]\n# CONFLICT 1\n\"a\" = \"x\"\n# CONFLICT 2\n\"b\" = \"y\"\n\n".to_string())
+        ; "multiple_collision_groups_different_ids"
+    )]
+    #[test_case(
+        PortalAnalysis {
+            missing: vec![("new".into(), "new".into(), false)],
+            collisions: vec![vec!["existing".into(), "new".into()]],
+        },
+        "[portal]\n\"existing\" = \"x\"\n" =>
+        Some("[portal]\n# CONFLICT 1\n\"existing\" = \"x\"\n\n# CONFLICT 1\n\"new\" = \"new\"\n".to_string())
+        ; "collision_on_auto_add_key"
+    )]
+    #[test_case(
+        PortalAnalysis {
+            missing: vec![("added".into(), "added".into(), false)],
+            collisions: vec![],
+        },
+        "target-directory = \"/foo\"\n\n[portal]\n" =>
+        Some("target-directory = \"/foo\"\n\n[portal]\n\n\"added\" = \"added\"\n".to_string())
+        ; "missing_key_preserves_other_sections"
+    )]
+    #[test_case(
+        PortalAnalysis {
+            missing: vec![("key".into(), "key".into(), false)],
+            collisions: vec![],
+        },
+        "" => Some("[portal]\n\"key\" = \"key\"\n".to_string())
+        ; "empty_content"
+    )]
+    #[test_case(
+        PortalAnalysis {
+            missing: vec![],
+            collisions: vec![vec!["bare_key".into()]],
+        },
+        "[portal]\nbare_key = \"x\"\n" =>
+        Some("[portal]\n# CONFLICT 1\nbare_key = \"x\"\n\n".to_string())
+        ; "collision_annotates_bare_key"
+    )]
+    fn test_apply_config_changes(analysis: PortalAnalysis, content: &str) -> Option<String> {
+        apply_config_changes(content, &analysis, Path::new("/target"))
     }
 
     #[test_case(

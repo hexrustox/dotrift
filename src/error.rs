@@ -6,6 +6,13 @@ macro_rules! read_file_err {
 }
 
 #[macro_export]
+macro_rules! write_file_err {
+    ($result:expr, $path:expr) => {
+        $result.wrap_err_with(|| format!("Failed to write file `{}`", $path.display()))
+    };
+}
+
+#[macro_export]
 macro_rules! remove_file_err {
     ($result:expr, $path:expr) => {
         $result.wrap_err_with(|| format!("Failed to remove file `{}`", $path.display()))
