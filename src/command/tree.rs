@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Component, Path, PathBuf};
 
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{Result, eyre};
 
 use crate::command::apply::PortalEntry;
 
@@ -19,7 +19,7 @@ impl Default for Node {
 }
 
 impl Node {
-    fn traverse_and_insert(&mut self, path: &Path, node: Node) -> Result<Option<String>> {
+    fn path_components(path: &Path) -> Result<Vec<String>> {
         let mut comps: Vec<_> = path.components().collect();
         if comps.is_empty() {
             return Err(eyre!("Cannot insert empty target path"));
@@ -27,10 +27,14 @@ impl Node {
         if let Some(Component::RootDir) = comps.first() {
             comps = comps[1..].to_vec();
         }
-        let components: Vec<String> = comps
+        Ok(comps
             .into_iter()
             .map(|c| c.as_os_str().to_string_lossy().to_string())
-            .collect();
+            .collect())
+    }
+
+    fn traverse_and_insert(&mut self, path: &Path, node: Node) -> Result<Option<String>> {
+        let components = Self::path_components(path)?;
 
         let count = components.len();
         let mut current = self;
@@ -90,6 +94,40 @@ impl Node {
 
     pub fn check_entry(&mut self, path: &Path, key: String) -> Result<Option<String>> {
         self.traverse_and_insert(path, Node::Marked(key))
+    }
+
+    fn all_keys(&self) -> Vec<String> {
+        match self {
+            Node::Marked(k) => vec![k.clone()],
+            Node::Dir(children) => {
+                let mut keys = Vec::new();
+                for child in children.values() {
+                    keys.extend(child.all_keys());
+                }
+                keys
+            }
+            Node::File(_) => vec![],
+        }
+    }
+
+    pub fn key_at(&self, path: &Path) -> Vec<String> {
+        let components = match Self::path_components(path) {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+        let mut current = self;
+        for name in &components {
+            match current {
+                Node::Dir(children) => {
+                    current = match children.get(name) {
+                        Some(child) => child,
+                        None => return vec![],
+                    };
+                }
+                _ => return current.all_keys(),
+            }
+        }
+        current.all_keys()
     }
 }
 

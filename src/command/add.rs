@@ -205,10 +205,14 @@ fn check_and_collect_collision(
             collisions.entry(t).or_default().insert(key.to_string());
         }
         Err(_) => {
+            let t = target_path.display().to_string();
             collisions
-                .entry(target_path.display().to_string())
+                .entry(t.clone())
                 .or_default()
                 .insert(key.to_string());
+            for context_key in root.key_at(target_path) {
+                collisions.entry(t.clone()).or_default().insert(context_key);
+            }
         }
         _ => {}
     }
@@ -1154,18 +1158,17 @@ mod tests {
         => Vec::<(String, Vec<String>)>::new()
         ; "empty_tree"
     )]
-    // TODO add note when collide with dir
     #[test_case(
         &["dir/file"],
-        &[("dir", "a")]
-        => vec![("dir".into(), vec!["a".into()])]
-        ; "file_collides_with_dir"
+        &[("dir", "a"), ("dir", "b")]
+        => vec![("dir".into(), vec!["a".into(), "b".into(), "dir/file".into()])]
+        ; "files_collides_with_dir"
     )]
     #[test_case(
         &["file"],
-        &[("file/a", "a")]
-        => vec![("file/a".into(), vec!["a".into(), "file".into()])]
-        ; "dir_collides_with_file"
+        &[("file/a", "a"), ("file/b", "b")]
+        => vec![("file/a".into(), vec!["a".into(), "file".into()]), ("file/b".into(), vec!["b".into(), "file".into()])]
+        ; "dirs_collides_with_file"
     )]
     fn test_check_new_entries(
         tree_paths: &[&str],
