@@ -1,10 +1,16 @@
 use std::{
     collections::{HashMap, HashSet},
+    env,
     fs::{self, remove_dir_all, remove_file},
+    io::ErrorKind,
     path::{Path, PathBuf},
+    process::Command,
 };
 
-use color_eyre::eyre::{Context, Result, eyre};
+use color_eyre::{
+    Section,
+    eyre::{Context, Result, eyre},
+};
 use glob::Pattern;
 use normalize_path::NormalizePath;
 use walkdir::WalkDir;
@@ -20,10 +26,11 @@ use crate::{
         },
     },
     config::Config,
-    create_dir_err,
+    copy_file_err, create_dir_err,
     db::Db,
+    global_config::{GlobalConfig, expand_args, find_portal_cursor},
     output,
-    path::config_path,
+    path::{config_path, tmp_path},
     read_file_err, write_file_err,
 };
 
@@ -141,32 +148,28 @@ pub fn run(
         tests::OPEN_EDITOR.set(should_open);
     }
 
-    #[cfg(not(test))]
-    {
-        use crate::copy_file_err;
+    let config_override = global_flags.config()?;
+    let temp_config = if !flags.no_modify && should_open {
+        prepare_config(&source_dir, &analysis, &target_dir)?
+    } else {
+        None
+    };
 
-        let config_override = global_flags.config()?;
-        let temp_config = if !flags.no_modify && should_open {
-            prepare_config(&source_dir, &analysis, &target_dir)?
-        } else {
-            None
-        };
-
-        if should_open {
-            let config_path = config_path(&source_dir);
-            if let Some(ref temp) = temp_config {
-                // TODO skip if error
-                let before = fs::metadata(temp)?.modified()?;
-                launch_editor(temp, config_override)?;
-                if fs::metadata(temp)?.modified()? != before {
-                    copy_file_err!(fs::copy(temp, &config_path), temp, config_path)?;
-                }
-                let _ = fs::remove_file(temp);
-            } else {
-                launch_editor(&config_path, config_override)?;
+    if should_open {
+        let config_path = config_path(&source_dir);
+        if let Some(ref temp) = temp_config {
+            let before = fs::metadata(temp).ok().and_then(|m| m.modified().ok());
+            launch_editor(temp, config_override)?;
+            let after = fs::metadata(temp).ok().and_then(|m| m.modified().ok());
+            if before.is_some_and(|b| after.is_some_and(|a| a != b)) {
+                copy_file_err!(fs::copy(temp, &config_path), temp, config_path)?;
             }
+            let _ = fs::remove_file(temp);
+        } else {
+            launch_editor(&config_path, config_override)?;
         }
     }
+
     Ok(())
 }
 
@@ -503,10 +506,9 @@ fn prepare_config(
 
     match apply_config_changes(&content, analysis, target_dir) {
         Some(modified) => {
-            let temp_dir = std::env::temp_dir();
+            let temp_dir = tmp_path();
             create_dir_err!(fs::create_dir_all(&temp_dir), temp_dir)?;
-            // TODO better temp file location
-            let temp_path = temp_dir.join("dotrift-config.toml");
+            let temp_path = temp_dir.join(format!("{}.toml", std::process::id()));
             write_file_err!(fs::write(&temp_path, modified), temp_path)?;
             Ok(Some(temp_path))
         }
@@ -515,9 +517,9 @@ fn prepare_config(
 }
 
 fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<()> {
-    use crate::global_config::{GlobalConfig, expand_args, find_portal_cursor};
-    use color_eyre::Section;
-    use std::{env, process::Command};
+    if cfg!(test) {
+        return Ok(());
+    }
 
     let file = file_path.display().to_string();
     let (row, col) = if let Ok(content) = fs::read_to_string(&file) {
@@ -553,13 +555,20 @@ fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<(
         },
     };
 
-    // TODO check command exist
-    Command::new(&cmd).args(&args).status().wrap_err_with(|| {
-        format!(
-            "Failed to launch editor: {}",
-            [vec![cmd], args].concat().join(" ")
-        )
-    })?;
+    let status = Command::new(&cmd).args(&args).status();
+    if let Err(ref e) = status {
+        return if e.kind() == ErrorKind::NotFound {
+            Err(eyre!("Editor command not found: `{cmd}`"))
+        } else {
+            status.map(|_| ()).wrap_err_with(|| {
+                format!(
+                    "Failed to launch editor: `{}`",
+                    [vec![cmd], args].concat().join(" ")
+                )
+            })
+        };
+    }
+
     Ok(())
 }
 
