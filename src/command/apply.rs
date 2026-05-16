@@ -9,7 +9,6 @@ use color_eyre::eyre::{Context, Result, eyre};
 use glob::{Pattern, glob_with};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use normalize_path::NormalizePath;
-use walkdir::WalkDir;
 
 use crate::{
     cli::{ApplyFlags, GlobalFlags},
@@ -18,7 +17,7 @@ use crate::{
         tree::{Node, build_tree},
         util::{
             GLOB_OPTION, PathLiteral, SafeStripPrefix, clean_up, clone_file, hash_file, is_glob,
-            is_managed, resolve_target, strip_prefix_filter_glob,
+            is_managed, resolve_target, strip_prefix_filter_glob, walk_files,
         },
     },
     config::{Config, DeployType, FileMode, Rules},
@@ -204,11 +203,7 @@ fn resolve_literal_portal(
     }
 
     if source_path.path_is_dir() {
-        for entry in WalkDir::new(&source_path)
-            .into_iter()
-            .flatten()
-            .filter(|e| !e.file_type().is_dir())
-        {
+        for entry in walk_files(&source_path) {
             let file_source = entry.path().to_path_buf();
 
             let rel_to_pattern = file_source.safe_strip_prefix(&source_path);
@@ -303,8 +298,9 @@ fn print_tree(path: &Path, node: &Node) -> Result<usize> {
             count += 1;
             output::print_created_file(path, &entry.source, entry.deploy_type);
         }
-        // TODO panic
-        Node::Marked(_) => {}
+        Node::Marked(_) => {
+            unreachable!()
+        }
     }
 
     Ok(count)
@@ -323,7 +319,9 @@ fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool)
         Node::File(entry) => {
             deploy_file(target, entry, db, overwrite_identical)?;
         }
-        Node::Marked(_) => {}
+        Node::Marked(_) => {
+            unreachable!()
+        }
     }
     Ok(())
 }

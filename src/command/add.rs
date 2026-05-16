@@ -13,7 +13,6 @@ use color_eyre::{
 };
 use glob::Pattern;
 use normalize_path::NormalizePath;
-use walkdir::WalkDir;
 
 use crate::{
     cli::{AddFlags, GlobalFlags, OpenEditor},
@@ -22,7 +21,7 @@ use crate::{
         to_absolute_path, tree,
         util::{
             GLOB_OPTION, PathLiteral, SafeStripPrefix, copy_recursive, is_glob, resolve_target,
-            strip_prefix_filter_glob,
+            strip_prefix_filter_glob, walk_files,
         },
     },
     config::Config,
@@ -51,11 +50,7 @@ pub fn run(
     let entries: Vec<(PathBuf, PathBuf)> = if reimport_dir {
         let db = Db::init(db_path)?;
         let mut entries = Vec::new();
-        for entry in WalkDir::new(&path)
-            .into_iter()
-            .flatten()
-            .filter(|e| !e.file_type().is_dir())
-        {
+        for entry in walk_files(&path) {
             let p = entry.path();
             match db.get_entry(p)? {
                 Some(db_entry) => {
@@ -267,11 +262,7 @@ fn resolve_collisions(
             }
 
             if source_path.path_is_dir() {
-                let walker = WalkDir::new(&source_path)
-                    .into_iter()
-                    .flatten()
-                    .filter(|e| !e.file_type().is_dir());
-                for entry in walker {
+                for entry in walk_files(&source_path) {
                     let file_source = entry.path().to_path_buf();
                     let rel_to_pattern = file_source.safe_strip_prefix(&source_path);
                     let target_path = target_dir.join(&target_rel_normalized).join(rel_to_pattern);

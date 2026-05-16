@@ -179,10 +179,17 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
     }
 }
 
+pub fn walk_all(path: &Path) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
+    WalkDir::new(path).into_iter().flatten()
+}
+
+pub fn walk_files(path: &Path) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
+    walk_all(path).filter(|e| !e.file_type().is_dir())
+}
+
 pub fn copy_recursive(from: &Path, to: &Path) -> Result<()> {
     if from.path_is_dir() {
-        // TODO extract walkdir
-        for entry in WalkDir::new(from).into_iter().flatten() {
+        for entry in walk_all(from) {
             let path = entry.path();
             let base = path.safe_strip_prefix(from);
             let new = to.join(base);

@@ -112,11 +112,15 @@ impl Db {
     }
 
     pub fn delete_entry_with_prefix(&self, target: &Path) -> color_eyre::Result<()> {
+        let prefix = target.to_string_lossy();
+        let upper = format!("{}\u{10FFFF}", prefix);
         self.conn
             .execute(
-                &format!("DELETE FROM {} WHERE target_path like ?1", TABLE_NAME),
-                // TODO escape meta char
-                params![target.to_string_lossy() + "%"],
+                &format!(
+                    "DELETE FROM {} WHERE target_path >= ?1 AND target_path < ?2",
+                    TABLE_NAME
+                ),
+                params![prefix.as_ref(), upper],
             )
             .wrap_err_with(|| {
                 format!(
