@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use color_eyre::eyre::{Result, eyre};
 use dirs::{config_dir, data_dir, state_dir};
 
-const PKG_NAME: &str = env!("CARGO_PKG_NAME");
+pub const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 
 pub fn source_path() -> Result<PathBuf> {
     data_dir()

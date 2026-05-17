@@ -47,12 +47,6 @@ impl Node {
                     if is_last {
                         if let Some(existing) = children.get(name) {
                             match existing {
-                                Node::File { .. } => {
-                                    return Err(eyre!(
-                                        "File already exists at `{}`",
-                                        path.display()
-                                    ));
-                                }
                                 Node::Dir(_) => {
                                     return Err(eyre!(
                                         "Directory exists when creating file at `{}`",
@@ -61,6 +55,9 @@ impl Node {
                                 }
                                 Node::Marked(key) => {
                                     return Ok(Some(key.clone()));
+                                }
+                                _ => {
+                                    unreachable!();
                                 }
                             }
                         }
@@ -190,7 +187,6 @@ mod tests {
         assert_eq!(node_count(&tree), total + 1);
     }
 
-    #[test_case("/file", "/file" => panics "File already exist"; "same_file")]
     #[test_case("/dir", "/dir/file" => panics "File exist"; "file")]
     #[test_case("/dir/file", "/dir" => panics "Directory exist"; "directory")]
     fn test_conflict(e1: &str, e2: &str) {

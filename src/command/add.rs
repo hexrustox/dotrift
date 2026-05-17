@@ -29,7 +29,7 @@ use crate::{
     db::Db,
     global_config::{GlobalConfig, expand_args, find_portal_cursor},
     output,
-    path::{config_path, tmp_path},
+    path::{PKG_NAME, config_path, tmp_path},
     read_file_err, write_file_err,
 };
 
@@ -57,14 +57,14 @@ pub fn run(
                     let dest = db_entry.source_path;
                     if !dest.starts_with(&source_dir) {
                         output::print_warn(format!(
-                            "Destination `{}` is outside source directory, skipping",
+                            "`{}` is outside source directory, skipping",
                             p.display()
                         ));
                         continue;
                     }
                     if dest.path_exists() && !flags.force {
                         output::print_warn(format!(
-                            "Already exists at `{}`, skipping",
+                            "`{} already exists`, skipping",
                             dest.display()
                         ));
                         continue;
@@ -72,7 +72,7 @@ pub fn run(
                     entries.push((p.to_path_buf(), dest));
                 }
                 None => {
-                    output::print_warn(format!("Not in database: `{}`, skipping", p.display()));
+                    output::print_warn(format!("`{}` is not in database, skipping", p.display()));
                 }
             }
         }
@@ -89,7 +89,12 @@ pub fn run(
             match db.get_entry(&path)? {
                 Some(entry) => entry.source_path,
                 None => {
-                    return Err(eyre!("Path `{}` not found in database", path.display()));
+                    return Err(
+                        eyre!("Path `{}` not found in database", path.display()).note(format!(
+                            "Database records files that were deployed with `{} apply`",
+                            PKG_NAME
+                        )),
+                    );
                 }
             }
         };
@@ -106,7 +111,8 @@ pub fn run(
     if !reimport_dir {
         let dest = &entries[0].1;
         if dest.path_exists() && !flags.force {
-            return Err(eyre!("`{}` already exists", dest.display()));
+            return Err(eyre!("`{}` already exists", dest.display())
+                .suggestion("Use --force to overwrite the existing file, or remove it manually"));
         }
     }
 

@@ -5,7 +5,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use color_eyre::eyre::{Context, Result, eyre};
+use color_eyre::{
+    Section,
+    eyre::{Context, Result, eyre},
+};
 use glob::{Pattern, glob_with};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use normalize_path::NormalizePath;
@@ -62,7 +65,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
         0
     };
 
-    let tree = build_tree(portal_entries)?;
+    let tree = build_tree(portal_entries).suggestion("Check portal entries for conflicting target paths. A file and a directory cannot share the same target path.")?;
 
     if flags.dry_run {
         let create_count = print_tree(Path::new("/"), &tree)?;
@@ -104,7 +107,8 @@ pub fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore>
     for pattern in patterns {
         builder
             .add_line(None, pattern)
-            .wrap_err_with(|| format!("Invalid ignore pattern: `{pattern}`"))?;
+            .wrap_err_with(|| format!("Invalid ignore pattern: `{pattern}`"))
+            .note("Use gitignore-style patterns. See gitignore documentation for syntax.")?;
     }
     builder
         .build()
@@ -328,6 +332,11 @@ fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool)
     Ok(())
 }
 
+fn abort_deploy(at: &Path) -> color_eyre::Report {
+    eyre!("Aborted at `{}`", at.display())
+        .note("Not all files were deployed. Files deployed before this point remain in place.")
+}
+
 fn deploy_dir(path: &Path, db: &Db) -> Result<bool> {
     if path.path_exists() {
         if path.path_is_dir() {
@@ -341,7 +350,7 @@ fn deploy_dir(path: &Path, db: &Db) -> Result<bool> {
                 db.delete_entry(path)?;
             }
             CollisionOptions::Quit => {
-                return Err(eyre!("Aborted at `{}`", path.display()));
+                return Err(abort_deploy(path));
             }
         }
     }
@@ -398,7 +407,7 @@ fn deploy_file(
                     db.delete_entry_with_prefix(target)?;
                 }
                 CollisionOptions::Quit => {
-                    return Err(eyre!("Aborted at `{}`", target.display()));
+                    return Err(abort_deploy(target));
                 }
             }
         } else {
@@ -427,7 +436,7 @@ fn deploy_file(
                     CollisionOptions::Skip => return Ok(()),
                     CollisionOptions::Overwrite => {}
                     CollisionOptions::Quit => {
-                        return Err(eyre!("Aborted at `{}`", target.display()));
+                        return Err(abort_deploy(target));
                     }
                 }
             }
