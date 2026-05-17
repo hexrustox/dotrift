@@ -64,7 +64,7 @@ pub fn resolve_target(
 
     if target_dir.starts_with(source_dir) {
         return Err(eyre!(
-            "Target directory '{}' cannot be inside source directory '{}'",
+            "Target directory `{}` cannot be inside source directory `{}`",
             target_dir.display(),
             source_dir.display()
         ));

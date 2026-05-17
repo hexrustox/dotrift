@@ -86,10 +86,8 @@ impl Node {
     }
 
     fn insert_entry(&mut self, target_path: PathBuf, entry: PortalEntry) -> Result<()> {
-        match self.traverse_and_insert(&target_path, Node::File(entry))? {
-            Some(_) => Err(eyre!("File already exists at `{}`", target_path.display())),
-            None => Ok(()),
-        }
+        self.traverse_and_insert(&target_path, Node::File(entry))?;
+        Ok(())
     }
 
     pub fn check_entry(&mut self, path: &Path, key: String) -> Result<Option<String>> {

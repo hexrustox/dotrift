@@ -34,7 +34,12 @@ pub fn expand_arg(arg: &str, params: &[(&str, &str)]) -> Result<String> {
                     Some((_, v)) => result.push_str(v),
                     None => {
                         return Err(eyre!(
-                            "Unknown parameter `{{{name}}}` in editor command argument"
+                            "Unknown parameter `{name}` in editor command argument (valid: {})",
+                            params
+                                .iter()
+                                .map(|(k, _)| format!("{{{k}}}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         ));
                     }
                 }
@@ -116,7 +121,7 @@ mod tests {
     #[test_case("-f", &[] => "-f"; "no_params")]
     #[test_case("{{file}}", &[] => "{file}"; "literal_braces")]
     #[test_case("}}", &[] => "}"; "literal_double_close")]
-    #[test_case("{foo}", &[("file", "/f")] => panics "Unknown parameter `{foo}`"; "unknown_param")]
+    #[test_case("{foo}", &[("file", "/f")] => panics "Unknown parameter `foo`"; "unknown_param")]
     #[test_case("{file", &[("file", "/f")] => panics "Unclosed parameter"; "unclosed_brace")]
     fn test_expand_arg(arg: &str, params: &[(&str, &str)]) -> String {
         expand_arg(arg, params).unwrap()

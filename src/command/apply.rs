@@ -104,9 +104,11 @@ pub fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore>
     for pattern in patterns {
         builder
             .add_line(None, pattern)
-            .wrap_err_with(|| format!("Invalid ignore pattern: '{pattern}'"))?;
+            .wrap_err_with(|| format!("Invalid ignore pattern: `{pattern}`"))?;
     }
-    builder.build().wrap_err("Failed to build ignore matcher")
+    builder
+        .build()
+        .wrap_err("Failed to compile ignore patterns")
 }
 
 fn resolve_portals(
@@ -339,7 +341,7 @@ fn deploy_dir(path: &Path, db: &Db) -> Result<bool> {
                 db.delete_entry(path)?;
             }
             CollisionOptions::Quit => {
-                return Err(eyre!("Aborted at '{}'", path.display()));
+                return Err(eyre!("Aborted at `{}`", path.display()));
             }
         }
     }
@@ -396,7 +398,7 @@ fn deploy_file(
                     db.delete_entry_with_prefix(target)?;
                 }
                 CollisionOptions::Quit => {
-                    return Err(eyre!("Aborted at '{}'", target.display()));
+                    return Err(eyre!("Aborted at `{}`", target.display()));
                 }
             }
         } else {
@@ -425,7 +427,7 @@ fn deploy_file(
                     CollisionOptions::Skip => return Ok(()),
                     CollisionOptions::Overwrite => {}
                     CollisionOptions::Quit => {
-                        return Err(eyre!("Aborted at '{}'", target.display()));
+                        return Err(eyre!("Aborted at `{}`", target.display()));
                     }
                 }
             }

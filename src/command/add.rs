@@ -57,14 +57,14 @@ pub fn run(
                     let dest = db_entry.source_path;
                     if !dest.starts_with(&source_dir) {
                         output::print_warn(format!(
-                            "destination `{}` is outside source directory, skipping",
+                            "Destination `{}` is outside source directory, skipping",
                             p.display()
                         ));
                         continue;
                     }
                     if dest.path_exists() && !flags.force {
                         output::print_warn(format!(
-                            "`{}` already exists, skipping",
+                            "Already exists at `{}`, skipping",
                             dest.display()
                         ));
                         continue;
@@ -72,7 +72,7 @@ pub fn run(
                     entries.push((p.to_path_buf(), dest));
                 }
                 None => {
-                    output::print_warn(format!("`{}` not in database, skipping", p.display()));
+                    output::print_warn(format!("Not in database: `{}`, skipping", p.display()));
                 }
             }
         }
@@ -95,7 +95,7 @@ pub fn run(
         };
         if !dest.starts_with(&source_dir) {
             return Err(eyre!(
-                "Destination '{}' must be inside source directory '{}'",
+                "Destination `{}` must be inside source directory `{}`",
                 dest.display(),
                 source_dir.display()
             ));

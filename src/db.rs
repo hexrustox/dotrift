@@ -34,7 +34,7 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
             return Err(rusqlite::Error::FromSqlConversionFailure(
                 1,
                 rusqlite::types::Type::Text,
-                eyre!("Invalid deploy type '{other}' for '{target_str}'").into(),
+                eyre!("Invalid deploy type `{other}` for `{target_str}`").into(),
             ));
         }
     };
@@ -73,7 +73,7 @@ impl Db {
             ),
             [],
         )
-        .wrap_err_with(|| format!("Failed to create table '{TABLE_NAME}'"))?;
+        .wrap_err("Failed to initialize database")?;
 
         Ok(Self { conn })
     }
@@ -96,7 +96,7 @@ impl Db {
                     symlink_target_str,
                 ],
             )
-            .wrap_err_with(|| format!("Failed to insert/update entry for '{}'", entry.target_path.display()))?;
+            .wrap_err_with(|| format!("Failed to insert/update entry for `{}`", entry.target_path.display()))?;
 
         Ok(())
     }
@@ -107,7 +107,7 @@ impl Db {
                 &format!("DELETE FROM {} WHERE target_path = ?1", TABLE_NAME),
                 params![target.to_string_lossy()],
             )
-            .wrap_err_with(|| format!("Failed to delete entry for '{}'", target.display()))?;
+            .wrap_err_with(|| format!("Failed to delete entry for `{}`", target.display()))?;
         Ok(())
     }
 
@@ -124,7 +124,7 @@ impl Db {
             )
             .wrap_err_with(|| {
                 format!(
-                    "Failed to delete entries with prefix '{}'",
+                    "Failed to delete entries with prefix `{}`",
                     target.display()
                 )
             })?;
@@ -134,7 +134,7 @@ impl Db {
     pub fn delete_table(&self) -> color_eyre::Result<()> {
         self.conn
             .execute(&format!("DROP TABLE IF EXISTS {}", TABLE_NAME), [])
-            .wrap_err_with(|| format!("Failed to delete table '{TABLE_NAME}'"))?;
+            .wrap_err("Failed to clear database")?;
         Ok(())
     }
 
@@ -145,11 +145,11 @@ impl Db {
                 "SELECT target_path, deploy_type, source_path, hash, symlink_target FROM {} WHERE target_path = ?1",
                 TABLE_NAME
             ))
-            .wrap_err_with(|| format!("Failed to prepare statement for querying '{}'", target.display()))?;
+            .wrap_err_with(|| format!("Failed to look up `{}`", target.display()))?;
 
         stmt.query_row(params![target.to_string_lossy()], row_to_entry)
             .optional()
-            .wrap_err_with(|| format!("Failed to query entry for '{}'", target.display()))
+            .wrap_err_with(|| format!("Failed to query entry for `{}`", target.display()))
     }
 
     pub fn get_all_entries(&self) -> color_eyre::Result<Vec<DbEntry>> {
@@ -159,7 +159,7 @@ impl Db {
                 "SELECT target_path, deploy_type, source_path, hash, symlink_target FROM {}",
                 TABLE_NAME
             ))
-            .wrap_err("Failed to prepare statement for listing entries")?;
+            .wrap_err("Failed to list database entries")?;
 
         let entries = stmt
             .query_map([], row_to_entry)
