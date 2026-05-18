@@ -7,6 +7,7 @@ use std::{
     io::{BufReader, ErrorKind, Read},
     os::unix::fs as unix_fs,
     path::{Path, PathBuf},
+    time::UNIX_EPOCH,
 };
 
 use color_eyre::Section;
@@ -151,6 +152,16 @@ pub fn hash_file(path: &Path) -> Result<u64> {
     Ok(hasher.finish())
 }
 
+pub fn read_mtime(path: &Path) -> Option<i64> {
+    path.symlink_metadata()
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_nanos() as i64)
+}
+
 pub fn is_managed_entry(entry: &DbEntry, target: &Path, target_hash: Option<u64>) -> bool {
     match entry.deploy_type {
         DeployType::Symlink => match fs::read_link(target) {
@@ -160,7 +171,12 @@ pub fn is_managed_entry(entry: &DbEntry, target: &Path, target_hash: Option<u64>
         DeployType::Copy => {
             if let Some(hash) = entry.hash {
                 target.path_is_file() && {
-                    if let Ok(h) = target_hash.map(Ok).unwrap_or_else(|| hash_file(target)) {
+                    if entry
+                        .mtime
+                        .is_some_and(|mt| read_mtime(target).is_some_and(|t| t == mt))
+                    {
+                        true
+                    } else if let Ok(h) = target_hash.map(Ok).unwrap_or_else(|| hash_file(target)) {
                         h == hash
                     } else {
                         false
@@ -326,6 +342,7 @@ pub mod tests {
             source_path: s.join("file"),
             hash: None,
             symlink_target: None,
+            mtime: None,
         })
         => true; "symlink_matching_source"
     )]
@@ -340,6 +357,7 @@ pub mod tests {
             source_path: s.join("file2"),
             hash: None,
             symlink_target: None,
+            mtime: None,
         })
         => false; "symlink_different_source"
     )]
@@ -352,6 +370,7 @@ pub mod tests {
             source_path: s.join("link"),
             hash: None,
             symlink_target: None,
+            mtime: None,
         })
         => false; "symlink_target_missing"
     )]
@@ -366,8 +385,43 @@ pub mod tests {
             source_path: s.join("file"),
             hash: Some(hash_file(&t.join("file")).unwrap()),
             symlink_target: None,
+            mtime: None,
         })
         => true; "copy_matching_hash"
+    )]
+    #[test_case(
+        |_, t| {
+            fs::write(t.join("file"), "same").unwrap();
+        },
+        |t| t.join("file"),
+        |_, t| {
+            Some(DbEntry {
+                target_path: t.join("file"),
+                deploy_type: DeployType::Copy,
+                source_path: PathBuf::from("/x"),
+                hash: Some(0),
+                symlink_target: None,
+                mtime: read_mtime(&t.join("file")),
+            })
+        }
+        => true; "copy_mtime_match"
+    )]
+    #[test_case(
+        |_, t| {
+            fs::write(t.join("file"), "same").unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            fs::write(t.join("file"), "same").unwrap();
+        },
+        |t| t.join("file"),
+        |_, t| Some(DbEntry {
+            target_path: t.join("file"),
+            deploy_type: DeployType::Copy,
+            source_path: PathBuf::from("/x"),
+            hash: Some(hash_file(&t.join("file")).unwrap()),
+            symlink_target: None,
+            mtime: Some(0),
+        })
+        => true; "copy_mtime_mismatch_hash_match"
     )]
     #[test_case(
         |s, t| {
@@ -381,6 +435,7 @@ pub mod tests {
             source_path: s.join("file"),
             hash: Some(hash_file(&s.join("file")).unwrap()),
             symlink_target: None,
+            mtime: None,
         })
         => false; "copy_different_hash"
     )]
@@ -396,6 +451,7 @@ pub mod tests {
             source_path: s.join("file"),
             hash: Some(hash_file(&s.join("file")).unwrap()),
             symlink_target: None,
+            mtime: None,
         })
         => false; "copy_hash_target_is_symlink"
     )]
@@ -408,6 +464,7 @@ pub mod tests {
             source_path: PathBuf::from("/x"),
             hash: Some(0),
             symlink_target: None,
+            mtime: None,
         })
         => false; "copy_hash_target_missing"
     )]
@@ -422,6 +479,7 @@ pub mod tests {
             source_path: PathBuf::from("/x"),
             hash: None,
             symlink_target: Some(PathBuf::from("/a")),
+            mtime: None,
         })
         => true; "copy_symlink_target_managed"
     )]
@@ -436,6 +494,7 @@ pub mod tests {
             source_path: PathBuf::from("/x"),
             hash: None,
             symlink_target: Some(PathBuf::from("/a")),
+            mtime: None,
         })
         => false; "copy_symlink_target_mismatch"
     )]
@@ -450,6 +509,7 @@ pub mod tests {
             source_path: PathBuf::from("/x"),
             hash: None,
             symlink_target: Some(PathBuf::from("/a")),
+            mtime: None,
         })
         => false; "copy_symlink_target_is_file"
     )]
@@ -462,6 +522,7 @@ pub mod tests {
             source_path: PathBuf::from("/x"),
             hash: None,
             symlink_target: Some(PathBuf::from("/a")),
+            mtime: None,
         })
         => false; "copy_symlink_target_missing"
     )]
@@ -477,6 +538,7 @@ pub mod tests {
             source_path: s.join("file"),
             hash: Some(hash_file(&s.join("file")).unwrap()),
             symlink_target: None,
+            mtime: None,
         })
         => false; "symlink_db_is_copy"
     )]
@@ -491,6 +553,7 @@ pub mod tests {
             source_path: s.join("file"),
             hash: None,
             symlink_target: None,
+            mtime: None,
         })
         => false; "copy_db_is_symlink"
     )]
@@ -513,6 +576,7 @@ pub mod tests {
             source_path: PathBuf::from("/x"),
             hash: None,
             symlink_target: None,
+            mtime: None,
         })
         => false; "copy_corrupt_no_hash_no_symlink_target"
     )]
@@ -527,6 +591,7 @@ pub mod tests {
             source_path: PathBuf::from("/x"),
             hash: Some(0),
             symlink_target: None,
+            mtime: None,
         })
         => false; "copy_target_is_dir"
     )]
@@ -544,6 +609,7 @@ pub mod tests {
             source_path: PathBuf::from("/x"),
             hash: Some(0),
             symlink_target: None,
+            mtime: None,
         }) => false; "copy_source_unreadable"
     )]
     fn test_is_managed(
@@ -724,6 +790,7 @@ pub mod tests {
                 source_path: source.join("file"),
                 hash: None,
                 symlink_target: None,
+                mtime: None,
             }).unwrap();
         },
         false, false, false,
@@ -742,6 +809,7 @@ pub mod tests {
                 source_path: PathBuf::from("/src/file"),
                 hash: Some(hash_file(&target.join("file")).unwrap()),
                 symlink_target: None,
+                mtime: None,
             }).unwrap();
         },
         false, false, false,
@@ -763,6 +831,7 @@ pub mod tests {
                 source_path: source.join("file"),
                 hash: None,
                 symlink_target: Some(PathBuf::from("/a")),
+                mtime: None,
             }).unwrap();
         },
         false, false, false,
@@ -781,6 +850,7 @@ pub mod tests {
                 source_path: PathBuf::from("/src/file"),
                 hash: Some(999),
                 symlink_target: None,
+                mtime: None,
             }).unwrap();
         },
         false, false, false,
@@ -798,6 +868,7 @@ pub mod tests {
                 source_path: PathBuf::from("/src/ghost"),
                 hash: Some(0),
                 symlink_target: None,
+                mtime: None,
             }).unwrap();
         },
         false, false, false,
@@ -816,6 +887,7 @@ pub mod tests {
                 source_path: PathBuf::from("/src/file"),
                 hash: Some(hash_file(&target.join("file")).unwrap()),
                 symlink_target: None,
+                mtime: None,
             }).unwrap();
         },
         true, false, false,
@@ -834,6 +906,7 @@ pub mod tests {
                 source_path: PathBuf::from("/src/file"),
                 hash: Some(hash_file(&target.join("file")).unwrap()),
                 symlink_target: None,
+                mtime: None,
             }).unwrap();
         },
         false, true, false,
@@ -854,6 +927,7 @@ pub mod tests {
                 source_path: PathBuf::from("/src/file"),
                 hash: Some(hash_file(&target.join("a/b/file")).unwrap()),
                 symlink_target: None,
+                mtime: None,
             }).unwrap();
         },
         false, false, true,
@@ -877,6 +951,7 @@ pub mod tests {
                 source_path: PathBuf::from("/src/file"),
                 hash: Some(hash_file(&target.join("a/b/managed")).unwrap()),
                 symlink_target: None,
+                mtime: None,
             }).unwrap();
         },
         false, false, true,
@@ -899,6 +974,7 @@ pub mod tests {
                 source_path: PathBuf::from("/src/file"),
                 hash: Some(hash_file(&target.join("a/b/managed")).unwrap()),
                 symlink_target: None,
+                mtime: None,
             }).unwrap();
         },
         false, true, true,

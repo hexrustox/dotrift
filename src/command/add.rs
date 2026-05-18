@@ -823,6 +823,7 @@ mod tests {
                 source_path: s.join("file"),
                 hash: None,
                 symlink_target: None,
+                mtime: None,
             }])
         },
         |s| {
@@ -839,6 +840,7 @@ mod tests {
                 source_path: s.join("link"),
                 hash: None,
                 symlink_target: Some(t.join("real")),
+                mtime: None,
             }])
         },
         |s| {
@@ -857,6 +859,7 @@ mod tests {
                     source_path: s.join("dest/file1"),
                     hash: None,
                     symlink_target: None,
+                    mtime: None,
                 },
                 DbEntry {
                     target_path: t.join("dir/sub/file2"),
@@ -864,6 +867,7 @@ mod tests {
                     source_path: s.join("dest/sub/file2"),
                     hash: None,
                     symlink_target: None,
+                    mtime: None,
                 },
             ])
         },
@@ -884,6 +888,7 @@ mod tests {
                     source_path: s.join("file"),
                     hash: None,
                     symlink_target: None,
+                    mtime: None,
                 },
             ])
         },

@@ -21,6 +21,7 @@ pub struct DbEntry {
     pub source_path: PathBuf,
     pub hash: Option<u64>,
     pub symlink_target: Option<PathBuf>,
+    pub mtime: Option<i64>,
 }
 
 fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
@@ -39,6 +40,8 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
     })?;
 
     let hash = hash_str.and_then(|s| u64::from_str_radix(&s, 16).ok());
+    let mtime: Option<i64> = row.get(5)?;
+
     let symlink_target = symlink_target_str.map(PathBuf::from);
 
     Ok(DbEntry {
@@ -47,6 +50,7 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
         source_path: PathBuf::from(source_str),
         hash,
         symlink_target,
+        mtime,
     })
 }
 
@@ -66,7 +70,8 @@ impl Db {
                 deploy_type TEXT NOT NULL,
                 source_path TEXT NOT NULL,
                 hash TEXT,
-                symlink_target TEXT
+                symlink_target TEXT,
+                mtime INTEGER
             )",
                 TABLE_NAME
             ),
@@ -86,13 +91,14 @@ impl Db {
 
         self.conn
             .execute(
-                &format!("INSERT OR REPLACE INTO {} (target_path, deploy_type, source_path, hash, symlink_target) VALUES (?1, ?2, ?3, ?4, ?5)", TABLE_NAME),
+                &format!("INSERT OR REPLACE INTO {} (target_path, deploy_type, source_path, hash, symlink_target, mtime) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", TABLE_NAME),
                 params![
                     entry.target_path.to_string_lossy(),
                     entry.deploy_type.to_string(),
                     entry.source_path.to_string_lossy(),
                     hash_str,
                     symlink_target_str,
+                    entry.mtime,
                 ],
             )
             .wrap_err_with(|| format!("Failed to insert/update entry for `{}`", entry.target_path.display()))?;
@@ -141,7 +147,7 @@ impl Db {
         let mut stmt = self
             .conn
             .prepare(&format!(
-                "SELECT target_path, deploy_type, source_path, hash, symlink_target FROM {} WHERE target_path = ?1",
+                "SELECT target_path, deploy_type, source_path, hash, symlink_target, mtime FROM {} WHERE target_path = ?1",
                 TABLE_NAME
             ))
             .wrap_err_with(|| format!("Failed to look up `{}`", target.display()))?;
@@ -155,7 +161,7 @@ impl Db {
         let mut stmt = self
             .conn
             .prepare(&format!(
-                "SELECT target_path, deploy_type, source_path, hash, symlink_target FROM {}",
+                "SELECT target_path, deploy_type, source_path, hash, symlink_target, mtime FROM {}",
                 TABLE_NAME
             ))
             .wrap_err("Failed to list database entries")?;

@@ -52,6 +52,7 @@ fn test_add_reimport() {
         source_path: source_dir.join("file"),
         hash: None,
         symlink_target: None,
+        mtime: None,
     })
     .unwrap();
 
@@ -146,6 +147,7 @@ fn test_add_directory_reimport() {
         source_path: source_dir.join("x.txt"),
         hash: None,
         symlink_target: None,
+        mtime: None,
     })
     .unwrap();
     db.insert_or_update(&DbEntry {
@@ -154,6 +156,7 @@ fn test_add_directory_reimport() {
         source_path: source_dir.join("sub/y.txt"),
         hash: None,
         symlink_target: None,
+        mtime: None,
     })
     .unwrap();
 

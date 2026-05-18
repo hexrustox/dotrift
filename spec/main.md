@@ -96,7 +96,8 @@ CREATE TABLE managed_files (
     deploy_type TEXT NOT NULL,
     source_path TEXT NOT NULL,
     hash TEXT,
-    symlink_target TEXT
+    symlink_target TEXT,
+    mtime INTEGER
 );
 ```
 
@@ -106,6 +107,7 @@ CREATE TABLE managed_files (
 * `source_path`: Absolute path in `source-dir`. Used to read content for copies, or verify link targets for symlinks.
 * `hash`: Hex digest using `xxHash64` of target file content at last apply. NULL for symlinks. Used to detect external modifications to the target (managed check compares target-on-disk hash against DB hash).
 * `symlink_target`: The symlink destination stored at deploy time (i.e., `read_link(source_path)`). Present when deploy type is `copy` and source is a symlink. NULL otherwise. Decouples managed check from current source filesystem state.
+* `mtime`: Modification time of the target file at last apply, stored as nanoseconds since Unix epoch. NULL for symlinks. When the on-disk mtime matches this value, the file is considered managed without computing the hash.
 
 ---
 
@@ -299,12 +301,12 @@ Traverse Rose Tree top-down (Pre-order DFS).
       - `copy` where source is symlink: target is symlink AND link target == `read_link(entry.source)` → identical.
       - If identical: if `overwrite_identical` flag (see Global Configuration) set, update DB entry. Skip write. Return.
    b. **Management Check** (if not identical): Determine if the target is unchanged since dotrift last wrote it.
-      - Query DB for entry at target path. No entry → unmanaged.
-      - If DB entry exists:
-        - DB type is symlink: target symlink points to `DB.source_path` → managed.
-        - DB type is copy with stored hash: target is regular file with on-disk hash matching `DB.hash` → managed.
-        - DB type is copy with `symlink_target`: target is a symlink pointing to `DB.symlink_target` → managed.
-        - Otherwise → unmanaged.
+       - Query DB for entry at target path. No entry → unmanaged.
+       - If DB entry exists:
+         - DB type is symlink: target symlink points to `DB.source_path` → managed.
+         - DB type is copy with stored hash: target is a regular file. If `DB.mtime` is non-NULL and matches the on-disk mtime → managed (skip hash). Otherwise, fall back to hash: on-disk hash matches `DB.hash` → managed, else → unmanaged.
+         - DB type is copy with `symlink_target`: target is a symlink pointing to `DB.symlink_target` → managed.
+         - Otherwise → unmanaged.
    c. **Action:**
       - **Managed:** Proceed to step 4 (write) silently. Safe to overwrite — no external modification detected.
       - **Unmanaged:** Collision prompt.
@@ -320,6 +322,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
    - `source_path`: absolute source path (from portal entry).
    - `hash`: hex digest of target file content if source is regular file (same hash compared during identical and managed checks), NULL if source is symlink or deploy type is `symlink`.
    - `symlink_target`: `read_link(source_path)` if source is a symlink and deploy type is `copy`, NULL otherwise.
+   - `mtime`: modification time of the target file after write, read via `symlink_metadata().modified()`, stored as nanoseconds since Unix epoch. NULL for symlinks.
 
 ---
 

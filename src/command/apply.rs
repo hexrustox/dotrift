@@ -20,7 +20,7 @@ use crate::{
         tree::{Node, build_tree},
         util::{
             GLOB_OPTION, PathLiteral, SafeStripPrefix, clean_up, clone_file, hash_file, is_glob,
-            is_managed, resolve_target, strip_prefix_filter_glob, walk_files,
+            is_managed, read_mtime, resolve_target, strip_prefix_filter_glob, walk_files,
         },
     },
     config::{Config, DeployType, FileMode, Rules},
@@ -490,10 +490,11 @@ fn deploy_file(
 }
 
 fn update_db(target: &Path, entry: &PortalEntry, db: &Db, source_hash: Option<u64>) -> Result<()> {
+    let is_regular = target.path_is_file();
     db.insert_or_update(&DbEntry {
         deploy_type: entry.deploy_type,
         source_path: entry.source.clone(),
-        hash: if target.path_is_file() {
+        hash: if is_regular {
             Some(
                 source_hash
                     .map(Ok)
@@ -510,6 +511,7 @@ fn update_db(target: &Path, entry: &PortalEntry, db: &Db, source_hash: Option<u6
         } else {
             None
         },
+        mtime: if is_regular { read_mtime(target) } else { None },
         target_path: target.to_path_buf(),
     })?;
 
