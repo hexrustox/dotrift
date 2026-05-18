@@ -101,14 +101,14 @@ impl Node {
                 }
                 keys
             }
-            Node::File(_) => vec![],
+            Node::File(_) => Vec::new(),
         }
     }
 
     pub fn key_at(&self, path: &Path) -> Vec<String> {
         let components = match Self::path_components(path) {
             Ok(c) => c,
-            Err(_) => return vec![],
+            Err(_) => return Vec::new(),
         };
         let mut current = self;
         for name in &components {
@@ -116,7 +116,7 @@ impl Node {
                 Node::Dir(children) => {
                     current = match children.get(name) {
                         Some(child) => child,
-                        None => return vec![],
+                        None => return Vec::new(),
                     };
                 }
                 _ => return current.all_keys(),

@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::{path::{Path, PathBuf}, str::FromStr};
 
 use color_eyre::eyre::{Context, eyre};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -27,17 +27,13 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
     let hash_str: Option<String> = row.get(3)?;
     let symlink_target_str: Option<String> = row.get(4)?;
 
-    let deploy_type = match deploy_str.as_str() {
-        "symlink" => DeployType::Symlink,
-        "copy" => DeployType::Copy,
-        other => {
-            return Err(rusqlite::Error::FromSqlConversionFailure(
-                1,
-                rusqlite::types::Type::Text,
-                eyre!("Invalid deploy type `{other}` for `{target_str}`").into(),
-            ));
-        }
-    };
+    let deploy_type = DeployType::from_str(&deploy_str).map_err(|_| {
+        rusqlite::Error::FromSqlConversionFailure(
+            1,
+            rusqlite::types::Type::Text,
+            eyre!("Invalid deploy type `{deploy_str}` for `{target_str}`").into(),
+        )
+    })?;
 
     let hash = hash_str.and_then(|s| u64::from_str_radix(&s, 16).ok());
     let symlink_target = symlink_target_str.map(PathBuf::from);
@@ -161,16 +157,12 @@ impl Db {
             ))
             .wrap_err("Failed to list database entries")?;
 
-        let entries = stmt
+        let rows = stmt
             .query_map([], row_to_entry)
-            .optional()
             .wrap_err("Failed to query entries from database")?;
-
         let mut result = Vec::new();
-        if let Some(entries) = entries {
-            for entry in entries {
-                result.push(entry.wrap_err("Failed to read database entry")?);
-            }
+        for entry in rows {
+            result.push(entry.wrap_err("Failed to read database entry")?);
         }
         Ok(result)
     }

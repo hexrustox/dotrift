@@ -3,6 +3,7 @@ use std::{
     fmt::Display,
     fs,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use color_eyre::eyre::Context;
@@ -53,6 +54,18 @@ impl Display for DeployType {
         match self {
             DeployType::Symlink => write!(f, "symlink"),
             DeployType::Copy => write!(f, "copy"),
+        }
+    }
+}
+
+impl FromStr for DeployType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "symlink" => Ok(DeployType::Symlink),
+            "copy" => Ok(DeployType::Copy),
+            _ => Err(()),
         }
     }
 }

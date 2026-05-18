@@ -4,7 +4,7 @@ use std::{
     fmt::Debug,
     fs::{self, File},
     hash::Hasher,
-    io::{BufReader, Read},
+    io::{BufReader, ErrorKind, Read},
     os::unix::fs as unix_fs,
     path::{Path, PathBuf},
 };
@@ -19,7 +19,7 @@ use walkdir::WalkDir;
 use crate::{
     command::apply::PortalEntry,
     config::{Config, DeployType},
-    db::Db,
+    db::{Db, DbEntry},
     output,
 };
 
@@ -151,19 +151,14 @@ pub fn hash_file(path: &Path) -> Result<u64> {
     Ok(hasher.finish())
 }
 
-pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
-    let db_entry = match db.get_entry(target).ok() {
-        Some(Some(e)) => e,
-        _ => return false,
-    };
-
-    match db_entry.deploy_type {
+pub fn is_managed_entry(entry: &DbEntry, target: &Path, target_hash: Option<u64>) -> bool {
+    match entry.deploy_type {
         DeployType::Symlink => match fs::read_link(target) {
-            Ok(p) => p == db_entry.source_path,
+            Ok(p) => p == entry.source_path,
             Err(_) => false,
         },
         DeployType::Copy => {
-            if let Some(hash) = db_entry.hash {
+            if let Some(hash) = entry.hash {
                 target.path_is_file() && {
                     if let Ok(h) = target_hash.map(Ok).unwrap_or_else(|| hash_file(target)) {
                         h == hash
@@ -173,9 +168,16 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
                 }
             } else {
                 target.path_is_symlink()
-                    && fs::read_link(target).is_ok_and(|l| Some(l) == db_entry.symlink_target)
+                    && fs::read_link(target).is_ok_and(|l| Some(l) == entry.symlink_target)
             }
         }
+    }
+}
+
+pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
+    match db.get_entry(target).ok().flatten() {
+        Some(entry) => is_managed_entry(&entry, target, target_hash),
+        None => false,
     }
 }
 
@@ -251,12 +253,13 @@ pub fn clean_up(
 
                     if prune_empty_dirs {
                         for dir in path.ancestors().skip(1) {
-                            if let Ok(iter) = dir.read_dir()
-                                && iter.count() == 0
-                            {
-                                crate::remove_dir_err!(fs::remove_dir(dir), dir)?;
-                            } else {
-                                break;
+                            match fs::remove_dir(dir) {
+                                Ok(()) => {}
+                                Err(e) if e.kind() == ErrorKind::NotFound => {}
+                                Err(e) if e.kind() == ErrorKind::DirectoryNotEmpty => break,
+                                Err(e) => {
+                                    crate::remove_dir_err!(Err::<(), _>(e), dir)?;
+                                }
                             }
                         }
                     }

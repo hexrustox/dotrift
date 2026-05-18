@@ -69,7 +69,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
 
     if flags.dry_run {
         let create_count = print_tree(Path::new("/"), &tree)?;
-        let mut parts = Vec::new();
+        let mut parts = Vec::with_capacity(2);
         if create_count > 0 {
             parts.push(if create_count == 1 {
                 "1 create".to_string()
@@ -125,14 +125,13 @@ fn resolve_portals(
 
     for (pattern, target_rel) in portals {
         let pattern_normalized = Path::new(pattern).normalize();
-        let pattern_str = pattern_normalized.to_string_lossy();
         let target_rel_normalized = target_rel.normalize();
 
-        if is_glob(&pattern_str) {
+        if is_glob(&pattern_normalized.to_string_lossy()) {
             resolve_glob_portal(
                 source_dir,
                 target_dir,
-                &pattern_str,
+                &pattern_normalized,
                 &target_rel_normalized,
                 ignore_matcher,
                 &mut portal_entries,
@@ -155,12 +154,12 @@ fn resolve_portals(
 fn resolve_glob_portal(
     source_dir: &Path,
     target_dir: &Path,
-    pattern: &str,
+    pattern: &Path,
     target_rel: &Path,
     ignore_matcher: &Gitignore,
     portal_entries: &mut HashMap<PathBuf, PortalEntry>,
 ) -> Result<()> {
-    let prefix = strip_prefix_filter_glob(pattern);
+    let prefix = strip_prefix_filter_glob(&pattern.to_string_lossy());
     let full_pattern = source_dir.join(pattern);
     let full_pattern_str = full_pattern.to_string_lossy();
 

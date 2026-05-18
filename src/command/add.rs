@@ -174,18 +174,37 @@ pub fn run(
     Ok(())
 }
 
-fn portal_matches(dest_rel: &Path, portal: &HashMap<String, PathBuf>) -> bool {
-    portal.keys().any(|pattern| {
-        if is_glob(pattern) {
-            Pattern::new(pattern)
-                .ok()
-                .map(|g| g.matches_path_with(dest_rel, GLOB_OPTION))
-                .unwrap_or(false)
+struct CompiledPortal {
+    globs: Vec<Pattern>,
+    literals: Vec<PathBuf>,
+}
+
+fn compile_portal(portal: &HashMap<String, PathBuf>) -> CompiledPortal {
+    let mut globs = Vec::with_capacity(portal.len());
+    let mut literals = Vec::with_capacity(portal.len());
+
+    for key in portal.keys() {
+        if is_glob(key) {
+            if let Ok(p) = Pattern::new(key) {
+                globs.push(p);
+            }
         } else {
-            let path = Path::new(pattern);
-            dest_rel.ancestors().any(|a| a == path)
+            literals.push(PathBuf::from(key));
         }
-    })
+    }
+
+    CompiledPortal { globs, literals }
+}
+
+fn portal_matches(dest_rel: &Path, compiled: &CompiledPortal) -> bool {
+    compiled
+        .globs
+        .iter()
+        .any(|p| p.matches_path_with(dest_rel, GLOB_OPTION))
+        || compiled
+            .literals
+            .iter()
+            .any(|path| dest_rel.ancestors().any(|a| a == path.as_path()))
 }
 
 pub struct PortalAnalysis {
@@ -300,7 +319,8 @@ fn check_new_entries(
     entries: &[(PathBuf, &Path)],
     target_dir: &Path,
 ) -> HashMap<String, HashSet<String>> {
-    let mut new_collisions: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut new_collisions: HashMap<String, HashSet<String>> =
+        HashMap::with_capacity(entries.len());
 
     for (computed_target, dest_rel) in entries {
         let target_path = target_dir.join(computed_target).normalize();
@@ -343,6 +363,7 @@ pub fn analyze_portal(
     let (mut tree, existing_collisions) =
         resolve_collisions(&config.portal, &config.ignore, target_dir, source_dir)?;
 
+    let compiled_portal = compile_portal(&config.portal);
     let mut precomputed: Vec<(PathBuf, &Path)> = Vec::with_capacity(entries.len());
     let mut missing = Vec::new();
     for (src, dest) in entries {
@@ -358,7 +379,7 @@ pub fn analyze_portal(
 
         precomputed.push((computed_target.clone(), dest_rel));
 
-        if !portal_matches(dest_rel, &config.portal) {
+        if !portal_matches(dest_rel, &compiled_portal) {
             missing.push((dest_rel.to_path_buf(), computed_target, warn));
         }
     }
@@ -445,8 +466,8 @@ fn apply_config_changes(
         result.push_str("\n[portal]\n");
     }
 
-    let mut auto_add_lines: Vec<String> = Vec::new();
-    let mut auto_add_keys: HashSet<String> = HashSet::new();
+    let mut auto_add_lines: Vec<String> = Vec::with_capacity(analysis.missing.len());
+    let mut auto_add_keys: HashSet<String> = HashSet::with_capacity(analysis.missing.len());
 
     for (dest_rel, computed_target, warn) in &analysis.missing {
         let key_str = dest_rel.display().to_string();
@@ -1033,8 +1054,9 @@ mod tests {
     fn test_portal_matches(portal: &str, dest: &str) -> bool {
         let (_temp_dir, source_dir, _) = setup_test(portal, "", "", false);
         let config = Config::read(&source_dir).unwrap();
+        let compiled = compile_portal(&config.portal);
 
-        !portal_matches(Path::new(dest), &config.portal)
+        !portal_matches(Path::new(dest), &compiled)
     }
 
     #[test_case(
