@@ -232,6 +232,7 @@ pub fn clean_up(
     db: &Db,
     dry_run: bool,
     prune_empty_dirs: bool,
+    verbose: bool,
 ) -> Result<usize> {
     let db_entries = db.get_all_entries()?;
 
@@ -247,9 +248,12 @@ pub fn clean_up(
             if managed {
                 if dry_run {
                     count += 1;
-                    output::print_removed(path);
+                    output::print_dry_remove(path);
                 } else {
                     crate::remove_file_err!(fs::remove_file(path), path)?;
+                    if verbose {
+                        output::print_removed(path);
+                    }
 
                     if prune_empty_dirs {
                         for dir in path.ancestors().skip(1) {
@@ -928,7 +932,14 @@ pub mod tests {
         } else {
             None
         };
-        clean_up(portal_entries.as_ref(), &db, dry_run, prune_empty_dirs).unwrap();
+        clean_up(
+            portal_entries.as_ref(),
+            &db,
+            dry_run,
+            prune_empty_dirs,
+            false,
+        )
+        .unwrap();
         assert(&target_dir, &db);
     }
 }

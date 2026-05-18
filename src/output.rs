@@ -20,11 +20,11 @@ pub fn portal_str(target: &Path, source: &Path, deploy_type: DeployType) -> Stri
     )
 }
 
-pub fn print_created_dir(path: &Path) {
+pub fn print_dry_create_dir(path: &Path) {
     eprintln!("{} {}", "[CREATE]".green().bold(), path.to_string_lossy());
 }
 
-pub fn print_created_file(target: &Path, source: &Path, deploy_type: DeployType) {
+pub fn print_dry_create_file(target: &Path, source: &Path, deploy_type: DeployType) {
     eprintln!(
         "{} {}",
         "[CREATE]".green().bold(),
@@ -32,7 +32,7 @@ pub fn print_created_file(target: &Path, source: &Path, deploy_type: DeployType)
     );
 }
 
-pub fn print_removed(path: &Path) {
+pub fn print_dry_remove(path: &Path) {
     eprintln!("{} {}", "[REMOVE]".red().bold(), path.to_string_lossy());
 }
 
@@ -54,6 +54,31 @@ pub fn print_warn(msg: impl std::fmt::Display) {
 
 pub fn print_ok(msg: impl std::fmt::Display) {
     eprintln!("{} {}", "[OK]".green().bold(), msg);
+}
+
+pub fn print_created_dir(path: &Path) {
+    eprintln!("{} {}", "[CREATED]".green().bold(), path.to_string_lossy());
+}
+
+pub fn print_created_file(target: &Path, source: &Path, deploy_type: DeployType) {
+    eprintln!(
+        "{} {}",
+        "[CREATED]".green().bold(),
+        portal_str(target, source, deploy_type)
+    );
+}
+
+pub fn print_removed(path: &Path) {
+    eprintln!("{} {}", "[REMOVED]".red().bold(), path.to_string_lossy());
+}
+
+pub fn print_added(src: &Path, dest: &Path) {
+    eprintln!(
+        "{} {} -> {}",
+        "[ADDED]".green().bold(),
+        src.to_string_lossy(),
+        dest.to_string_lossy(),
+    );
 }
 
 pub fn print_summary(msg: impl std::fmt::Display) {

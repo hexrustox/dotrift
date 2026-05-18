@@ -40,6 +40,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
     let source_dir = global_flags.source()?;
     let target_override = global_flags.target()?;
     let config_override = global_flags.config()?;
+    let verbose = global_flags.verbose;
 
     let config = Config::read(&source_dir)?;
 
@@ -60,6 +61,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
             &db,
             flags.dry_run,
             flags.prune_empty_dirs,
+            verbose,
         )?
     } else {
         0
@@ -91,7 +93,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
     }
 
     let overwrite_identical = GlobalConfig::read(config_override)?.overwrite_identical;
-    traverse_tree(Path::new("/"), &tree, &db, overwrite_identical)?;
+    traverse_tree(Path::new("/"), &tree, &db, overwrite_identical, verbose)?;
 
     Ok(())
 }
@@ -293,7 +295,7 @@ fn print_tree(path: &Path, node: &Node) -> Result<usize> {
     match node {
         Node::Dir(children) => {
             if path != Path::new("/") {
-                output::print_created_dir(path);
+                output::print_dry_create_dir(path);
             }
             for (name, child) in children {
                 count += print_tree(&path.join(name), child)?;
@@ -301,7 +303,7 @@ fn print_tree(path: &Path, node: &Node) -> Result<usize> {
         }
         Node::File(entry) => {
             count += 1;
-            output::print_created_file(path, &entry.source, entry.deploy_type);
+            output::print_dry_create_file(path, &entry.source, entry.deploy_type);
         }
         Node::Marked(_) => {
             unreachable!()
@@ -311,18 +313,24 @@ fn print_tree(path: &Path, node: &Node) -> Result<usize> {
     Ok(count)
 }
 
-fn traverse_tree(target: &Path, node: &Node, db: &Db, overwrite_identical: bool) -> Result<()> {
+fn traverse_tree(
+    target: &Path,
+    node: &Node,
+    db: &Db,
+    overwrite_identical: bool,
+    verbose: bool,
+) -> Result<()> {
     match node {
         Node::Dir(children) => {
-            if deploy_dir(target, db)? {
+            if deploy_dir(target, db, verbose)? {
                 return Ok(());
             }
             for (name, child) in children {
-                traverse_tree(&target.join(name), child, db, overwrite_identical)?;
+                traverse_tree(&target.join(name), child, db, overwrite_identical, verbose)?;
             }
         }
         Node::File(entry) => {
-            deploy_file(target, entry, db, overwrite_identical)?;
+            deploy_file(target, entry, db, overwrite_identical, verbose)?;
         }
         Node::Marked(_) => {
             unreachable!()
@@ -336,7 +344,7 @@ fn abort_deploy(at: &Path) -> color_eyre::Report {
         .note("Not all files were deployed. Files deployed before this point remain in place.")
 }
 
-fn deploy_dir(path: &Path, db: &Db) -> Result<bool> {
+fn deploy_dir(path: &Path, db: &Db, verbose: bool) -> Result<bool> {
     if path.path_exists() {
         if path.path_is_dir() {
             return Ok(false);
@@ -346,6 +354,9 @@ fn deploy_dir(path: &Path, db: &Db) -> Result<bool> {
             CollisionOptions::Skip => return Ok(true),
             CollisionOptions::Overwrite => {
                 crate::remove_file_err!(fs::remove_file(path), path)?;
+                if verbose {
+                    output::print_removed(path);
+                }
                 db.delete_entry(path)?;
             }
             CollisionOptions::Quit => {
@@ -354,6 +365,9 @@ fn deploy_dir(path: &Path, db: &Db) -> Result<bool> {
         }
     }
     crate::create_dir_err!(fs::create_dir_all(path), path)?;
+    if verbose {
+        output::print_created_dir(path);
+    }
     Ok(false)
 }
 
@@ -392,6 +406,7 @@ fn deploy_file(
     entry: &PortalEntry,
     db: &Db,
     overwrite_identical: bool,
+    verbose: bool,
 ) -> Result<()> {
     let mut source_hash = None;
     let mut target_hash = None;
@@ -403,6 +418,9 @@ fn deploy_file(
                 CollisionOptions::Skip => return Ok(()),
                 CollisionOptions::Overwrite => {
                     crate::remove_dir_err!(fs::remove_dir_all(target), target)?;
+                    if verbose {
+                        output::print_removed(target);
+                    }
                     db.delete_entry_with_prefix(target)?;
                 }
                 CollisionOptions::Quit => {
@@ -462,6 +480,9 @@ fn deploy_file(
                     })?;
             }
         }
+    }
+    if verbose {
+        output::print_created_file(target, &entry.source, entry.deploy_type);
     }
 
     update_db(target, entry, db, source_hash)?;

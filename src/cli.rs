@@ -17,6 +17,10 @@ pub struct GlobalFlags {
     /// Override the config file. Default: $XDG_CONFIG_HOME/dotrift/config.toml or ~/.config/dotrift/config.toml.
     #[arg(short, long, name = "CONFIG_FILE")]
     config: Option<PathBuf>,
+
+    /// Enable verbose logging
+    #[arg(short, long)]
+    pub verbose: bool,
 }
 
 impl GlobalFlags {
@@ -25,6 +29,7 @@ impl GlobalFlags {
             source,
             target,
             config,
+            verbose: false,
         }
     }
 

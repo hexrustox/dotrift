@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    env,
-    fs::{self, remove_dir_all, remove_file},
+    env, fs,
     io::ErrorKind,
     path::{Path, PathBuf},
     process::Command,
@@ -116,9 +115,10 @@ pub fn run(
         }
     }
 
+    let verbose = global_flags.verbose;
     for (src, dest) in &entries {
         if flags.force {
-            remove_obstructions(dest)?;
+            remove_obstructions(dest, verbose)?;
         }
         if let Some(parent) = dest.parent() {
             crate::create_dir_err!(fs::create_dir_all(parent), parent)?;
@@ -130,6 +130,9 @@ pub fn run(
                 format!("Failed to move `{}` to `{}`", src.display(), dest.display())
             })
         }?;
+        if verbose {
+            output::print_added(src, dest);
+        }
     }
 
     let config = Config::read(&source_dir)?;
@@ -594,12 +597,18 @@ fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<(
     Ok(())
 }
 
-fn remove_obstructions(path: &Path) -> Result<()> {
+fn remove_obstructions(path: &Path, verbose: bool) -> Result<()> {
     if let Ok(meta) = fs::symlink_metadata(path) {
         if meta.is_dir() {
-            crate::remove_dir_err!(remove_dir_all(path), path)?;
+            crate::remove_dir_err!(fs::remove_dir_all(path), path)?;
+            if verbose {
+                output::print_removed(path);
+            }
         } else {
-            crate::remove_file_err!(remove_file(path), path)?;
+            crate::remove_file_err!(fs::remove_file(path), path)?;
+            if verbose {
+                output::print_removed(path);
+            }
         }
     }
     for dir in path.ancestors().skip(1) {
@@ -609,7 +618,10 @@ fn remove_obstructions(path: &Path) -> Result<()> {
         if meta.is_dir() {
             break;
         }
-        crate::remove_file_err!(remove_file(dir), dir)?;
+        crate::remove_file_err!(fs::remove_file(dir), dir)?;
+        if verbose {
+            output::print_removed(dir);
+        }
     }
     Ok(())
 }
@@ -1021,7 +1033,7 @@ mod tests {
     fn test_remove_obstructions(setup: impl FnOnce(&Path) -> PathBuf, assert: impl FnOnce(&Path)) {
         let t = tempfile::tempdir().unwrap();
         let target = setup(t.path());
-        remove_obstructions(&target).unwrap();
+        remove_obstructions(&target, false).unwrap();
         assert(t.path());
     }
 

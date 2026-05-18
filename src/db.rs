@@ -1,4 +1,7 @@
-use std::{path::{Path, PathBuf}, str::FromStr};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use color_eyre::eyre::{Context, eyre};
 use rusqlite::{Connection, OptionalExtension, params};

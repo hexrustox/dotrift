@@ -21,7 +21,13 @@ pub fn run(
     resolve_target(&source_dir, target_override, &config)?;
 
     let db = Db::init(db_path)?;
-    let n = clean_up(None, &db, flags.dry_run, flags.prune_empty_dirs)?;
+    let n = clean_up(
+        None,
+        &db,
+        flags.dry_run,
+        flags.prune_empty_dirs,
+        global_flags.verbose,
+    )?;
     if flags.dry_run {
         let label = if n == 1 { "removal" } else { "removals" };
         output::print_summary(format_args!("{} {}", n, label));
