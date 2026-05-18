@@ -311,7 +311,6 @@ pub mod tests {
         (temp_dir, source_dir, target_dir)
     }
 
-    // --- Symlink deploy type ---
     #[test_case(
         |s, t| {
             unix_fs::symlink(s.join("file"), t.join("link")).unwrap();
@@ -352,7 +351,6 @@ pub mod tests {
         })
         => false; "symlink_target_missing"
     )]
-    // --- Copy deploy type with hash ---
     #[test_case(
         |_, t| {
             fs::write(t.join("file"), "").unwrap();
@@ -409,7 +407,6 @@ pub mod tests {
         })
         => false; "copy_hash_target_missing"
     )]
-    // --- Copy deploy type with symlink_target ---
     #[test_case(
         |_, t| {
             unix_fs::symlink(Path::new("/a"), t.join("link")).unwrap();
@@ -464,7 +461,6 @@ pub mod tests {
         })
         => false; "copy_symlink_target_missing"
     )]
-    // --- Cross-type and corrupt ---
     #[test_case(
         |s, t| {
             fs::write(s.join("file"), "").unwrap();
@@ -713,7 +709,6 @@ pub mod tests {
         assertion(&t);
     }
 
-    // --- Managed entries removed from disk and DB ---
     #[test_case(
         |target, db| {
             let source = target.parent().unwrap().join("source");
@@ -773,7 +768,6 @@ pub mod tests {
         };
         "managed_copy_symlink_source_removed"
     )]
-    // --- Unmanaged/missing: disk untouched, DB cleaned ---
     #[test_case(
         |target, db| {
             fs::write(target.join("file"), "modified").unwrap();
@@ -809,7 +803,6 @@ pub mod tests {
         };
         "missing_file_db_cleaned"
     )]
-    // --- Portal entry skipped ---
     #[test_case(
         |target, db| {
             fs::write(target.join("file"), "data").unwrap();
@@ -828,7 +821,6 @@ pub mod tests {
         };
         "portal_entry_skipped"
     )]
-    // --- Dry run: no changes ---
     #[test_case(
         |target, db| {
             fs::write(target.join("file"), "data").unwrap();
@@ -847,7 +839,6 @@ pub mod tests {
         };
         "dry_run_no_changes"
     )]
-    // --- Prune empty dirs ---
     #[test_case(
         |target, db| {
             fs::create_dir_all(target.join("a/b")).unwrap();

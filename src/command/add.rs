@@ -414,7 +414,7 @@ fn annotate_portal_key(content: &mut String, key: &str, annotation: &str) -> boo
         }
         let line = &content[line_start..i];
         if i < bytes.len() {
-            i += 1; // skip \n
+            i += 1;
         }
 
         if !in_portal {
@@ -653,7 +653,6 @@ mod tests {
         .unwrap();
     }
 
-    // --- simple file moves (destination path variations) ---
     #[test_case(
         |t, _| {
             fs::write(t.join("file"), "").unwrap();
@@ -683,7 +682,6 @@ mod tests {
             assert!(s.join("file").exists());
         }; "move_normalized_path"
     )]
-    // --- source type variations ---
     #[test_case(
         |t, s| {
             fs::write(t.join("real"), "data").unwrap();
@@ -709,7 +707,6 @@ mod tests {
             assert!(s.join("dir/sub/file").exists());
         }; "move_directory"
     )]
-    // --- destination path depth ---
     #[test_case(
         |t, s| {
             fs::write(t.join("file"), "data").unwrap();
@@ -719,7 +716,6 @@ mod tests {
             assert!(s.join("a/b/c/file").exists());
         }; "move_to_nested_dest"
     )]
-    // --- failure cases ---
     #[test_case(
         |_, s| {
             (s.join("nonexistent"), s.join("dest"))

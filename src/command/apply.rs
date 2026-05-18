@@ -272,7 +272,7 @@ fn apply_rules(
     }
 
     for (path, portal_entry) in portal_entries.iter_mut() {
-        let rel = path.safe_strip_prefix(target_dir); // computed E times (was R×E)
+        let rel = path.safe_strip_prefix(target_dir);
         for (pattern, rule) in &compiled {
             if !pattern.matches_path_with(rel, GLOB_OPTION) {
                 continue;
@@ -756,7 +756,6 @@ mod tests {
         pub static CHECK_MANAGED: RefCell<bool> = const { RefCell::new(false) };
     }
 
-    // --- Fresh deploy ---
     #[test_case(
         |s, _| {
             fs::write(s.join("file"), "").unwrap();
@@ -819,7 +818,6 @@ mod tests {
         },
         DeployType::Copy; "copy_nested_dir_fresh"
     )]
-    // --- Identical ---
     #[test_case(
         |s, t| {
             unix_fs::symlink(Path::new("/a"), s.join("file")).unwrap();
@@ -850,7 +848,6 @@ mod tests {
         },
         DeployType::Copy; "copy_identical_symlink"
     )]
-    // --- Collision: file vs dir ---
     #[test_case(
         |s, t| {
             fs::write(s.join("dir"), "").unwrap();
@@ -901,7 +898,6 @@ mod tests {
         },
         DeployType::Copy; "copy_file_vs_dir_overwrite"
     )]
-    // --- Collision: dir vs file ---
     #[test_case(
         |s, t| {
             fs::create_dir_all(s.join("dir")).unwrap();
@@ -952,7 +948,6 @@ mod tests {
         },
         DeployType::Copy; "copy_dir_vs_file_overwrite"
     )]
-    // --- Collision: file vs file ---
     #[test_case(
         |s, t| {
             fs::write(s.join("file"), "").unwrap();
@@ -995,7 +990,6 @@ mod tests {
         },
         DeployType::Copy; "copy_file_vs_file_overwrite"
     )]
-    // --- Collision: quit ---
     #[test_case(
         |s, t| {
             fs::write(s.join("file1"), "").unwrap();
@@ -1022,7 +1016,6 @@ mod tests {
         },
         DeployType::Copy => panics "Abort"; "quit_copy"
     )]
-    // --- Symlink to dir ---
     #[test_case(
         |s, t| {
             fs::create_dir_all(t.join("real_dir")).unwrap();
@@ -1064,7 +1057,6 @@ mod tests {
         assert(&source_dir, &target_dir);
     }
 
-    // --- Re-apply identical (no-op) ---
     #[test_case(
         |s, _| {
             fs::write(s.join("file"), "a").unwrap();
@@ -1091,7 +1083,6 @@ mod tests {
         },
         DeployType::Symlink; "symlink_reapply_identical"
     )]
-    // --- Re-apply after source changed ---
     #[test_case(
         |s, _| {
             fs::write(s.join("file"), "a").unwrap();
@@ -1122,7 +1113,6 @@ mod tests {
         },
         DeployType::Symlink; "symlink_reapply_source_changed"
     )]
-    // --- Re-apply after externally modified target (unmanaged) ---
     #[test_case(
         |s, _| {
             fs::write(s.join("file"), "a").unwrap();
@@ -1154,7 +1144,6 @@ mod tests {
         },
         DeployType::Copy; "copy_reapply_external_modification_overwrite"
     )]
-    // --- Unmanaged symlink target on re-apply ---
     #[test_case(
         |s, _| {
             fs::write(s.join("file"), "a").unwrap();
@@ -1188,7 +1177,6 @@ mod tests {
         },
         DeployType::Symlink; "symlink_reapply_target_replaced_with_wrong_symlink_skip"
     )]
-    // --- Copy with symlink source on re-apply ---
     #[test_case(
         |s, _| {
             unix_fs::symlink(Path::new("/a"), s.join("file")).unwrap();
@@ -1222,7 +1210,6 @@ mod tests {
         },
         DeployType::Copy; "copy_reapply_symlink_source_changed"
     )]
-    // --- Target type changed externally (skip/overwrite) ---
     #[test_case(
         |s, _| {
             fs::write(s.join("file"), "a").unwrap();
