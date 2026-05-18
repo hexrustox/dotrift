@@ -26,7 +26,7 @@ use crate::{
     config::Config,
     copy_file_err, create_dir_err,
     db::Db,
-    global_config::{GlobalConfig, expand_args, find_portal_cursor},
+    global_config::{GlobalConfig, expand_args, find_portal_cursor, portal_insertion_point},
     output,
     path::{PKG_NAME, config_path, tmp_path},
     read_file_err, write_file_err,
@@ -459,14 +459,18 @@ fn apply_config_changes(
         return None;
     }
 
-    let mut result = if content.is_empty() {
+    let mut new_content = if content.is_empty() {
         "[portal]".to_string()
     } else {
         content.to_string()
     };
 
-    if !result.contains("[portal]") {
-        result.push_str("\n[portal]\n");
+    if !new_content.ends_with('\n') {
+        new_content.push('\n');
+    }
+
+    if !new_content.contains("[portal]") {
+        new_content.push_str("[portal]\n");
     }
 
     let mut auto_add_lines: Vec<String> = Vec::with_capacity(analysis.missing.len());
@@ -490,31 +494,41 @@ fn apply_config_changes(
         ));
     }
 
-    for (i, group) in analysis.collisions.iter().enumerate() {
-        let id = i + 1;
+    for group in &analysis.collisions {
         for key in group {
+            let others: Vec<_> = group.iter().filter(|k| *k != key).collect();
+            let annotation = format!(
+                "# CONFLICT with {}",
+                others
+                    .iter()
+                    .map(|s| toml_quote(s))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
             if auto_add_keys.contains(key) {
                 for (li, line) in auto_add_lines.iter_mut().enumerate() {
                     if line.trim().starts_with(&toml_quote(key))
                         || line.trim().starts_with(key.as_str())
                     {
-                        auto_add_lines.insert(li, format!("# CONFLICT {}", id));
+                        auto_add_lines.insert(li, annotation.clone());
                         break;
                     }
                 }
             } else {
-                annotate_portal_key(&mut result, key, &format!("# CONFLICT {}", id));
+                annotate_portal_key(&mut new_content, key, &annotation);
             }
         }
     }
 
-    result.push('\n');
+    let insert_at = portal_insertion_point(&new_content);
+    let mut insert = String::new();
     for line in &auto_add_lines {
-        result.push_str(line);
-        result.push('\n');
+        insert.push_str(line);
+        insert.push('\n');
     }
+    new_content.insert_str(insert_at, &insert);
 
-    Some(result)
+    Some(new_content)
 }
 
 fn prepare_config(
@@ -902,7 +916,7 @@ mod tests {
         |t| {
             assert!(!t.join("x").exists());
         }
-        ; "file_at_dest"
+        ; "obstruction_file_at_dest"
     )]
     #[test_case(
         |t| {
@@ -912,7 +926,7 @@ mod tests {
         |t| {
             assert!(!t.join("x").exists());
         }
-        ; "empty_dir_at_dest"
+        ; "obstruction_empty_dir_at_dest"
     )]
     #[test_case(
         |t| {
@@ -924,7 +938,7 @@ mod tests {
         |t| {
             assert!(!t.join("x").exists());
         }
-        ; "nonempty_dir_at_dest"
+        ; "obstruction_nonempty_dir_at_dest"
     )]
     #[test_case(
         |t| {
@@ -934,7 +948,7 @@ mod tests {
         |t| {
             assert!(!t.join("link").is_symlink());
         }
-        ; "dangling_symlink_at_dest"
+        ; "obstruction_dangling_symlink_at_dest"
     )]
     #[test_case(
         |t| {
@@ -947,7 +961,7 @@ mod tests {
             assert!(!t.join("link").is_symlink());
             assert!(t.join("real").exists());
         }
-        ; "valid_symlink_file_at_dest"
+        ; "obstruction_valid_symlink_at_dest"
     )]
     #[test_case(
         |t| {
@@ -961,14 +975,14 @@ mod tests {
             assert!(!t.join("link").is_symlink());
             assert!(t.join("dir/f").exists());
         }
-        ; "symlink_to_dir_at_dest"
+        ; "obstruction_symlink_to_dir_at_dest"
     )]
     #[test_case(
         |t| {
             t.join("ghost")
         },
         |_| {}
-        ; "nonexistent_dest"
+        ; "obstruction_nonexistent_dest"
     )]
     #[test_case(
         |t| {
@@ -978,7 +992,7 @@ mod tests {
         |t| {
             assert!(!t.join("a").exists());
         }
-        ; "file_blocking_parent"
+        ; "obstruction_file_blocking_parent"
     )]
     #[test_case(
         |t| {
@@ -988,7 +1002,7 @@ mod tests {
         |t| {
             assert!(!t.join("a").is_symlink());
         }
-        ; "dangling_symlink_blocking_parent"
+        ; "obstruction_dangling_symlink_blocking_parent"
     )]
     #[test_case(
         |t| {
@@ -1001,7 +1015,7 @@ mod tests {
             assert!(!t.join("a").is_symlink());
             assert!(t.join("real").exists());
         }
-        ; "valid_symlink_blocking_parent"
+        ; "obstruction_valid_symlink_blocking_parent"
     )]
     #[test_case(
         |t| {
@@ -1011,24 +1025,14 @@ mod tests {
         |t| {
             assert!(t.join("dir").is_dir());
         }
-        ; "no_obstruction_existing_parent"
+        ; "obstruction_none_with_parent"
     )]
     #[test_case(
         |t| {
             t.join("a/b/c")
         },
         |_| {}
-        ; "no_obstruction_no_parent"
-    )]
-    #[test_case(
-        |t| {
-            fs::write(t.join("x"), "dest_content").unwrap();
-            t.join("x")
-        },
-        |t| {
-            assert!(!t.join("x").exists());
-        }
-        ; "file_at_dest_clean_parent"
+        ; "obstruction_none_without_parent"
     )]
     fn test_remove_obstructions(setup: impl FnOnce(&Path) -> PathBuf, assert: impl FnOnce(&Path)) {
         let t = tempfile::tempdir().unwrap();
@@ -1342,7 +1346,9 @@ mod tests {
             missing: vec![("file".into(), "file".into(), false)],
             collisions: vec![],
         },
-        "" => Some("[portal]\n\"file\" = \"file\"\n".to_string())
+        "" => Some(r#"[portal]
+"file" = "file"
+"#.to_string())
         ; "missing_key_empty_content_creates_portal"
     )]
     #[test_case(
@@ -1350,8 +1356,13 @@ mod tests {
             missing: vec![("file".into(), "file".into(), false)],
             collisions: vec![],
         },
-        "[portal]\n\"existing\" = \"existing\"\n" =>
-        Some("[portal]\n\"existing\" = \"existing\"\n\n\"file\" = \"file\"\n".to_string())
+        r#"[portal]
+"existing" = "existing"
+"# =>
+        Some(r#"[portal]
+"existing" = "existing"
+"file" = "file"
+"#.to_string())
         ; "missing_key_appended_to_existing_portal"
     )]
     #[test_case(
@@ -1359,44 +1370,67 @@ mod tests {
             missing: vec![("file".into(), "/absolute/path".into(), true)],
             collisions: vec![],
         },
-        "[portal]\n" =>
-        Some("[portal]\n\n# WARNING: /absolute/path is outside target directory /target\n\"file\" = \"/absolute/path\"\n".to_string())
+        r#"[portal]"# =>
+        Some(r#"[portal]
+# WARNING: /absolute/path is outside target directory /target
+"file" = "/absolute/path"
+"#.to_string())
         ; "missing_key_with_warning"
     )]
     #[test_case(
         PortalAnalysis {
             missing: vec![],
-            collisions: vec![vec!["a".into(), "b".into()]],
+            collisions: vec![vec!["bare".into(), "quoted".into()]],
         },
-        "[portal]\n\"a\" = \"x\"\n\"b\" = \"x\"\n" =>
-        Some("[portal]\n# CONFLICT 1\n\"a\" = \"x\"\n# CONFLICT 1\n\"b\" = \"x\"\n\n".to_string())
+        r#"[portal]
+bare = "x"
+"quoted" = "x"
+"# =>
+        Some(r#"[portal]
+# CONFLICT with "quoted"
+bare = "x"
+# CONFLICT with "bare"
+"quoted" = "x"
+"#.to_string())
         ; "collision_annotates_existing_keys"
     )]
     #[test_case(
         PortalAnalysis {
             missing: vec![],
-            collisions: vec![vec!["file".into()]],
+            collisions: vec![vec!["a".into(), "c".into()], vec!["b".into(), "d".into()]],
         },
-        "[portal]\n\"file\" = \"x\"\n" =>
-        Some("[portal]\n# CONFLICT 1\n\"file\" = \"x\"\n\n".to_string())
-        ; "single_collision_single_key"
-    )]
-    #[test_case(
-        PortalAnalysis {
-            missing: vec![],
-            collisions: vec![vec!["a".into()], vec!["b".into()]],
-        },
-        "[portal]\n\"a\" = \"x\"\n\"b\" = \"y\"\n" =>
-        Some("[portal]\n# CONFLICT 1\n\"a\" = \"x\"\n# CONFLICT 2\n\"b\" = \"y\"\n\n".to_string())
-        ; "multiple_collision_groups_different_ids"
+        r#"[portal]
+"a" = "x"
+"b" = "y"
+"c" = "x"
+"d" = "y"
+"# =>
+        Some(r#"[portal]
+# CONFLICT with "c"
+"a" = "x"
+# CONFLICT with "d"
+"b" = "y"
+# CONFLICT with "a"
+"c" = "x"
+# CONFLICT with "b"
+"d" = "y"
+"#.to_string())
+        ; "multiple_collision_groups"
     )]
     #[test_case(
         PortalAnalysis {
             missing: vec![("new".into(), "new".into(), false)],
             collisions: vec![vec!["existing".into(), "new".into()]],
         },
-        "[portal]\n\"existing\" = \"x\"\n" =>
-        Some("[portal]\n# CONFLICT 1\n\"existing\" = \"x\"\n\n# CONFLICT 1\n\"new\" = \"new\"\n".to_string())
+        r#"[portal]
+"existing" = "x"
+"# =>
+        Some(r#"[portal]
+# CONFLICT with "new"
+"existing" = "x"
+# CONFLICT with "existing"
+"new" = "new"
+"#.to_string())
         ; "collision_on_auto_add_key"
     )]
     #[test_case(
@@ -1404,8 +1438,15 @@ mod tests {
             missing: vec![("added".into(), "added".into(), false)],
             collisions: vec![],
         },
-        "target-directory = \"/foo\"\n\n[portal]\n" =>
-        Some("target-directory = \"/foo\"\n\n[portal]\n\n\"added\" = \"added\"\n".to_string())
+        r#"target-directory = "/foo"
+
+[portal]
+"# =>
+        Some(r#"target-directory = "/foo"
+
+[portal]
+"added" = "added"
+"#.to_string())
         ; "missing_key_preserves_other_sections"
     )]
     #[test_case(
@@ -1413,17 +1454,45 @@ mod tests {
             missing: vec![("key".into(), "key".into(), false)],
             collisions: vec![],
         },
-        "" => Some("[portal]\n\"key\" = \"key\"\n".to_string())
+        "" => Some(r#"[portal]
+"key" = "key"
+"#.to_string())
         ; "empty_content"
     )]
     #[test_case(
         PortalAnalysis {
             missing: vec![],
-            collisions: vec![vec!["bare_key".into()]],
+            collisions: vec![vec!["a".into(), "b".into(), "c".into()]],
         },
-        "[portal]\nbare_key = \"x\"\n" =>
-        Some("[portal]\n# CONFLICT 1\nbare_key = \"x\"\n\n".to_string())
-        ; "collision_annotates_bare_key"
+        r#"[portal]
+"a" = "x"
+"b" = "x"
+"c" = "x"
+"# =>
+        Some(r#"[portal]
+# CONFLICT with "b", "c"
+"a" = "x"
+# CONFLICT with "a", "c"
+"b" = "x"
+# CONFLICT with "a", "b"
+"c" = "x"
+"#.to_string())
+        ; "collision_annotates_three_way"
+    )]
+    #[test_case(
+        PortalAnalysis {
+            missing: vec![("key".into(), "key".into(), false)],
+            collisions: vec![],
+        },
+        "[portal]
+
+# suffix
+" => Some(r#"[portal]
+"key" = "key"
+
+# suffix
+"#.to_string())
+        ; "missing_key_inserted_before_trailing_content"
     )]
     fn test_apply_config_changes(analysis: PortalAnalysis, content: &str) -> Option<String> {
         apply_config_changes(content, &analysis, Path::new("/target"))
@@ -1437,7 +1506,7 @@ mod tests {
         },
         |_, _| {
             OPEN_EDITOR.with_borrow(|b| assert!(!b));
-        }; "move_editor_portal_match"
+        }        ; "editor_closed_when_destination_matches_portal"
     )]
     #[test_case(
         r#""other" = """#,
@@ -1447,7 +1516,7 @@ mod tests {
         },
         |_, _| {
             OPEN_EDITOR.with_borrow(|b| assert!(b));
-        }; "move_editor_portal_mismatch"
+        }        ; "editor_opens_when_portal_mismatch"
     )]
     #[test_case(
         "",
@@ -1457,7 +1526,7 @@ mod tests {
         },
         |_, _| {
             OPEN_EDITOR.with_borrow(|b| assert!(b));
-        }; "move_editor_empty_portal"
+        }        ; "editor_opens_when_portal_empty"
     )]
     #[test_case(
         r#""" = ""
@@ -1470,7 +1539,7 @@ mod tests {
         },
         |_, _| {
             OPEN_EDITOR.with_borrow(|b| assert!(b));
-        }; "move_editor_collision_only"
+        }        ; "editor_opens_when_collision_exists"
     )]
     #[test_case(
         r#""other" = "file""#,
@@ -1481,7 +1550,7 @@ mod tests {
         },
         |_, _| {
             OPEN_EDITOR.with_borrow(|b| assert!(b));
-        }; "move_editor_collision_only_and_missing"
+        }        ; "editor_opens_when_collision_and_missing"
     )]
     fn test_add_open_editor(
         portal: &str,

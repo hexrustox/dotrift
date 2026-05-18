@@ -58,25 +58,41 @@ pub fn expand_arg(arg: &str, params: &[(&str, &str)]) -> Result<String> {
     Ok(result)
 }
 
-pub fn find_portal_cursor(content: &str) -> (u32, u32) {
+pub fn portal_insertion_point(content: &str) -> usize {
+    let bytes = content.as_bytes();
     let mut in_portal = false;
-    let mut last = 1;
+    let mut insert_at = 0;
+    let mut i = 0;
 
-    for (i, line) in content.lines().enumerate() {
-        let t = line.trim();
-        if t == "[portal]" {
-            in_portal = true;
-            last = i as u32 + 2;
-        } else if in_portal {
-            if t.starts_with('[') {
-                break;
-            }
-            if !t.is_empty() && !t.starts_with('#') {
-                last = i as u32 + 2;
-            }
+    while i < bytes.len() {
+        let line_start = i;
+        while i < bytes.len() && bytes[i] != b'\n' {
+            i += 1;
         }
+        let line_end = if i < bytes.len() { i + 1 } else { i };
+        let trimmed = content[line_start..i].trim();
+
+        if !in_portal {
+            if trimmed == "[portal]" {
+                in_portal = true;
+                insert_at = line_end;
+            }
+        } else if !trimmed.is_empty() && trimmed.starts_with('[') {
+            break;
+        } else if !trimmed.is_empty() && !trimmed.starts_with('#') && trimmed.contains('=') {
+            insert_at = line_end;
+        }
+
+        i = line_end;
     }
-    (last, 1)
+
+    insert_at
+}
+
+pub fn find_portal_cursor(content: &str) -> (u32, u32) {
+    let offset = portal_insertion_point(content);
+    let line = content[..offset].bytes().filter(|&b| b == b'\n').count() as u32 + 1;
+    (line, 1)
 }
 
 #[derive(Default, Deserialize)]
