@@ -60,11 +60,11 @@ impl FileViewer {
         self.scroll = self.lines_count().saturating_sub(viewport_height);
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) -> std::io::Result<()> {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         let line_count = self.lines_count();
         if line_count == 0 {
             frame.render_widget(Paragraph::new(""), area);
-            return Ok(());
+            return;
         }
 
         let visible_height = area.height as usize;
@@ -73,20 +73,19 @@ impl FileViewer {
         let start = self.scroll;
         let end = (start + visible_height).min(line_count);
 
-        self.file.seek(SeekFrom::Start(self.offsets[start]))?;
+        let _ = self.file.seek(SeekFrom::Start(self.offsets[start]));
 
         self.buf.clear();
         let mut reader = BufReader::new(&mut self.file);
 
         for _ in start..end {
-            let bytes = reader.read_until(b'\n', &mut self.buf)?;
-            if bytes == 0 {
+            let bytes = reader.read_until(b'\n', &mut self.buf);
+            if bytes.as_ref().is_ok_and(|b| *b == 0) || bytes.is_err() {
                 break;
             }
         }
 
         let content = String::from_utf8_lossy(&self.buf);
-        frame.render_widget(Paragraph::new(content.as_ref()), area);
-        Ok(())
+        frame.render_widget(Paragraph::new(content), area);
     }
 }

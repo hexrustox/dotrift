@@ -29,9 +29,7 @@ impl PagerMode for SinglePane {
             .constraints([Constraint::Length(1), Constraint::Min(0)])
             .split(area);
         header::render(frame, chunks[0], &self.header);
-        self.viewer
-            .render(frame, chunks[1])
-            .expect("Failed to render file content");
+        self.viewer.render(frame, chunks[1]);
     }
 
     fn scroll_up(&mut self, n: usize) {

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 crossterm.workspace = true
+memmap2 = "0.9"
 ratatui = { version = "0.29", default-features = false, features = [
   "crossterm",
 ] }

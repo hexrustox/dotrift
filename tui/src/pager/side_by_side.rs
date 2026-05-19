@@ -1,13 +1,17 @@
-use std::{fs, io, path::Path};
+use std::{
+    fs::File,
+    io::{self, BufRead, BufReader, Seek, SeekFrom},
+    path::Path,
+};
 
+use memmap2::Mmap;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::Paragraph,
 };
-use similar::{ChangeTag, TextDiff};
+use similar::{DiffOp, TextDiff};
 
 use super::{PagerMode, header};
 
@@ -20,93 +24,132 @@ enum DiffTag {
 }
 
 struct DiffPair {
-    left: Option<String>,
-    right: Option<String>,
+    left_idx: Option<usize>,
+    right_idx: Option<usize>,
     tag: DiffTag,
+}
+
+struct FileIndex {
+    file: File,
+    offsets: Vec<u64>,
+}
+
+impl FileIndex {
+    fn new_from_file(mut file: File) -> io::Result<Self> {
+        file.seek(SeekFrom::Start(0))?;
+        let mut reader = BufReader::new(&mut file);
+        let mut offsets = vec![0u64];
+        let mut buf = Vec::new();
+
+        loop {
+            let bytes = reader.read_until(b'\n', &mut buf)?;
+            if bytes == 0 {
+                break;
+            }
+            offsets.push(offsets.last().unwrap() + bytes as u64);
+            buf.clear();
+        }
+
+        file.seek(SeekFrom::Start(0))?;
+        Ok(Self { file, offsets })
+    }
+
+    fn lines_count(&self) -> usize {
+        self.offsets.len().saturating_sub(1)
+    }
+
+    fn read_line(&mut self, idx: usize, buf: &mut Vec<u8>) -> io::Result<()> {
+        buf.clear();
+        if idx >= self.lines_count() {
+            return Ok(());
+        }
+        self.file.seek(SeekFrom::Start(self.offsets[idx]))?;
+        let mut reader = BufReader::new(&mut self.file);
+        reader.read_until(b'\n', buf)?;
+        if buf.ends_with(b"\n") {
+            buf.pop();
+            if buf.ends_with(b"\r") {
+                buf.pop();
+            }
+        }
+        Ok(())
+    }
 }
 
 pub struct SideBySide {
     pairs: Vec<DiffPair>,
+    left: FileIndex,
+    right: FileIndex,
     scroll: usize,
     header_left: String,
     header_right: String,
+    buf: Vec<u8>,
 }
 
-impl SideBySide {
-    pub fn new(source: &Path, target: &Path) -> io::Result<Self> {
-        let left_content = fs::read_to_string(source)?;
-        let right_content = fs::read_to_string(target)?;
-        let pairs = compute_diff(&left_content, &right_content);
-
-        let header_left = source.display().to_string();
-        let header_right = target.display().to_string();
-
-        Ok(Self {
-            pairs,
-            scroll: 0,
-            header_left,
-            header_right,
-        })
-    }
-}
-
-fn compute_diff(old: &str, new: &str) -> Vec<DiffPair> {
+fn compute_pairs_from_ops(old: &str, new: &str) -> Vec<DiffPair> {
     let diff = TextDiff::from_lines(old, new);
 
-    let changes: Vec<(ChangeTag, String)> = diff
-        .iter_all_changes()
-        .map(|c| {
-            let mut line = c.value().to_string();
-            if line.ends_with('\n') {
-                line.pop();
-                if line.ends_with('\r') {
-                    line.pop();
+    let mut pairs = Vec::new();
+
+    for op in diff.ops().to_vec() {
+        match op {
+            DiffOp::Equal {
+                old_index,
+                new_index,
+                len,
+            } => {
+                for i in 0..len {
+                    pairs.push(DiffPair {
+                        left_idx: Some(old_index + i),
+                        right_idx: Some(new_index + i),
+                        tag: DiffTag::Equal,
+                    });
                 }
             }
-            (c.tag(), line)
-        })
-        .collect();
-
-    let mut pairs = Vec::new();
-    let mut i = 0;
-
-    while i < changes.len() {
-        let (tag, value) = &changes[i];
-        let line = value.clone();
-
-        match *tag {
-            ChangeTag::Delete if i + 1 < changes.len() && changes[i + 1].0 == ChangeTag::Insert => {
-                let new_line = changes[i + 1].1.clone();
-                pairs.push(DiffPair {
-                    left: Some(line),
-                    right: Some(new_line),
-                    tag: DiffTag::Change,
-                });
-                i += 2;
+            DiffOp::Delete {
+                old_index, old_len, ..
+            } => {
+                for i in 0..old_len {
+                    pairs.push(DiffPair {
+                        left_idx: Some(old_index + i),
+                        right_idx: None,
+                        tag: DiffTag::Delete,
+                    });
+                }
             }
-            ChangeTag::Equal => {
-                pairs.push(DiffPair {
-                    left: Some(line.clone()),
-                    right: Some(line),
-                    tag: DiffTag::Equal,
-                });
-                i += 1;
+            DiffOp::Insert {
+                new_index, new_len, ..
+            } => {
+                for i in 0..new_len {
+                    pairs.push(DiffPair {
+                        left_idx: None,
+                        right_idx: Some(new_index + i),
+                        tag: DiffTag::Insert,
+                    });
+                }
             }
-            ChangeTag::Delete => {
-                pairs.push(DiffPair {
-                    left: Some(line),
-                    right: None,
-                    tag: DiffTag::Delete,
-                });
-                i += 1;
-            }
-            ChangeTag::Insert => {
-                pairs.push(DiffPair {
-                    left: None,
-                    right: Some(line),
-                    tag: DiffTag::Insert,
-                });
-                i += 1;
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+            } => {
+                let max = old_len.max(new_len);
+                for i in 0..max {
+                    let left_idx = (i < old_len).then_some(old_index + i);
+                    let right_idx = (i < new_len).then_some(new_index + i);
+                    let tag = match (i < old_len, i < new_len) {
+                        (true, true) => DiffTag::Change,
+                        (true, false) => DiffTag::Delete,
+                        (false, true) => DiffTag::Insert,
+                        (false, false) => unreachable!(),
+                    };
+                    pairs.push(DiffPair {
+                        left_idx,
+                        right_idx,
+                        tag,
+                    });
+                }
             }
         }
     }
@@ -114,33 +157,90 @@ fn compute_diff(old: &str, new: &str) -> Vec<DiffPair> {
     pairs
 }
 
-fn styled_cell(prefix: char, content: &str, color: Color) -> Line<'_> {
+impl SideBySide {
+    pub fn new(path1: &Path, path2: &Path) -> io::Result<Self> {
+        let left_file = File::open(path1)?;
+        let right_file = File::open(path2)?;
+
+        let left_map = unsafe { Mmap::map(&left_file)? };
+        let right_map = unsafe { Mmap::map(&right_file)? };
+
+        let left_str = std::str::from_utf8(&left_map)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let right_str = std::str::from_utf8(&right_map)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let pairs = compute_pairs_from_ops(left_str, right_str);
+
+        drop(left_map);
+        drop(right_map);
+
+        let left = FileIndex::new_from_file(left_file)?;
+        let right = FileIndex::new_from_file(right_file)?;
+
+        let header_left = path1.display().to_string();
+        let header_right = path2.display().to_string();
+
+        Ok(Self {
+            pairs,
+            left,
+            right,
+            scroll: 0,
+            header_left,
+            header_right,
+            buf: Vec::new(),
+        })
+    }
+}
+
+fn styled_cell(prefix: char, content: String, color: Color) -> Line<'static> {
     Line::from(vec![
         Span::styled(prefix.to_string(), Style::default().fg(color)),
-        Span::from(content.to_string()),
+        Span::from(content),
     ])
 }
 
-fn pair_lines(pair: &DiffPair, left_w: usize, right_w: usize) -> (Line<'_>, Line<'_>) {
-    let left = match (pair.tag, &pair.left) {
-        (DiffTag::Delete | DiffTag::Change, Some(s)) => {
-            styled_cell('-', truncate(s, left_w.saturating_sub(1)), Color::Red)
+fn pair_lines(
+    pair: &DiffPair,
+    left: &mut FileIndex,
+    right: &mut FileIndex,
+    buf: &mut Vec<u8>,
+) -> (Line<'static>, Line<'static>) {
+    let left_content = match (pair.tag, pair.left_idx) {
+        (DiffTag::Delete | DiffTag::Change | DiffTag::Equal, Some(idx)) => {
+            if left.read_line(idx, buf).is_err() {
+                buf.clear();
+            }
+            String::from_utf8_lossy(buf).to_string()
         }
-        (DiffTag::Equal, Some(s)) => {
-            Line::from(format!(" {}", truncate(s, left_w.saturating_sub(1))))
-        }
+        _ => String::new(),
+    };
+
+    let left_line = match (pair.tag, pair.left_idx) {
+        (DiffTag::Delete | DiffTag::Change, Some(_)) => styled_cell('-', left_content, Color::Red),
+        (DiffTag::Equal, Some(_)) => Line::from(format!(" {}", &left_content)),
         _ => Line::from(""),
     };
-    let right = match (pair.tag, &pair.right) {
-        (DiffTag::Insert | DiffTag::Change, Some(s)) => {
-            styled_cell('+', truncate(s, right_w.saturating_sub(1)), Color::Green)
+
+    let right_content = match (pair.tag, pair.right_idx) {
+        (DiffTag::Insert | DiffTag::Change | DiffTag::Equal, Some(idx)) => {
+            if right.read_line(idx, buf).is_err() {
+                buf.clear();
+            }
+            String::from_utf8_lossy(buf).to_string()
         }
-        (DiffTag::Equal, Some(s)) => {
-            Line::from(format!(" {}", truncate(s, right_w.saturating_sub(1))))
+        _ => String::new(),
+    };
+
+    let right_line = match (pair.tag, pair.right_idx) {
+        (DiffTag::Insert | DiffTag::Change, Some(_)) => {
+            styled_cell('+', right_content, Color::Green)
         }
+        (DiffTag::Equal, Some(_)) => Line::from(format!(" {}", &right_content)),
         _ => Line::from(""),
     };
-    (left, right)
+
+    (left_line, right_line)
 }
 
 impl PagerMode for SideBySide {
@@ -176,12 +276,13 @@ impl PagerMode for SideBySide {
             let row_y = content_area.y + row as u16;
 
             let (left_line, right_line) =
-                pair_lines(pair, left_width as usize, right_width as usize);
+                pair_lines(pair, &mut self.left, &mut self.right, &mut self.buf);
+
             let left_rect = Rect::new(content_area.x, row_y, left_width, 1);
-            frame.render_widget(Paragraph::new(left_line), left_rect);
+            frame.render_widget(left_line, left_rect);
 
             let right_rect = Rect::new(content_area.x + left_width, row_y, right_width, 1);
-            frame.render_widget(Paragraph::new(right_line), right_rect);
+            frame.render_widget(right_line, right_rect);
         }
     }
 
@@ -203,63 +304,54 @@ impl PagerMode for SideBySide {
     }
 }
 
-fn truncate(s: &str, max_chars: usize) -> &str {
-    match s.char_indices().nth(max_chars) {
-        Some((idx, _)) => &s[..idx],
-        None => s,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::NamedTempFile;
     use test_case::test_case;
 
-    fn columns_lines(
-        pairs: &[DiffPair],
-        left_w: usize,
-        right_w: usize,
-    ) -> (Vec<Line<'_>>, Vec<Line<'_>>) {
-        let mut left = Vec::new();
-        let mut right = Vec::new();
-        for pair in pairs {
-            let (l, r) = pair_lines(pair, left_w, right_w);
-            left.push(l);
-            right.push(r);
-        }
-        (left, right)
+    fn file_index_from_str(s: &str) -> (NamedTempFile, FileIndex) {
+        let tmp = NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), s).unwrap();
+        let fi = FileIndex::new_from_file(File::open(tmp.path()).unwrap()).unwrap();
+        (tmp, fi)
     }
 
-    fn line_from_text(text: &str) -> Line<'_> {
-        if text.is_empty() {
-            return Line::from("");
-        }
-        let first = text.as_bytes()[0];
-        match first {
-            b'-' => styled_cell('-', &text[1..], Color::Red),
-            b'+' => styled_cell('+', &text[1..], Color::Green),
-            _ => Line::from(text.to_string()),
-        }
+    fn spans_to_string(line: &Line) -> String {
+        line.spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<Vec<_>>()
+            .concat()
     }
 
-    #[test_case("a\nb\n", "a\nb\n", &[" a", " b"], &[" a", " b"]; "equal")]
-    #[test_case("a\nb\nc\n", "a\nc\n", &[" a", "-b", " c"], &[" a", "", " c"]; "delete mid")]
-    #[test_case("a\nc\n", "a\nb\nc\n", &[" a", "", " c"], &[" a", "+b", " c"]; "insert mid")]
-    #[test_case("old\n", "new\n", &["-old"], &["+new"]; "change")]
-    #[test_case("a\nb\nc\n", "a\nx\nc\n", &[" a", "-b", " c"], &[" a", "+x", " c"]; "mixed change")]
-    #[test_case("a\nb\n", "a\n", &[" a", "-b"], &[" a", ""]; "solo delete")]
-    #[test_case("a\n", "a\nb\n", &[" a", ""], &[" a", "+b"]; "solo insert")]
-    #[test_case("", "", &[], &[]; "both empty")]
-    #[test_case("", "x\n", &[""], &["+x"]; "empty old")]
-    #[test_case("x\n", "", &["-x"], &[""]; "empty new")]
-    fn diff(old: &str, new: &str, expected_left: &[&str], expected_right: &[&str]) {
-        let pairs = compute_diff(old, new);
-        let (left_lines, right_lines) = columns_lines(&pairs, 80, 80);
+    #[test_case("a\nb\n",    "a\nb\n",    " a\n b",      " a\n b";      "equal")]
+    #[test_case("a\nb\nc\n", "a\nc\n",    " a\n-b\n c", " a\n\n c";   "delete mid")]
+    #[test_case("a\nc\n",    "a\nb\nc\n", " a\n\n c",   " a\n+b\n c"; "insert mid")]
+    #[test_case("old\n",     "new\n",     "-old",           "+new";           "change")]
+    #[test_case("a\nb\nc\n", "a\nx\nc\n", " a\n-b\n c", " a\n+x\n c"; "mixed change")]
+    #[test_case("a\nb\n",    "a\n",       " a\n-b",       " a\n";         "solo delete")]
+    #[test_case("a\n",       "a\nb\n",    " a\n",         " a\n+b";       "solo insert")]
+    #[test_case("",          "",          "",                 "";                 "both empty")]
+    #[test_case("",          "x\n",       "",               "+x";             "empty old")]
+    #[test_case("x\n",       "",          "-x",             "";               "empty new")]
+    fn diff(old: &str, new: &str, expected_left: &str, expected_right: &str) {
+        let pairs = compute_pairs_from_ops(old, new);
 
-        let exp_left: Vec<Line> = expected_left.iter().map(|s| line_from_text(s)).collect();
-        let exp_right: Vec<Line> = expected_right.iter().map(|s| line_from_text(s)).collect();
+        let (_tmp1, mut left) = file_index_from_str(old);
+        let (_tmp2, mut right) = file_index_from_str(new);
 
-        assert_eq!(left_lines, exp_left);
-        assert_eq!(right_lines, exp_right);
+        let mut buf = Vec::new();
+        let mut actual_left = Vec::new();
+        let mut actual_right = Vec::new();
+
+        for pair in &pairs {
+            let (l, r) = pair_lines(pair, &mut left, &mut right, &mut buf);
+            actual_left.push(spans_to_string(&l));
+            actual_right.push(spans_to_string(&r));
+        }
+
+        assert_eq!(actual_left.join("\n"), expected_left);
+        assert_eq!(actual_right.join("\n"), expected_right);
     }
 }

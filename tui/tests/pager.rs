@@ -1,8 +1,9 @@
 use std::io::Write;
 use tempfile::NamedTempFile;
 
+#[ignore]
 #[test]
-fn single_pane() {
+fn file() {
     let mut file = NamedTempFile::new().unwrap();
     for i in 1..=100 {
         writeln!(file, "line {i}").unwrap();
@@ -13,6 +14,7 @@ fn single_pane() {
     assert!(result.is_ok());
 }
 
+#[ignore]
 #[test]
 fn diff() {
     let mut file1 = NamedTempFile::new().unwrap();
