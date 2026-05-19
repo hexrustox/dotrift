@@ -9,6 +9,7 @@ pub enum CollisionOptions {
     #[default]
     Skip,
     Overwrite,
+    Diff,
     Quit,
 }
 
@@ -18,6 +19,7 @@ impl Display for CollisionOptions {
         match self {
             Skip => write!(f, "skip"),
             Overwrite => write!(f, "overwrite"),
+            Diff => write!(f, "diff"),
             Quit => write!(f, "quit"),
         }
     }
@@ -29,6 +31,7 @@ impl HotKey for CollisionOptions {
         match self {
             Skip => 's',
             Overwrite => 'o',
+            Diff => 'd',
             Quit => 'q',
         }
     }

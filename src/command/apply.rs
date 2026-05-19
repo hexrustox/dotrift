@@ -362,6 +362,7 @@ fn deploy_dir(path: &Path, db: &Db, verbose: bool) -> Result<bool> {
             CollisionOptions::Quit => {
                 return Err(abort_deploy(path));
             }
+            CollisionOptions::Diff => unreachable!(),
         }
     }
     crate::create_dir_err!(fs::create_dir_all(path), path)?;
@@ -426,6 +427,7 @@ fn deploy_file(
                 CollisionOptions::Quit => {
                     return Err(abort_deploy(target));
                 }
+                CollisionOptions::Diff => unreachable!(),
             }
         } else {
             let identical = is_identical(
@@ -455,6 +457,7 @@ fn deploy_file(
                     CollisionOptions::Quit => {
                         return Err(abort_deploy(target));
                     }
+                    CollisionOptions::Diff => unreachable!(),
                 }
             }
         }

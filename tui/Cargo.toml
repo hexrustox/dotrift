@@ -5,4 +5,10 @@ edition = "2024"
 
 [dependencies]
 crossterm.workspace = true
+ratatui = { version = "0.29", default-features = false, features = [
+  "crossterm",
+] }
 strum.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
