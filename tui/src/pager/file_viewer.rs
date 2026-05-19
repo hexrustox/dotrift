@@ -4,11 +4,7 @@ use std::{
     path::Path,
 };
 
-use ratatui::{
-    layout::Rect,
-    widgets::Paragraph,
-    Frame,
-};
+use ratatui::{Frame, layout::Rect, widgets::Paragraph};
 
 pub struct FileViewer {
     file: File,

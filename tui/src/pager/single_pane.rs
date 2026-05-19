@@ -9,7 +9,7 @@ use super::{PagerMode, file_viewer::FileViewer, header};
 
 pub struct SinglePane {
     viewer: FileViewer,
-    header_text: String,
+    header: String,
 }
 
 impl SinglePane {
@@ -17,7 +17,7 @@ impl SinglePane {
         let viewer = FileViewer::new(path)?;
         Ok(Self {
             viewer,
-            header_text: path.display().to_string(),
+            header: path.to_string_lossy().into_owned(),
         })
     }
 }
@@ -28,7 +28,7 @@ impl PagerMode for SinglePane {
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Min(0)])
             .split(area);
-        header::render(frame, chunks[0], &self.header_text);
+        header::render(frame, chunks[0], &self.header);
         self.viewer
             .render(frame, chunks[1])
             .expect("Failed to render file content");

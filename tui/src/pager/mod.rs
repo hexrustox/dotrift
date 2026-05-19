@@ -1,5 +1,6 @@
 pub mod file_viewer;
 pub mod header;
+pub mod side_by_side;
 pub mod single_pane;
 
 use std::{
@@ -14,6 +15,7 @@ use crossterm::{
 };
 use ratatui::{Frame, Terminal, backend::CrosstermBackend, layout::Rect};
 
+use side_by_side::SideBySide;
 use single_pane::SinglePane;
 
 pub fn run(path1: &Path, path2: Option<&Path>) -> io::Result<()> {
@@ -27,11 +29,12 @@ pub fn run(path1: &Path, path2: Option<&Path>) -> io::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = if path2.is_none() {
-        let mut pane = SinglePane::new(path1)?;
+    let result = if let Some(path2) = path2 {
+        let mut pane = SideBySide::new(path1, path2)?;
         run_app(&mut terminal, &mut pane)
     } else {
-        todo!()
+        let mut pane = SinglePane::new(path1)?;
+        run_app(&mut terminal, &mut pane)
     };
 
     disable_raw_mode()?;

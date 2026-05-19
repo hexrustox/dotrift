@@ -8,7 +8,9 @@ crossterm.workspace = true
 ratatui = { version = "0.29", default-features = false, features = [
   "crossterm",
 ] }
+similar = "2"
 strum.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+test-case.workspace = true
