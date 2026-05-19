@@ -6,36 +6,24 @@ use std::{
 
 use ratatui::{Frame, layout::Rect, widgets::Paragraph};
 
+use super::{Scroll, build_offsets};
+
 pub struct FileViewer {
-    file: File,
+    file: BufReader<File>,
     offsets: Vec<u64>,
-    scroll: usize,
+    scroll: Scroll,
     buf: Vec<u8>,
 }
 
 impl FileViewer {
     pub fn new(path: &Path) -> std::io::Result<Self> {
-        let mut file = File::open(path)?;
-        let mut reader = BufReader::new(&mut file);
-        let mut offsets = vec![0u64];
-        let mut buf = Vec::new();
-
-        loop {
-            let bytes = reader.read_until(b'\n', &mut buf)?;
-            if bytes == 0 {
-                break;
-            }
-            offsets.push(offsets.last().unwrap() + bytes as u64);
-            buf.clear();
-        }
-
-        file.seek(SeekFrom::Start(0))?;
-
+        let mut file = BufReader::new(File::open(path)?);
+        let (offsets, buf) = build_offsets(&mut file)?;
         Ok(Self {
             file,
             offsets,
-            scroll: 0,
-            buf: Vec::new(),
+            scroll: Scroll::new(),
+            buf,
         })
     }
 
@@ -44,20 +32,19 @@ impl FileViewer {
     }
 
     pub fn scroll_up(&mut self, n: usize) {
-        self.scroll = self.scroll.saturating_sub(n);
+        self.scroll.up(n);
     }
 
     pub fn scroll_down(&mut self, n: usize, viewport_height: usize) {
-        let max = self.lines_count().saturating_sub(viewport_height);
-        self.scroll = (self.scroll + n).min(max);
+        self.scroll.down(n, self.lines_count(), viewport_height);
     }
 
     pub fn scroll_to_top(&mut self) {
-        self.scroll = 0;
+        self.scroll.top();
     }
 
     pub fn scroll_to_bottom(&mut self, viewport_height: usize) {
-        self.scroll = self.lines_count().saturating_sub(viewport_height);
+        self.scroll.bottom(self.lines_count(), viewport_height);
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -67,25 +54,21 @@ impl FileViewer {
             return;
         }
 
-        let visible_height = area.height as usize;
-        let max_scroll = line_count.saturating_sub(visible_height);
-        self.scroll = self.scroll.min(max_scroll);
-        let start = self.scroll;
-        let end = (start + visible_height).min(line_count);
+        let visible_h = area.height as usize;
+        self.scroll.clamp(line_count, visible_h);
+        let start = self.scroll.get();
+        let end = (start + visible_h).min(line_count);
 
         let _ = self.file.seek(SeekFrom::Start(self.offsets[start]));
 
         self.buf.clear();
-        let mut reader = BufReader::new(&mut self.file);
-
         for _ in start..end {
-            let bytes = reader.read_until(b'\n', &mut self.buf);
-            if bytes.as_ref().is_ok_and(|b| *b == 0) || bytes.is_err() {
+            if self.file.read_until(b'\n', &mut self.buf).is_err() {
                 break;
             }
         }
 
         let content = String::from_utf8_lossy(&self.buf);
-        frame.render_widget(Paragraph::new(content), area);
+        frame.render_widget(Paragraph::new(content.as_ref()), area);
     }
 }

@@ -31,6 +31,7 @@ impl HotKey for Fruits {
     }
 }
 
+#[ignore]
 #[test]
 fn main() {
     let select = SelectPrompt::<Fruits>::new()

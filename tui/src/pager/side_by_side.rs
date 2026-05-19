@@ -13,7 +13,7 @@ use ratatui::{
 };
 use similar::{DiffOp, TextDiff};
 
-use super::{PagerMode, header};
+use super::{PagerMode, Scroll, header, offsets_from_bytes};
 
 #[derive(Clone, Copy, PartialEq)]
 enum DiffTag {
@@ -30,27 +30,19 @@ struct DiffPair {
 }
 
 struct FileIndex {
-    file: File,
+    file: BufReader<File>,
     offsets: Vec<u64>,
 }
 
 impl FileIndex {
-    fn new_from_file(mut file: File) -> io::Result<Self> {
-        file.seek(SeekFrom::Start(0))?;
-        let mut reader = BufReader::new(&mut file);
-        let mut offsets = vec![0u64];
-        let mut buf = Vec::new();
+    fn new(file: BufReader<File>, offsets: Vec<u64>) -> Self {
+        Self { file, offsets }
+    }
 
-        loop {
-            let bytes = reader.read_until(b'\n', &mut buf)?;
-            if bytes == 0 {
-                break;
-            }
-            offsets.push(offsets.last().unwrap() + bytes as u64);
-            buf.clear();
-        }
-
-        file.seek(SeekFrom::Start(0))?;
+    #[cfg(test)]
+    fn from_reader(mut file: BufReader<File>) -> io::Result<Self> {
+        use super::build_offsets;
+        let (offsets, _) = build_offsets(&mut file)?;
         Ok(Self { file, offsets })
     }
 
@@ -64,15 +56,18 @@ impl FileIndex {
             return Ok(());
         }
         self.file.seek(SeekFrom::Start(self.offsets[idx]))?;
-        let mut reader = BufReader::new(&mut self.file);
-        reader.read_until(b'\n', buf)?;
-        if buf.ends_with(b"\n") {
-            buf.pop();
-            if buf.ends_with(b"\r") {
-                buf.pop();
-            }
-        }
+        self.file.read_until(b'\n', buf)?;
+        strip_newline(buf);
         Ok(())
+    }
+}
+
+fn strip_newline(buf: &mut Vec<u8>) {
+    if buf.ends_with(b"\n") {
+        buf.pop();
+        if buf.ends_with(b"\r") {
+            buf.pop();
+        }
     }
 }
 
@@ -80,7 +75,7 @@ pub struct SideBySide {
     pairs: Vec<DiffPair>,
     left: FileIndex,
     right: FileIndex,
-    scroll: usize,
+    scroll: Scroll,
     header_left: String,
     header_right: String,
     buf: Vec<u8>,
@@ -91,8 +86,8 @@ fn compute_pairs_from_ops(old: &str, new: &str) -> Vec<DiffPair> {
 
     let mut pairs = Vec::new();
 
-    for op in diff.ops().to_vec() {
-        match op {
+    for op in diff.ops() {
+        match *op {
             DiffOp::Equal {
                 old_index,
                 new_index,
@@ -172,20 +167,23 @@ impl SideBySide {
 
         let pairs = compute_pairs_from_ops(left_str, right_str);
 
+        let left_offsets = offsets_from_bytes(left_map.as_ref());
+        let right_offsets = offsets_from_bytes(right_map.as_ref());
+
         drop(left_map);
         drop(right_map);
 
-        let left = FileIndex::new_from_file(left_file)?;
-        let right = FileIndex::new_from_file(right_file)?;
+        let left = FileIndex::new(BufReader::new(left_file), left_offsets);
+        let right = FileIndex::new(BufReader::new(right_file), right_offsets);
 
-        let header_left = path1.display().to_string();
-        let header_right = path2.display().to_string();
+        let header_left = path1.to_string_lossy().into_owned();
+        let header_right = path2.to_string_lossy().into_owned();
 
         Ok(Self {
             pairs,
             left,
             right,
-            scroll: 0,
+            scroll: Scroll::new(),
             header_left,
             header_right,
             buf: Vec::new(),
@@ -200,36 +198,31 @@ fn styled_cell(prefix: char, content: String, color: Color) -> Line<'static> {
     ])
 }
 
+fn read_content(fi: &mut FileIndex, idx: Option<usize>, buf: &mut Vec<u8>) -> String {
+    match idx {
+        Some(i) => {
+            if fi.read_line(i, buf).is_err() {
+                buf.clear();
+            }
+            String::from_utf8_lossy(buf).into_owned()
+        }
+        None => String::new(),
+    }
+}
+
 fn pair_lines(
     pair: &DiffPair,
     left: &mut FileIndex,
     right: &mut FileIndex,
     buf: &mut Vec<u8>,
 ) -> (Line<'static>, Line<'static>) {
-    let left_content = match (pair.tag, pair.left_idx) {
-        (DiffTag::Delete | DiffTag::Change | DiffTag::Equal, Some(idx)) => {
-            if left.read_line(idx, buf).is_err() {
-                buf.clear();
-            }
-            String::from_utf8_lossy(buf).to_string()
-        }
-        _ => String::new(),
-    };
+    let left_content = read_content(left, pair.left_idx, buf);
+    let right_content = read_content(right, pair.right_idx, buf);
 
     let left_line = match (pair.tag, pair.left_idx) {
         (DiffTag::Delete | DiffTag::Change, Some(_)) => styled_cell('-', left_content, Color::Red),
         (DiffTag::Equal, Some(_)) => Line::from(format!(" {}", &left_content)),
         _ => Line::from(""),
-    };
-
-    let right_content = match (pair.tag, pair.right_idx) {
-        (DiffTag::Insert | DiffTag::Change | DiffTag::Equal, Some(idx)) => {
-            if right.read_line(idx, buf).is_err() {
-                buf.clear();
-            }
-            String::from_utf8_lossy(buf).to_string()
-        }
-        _ => String::new(),
     };
 
     let right_line = match (pair.tag, pair.right_idx) {
@@ -245,12 +238,13 @@ fn pair_lines(
 
 impl PagerMode for SideBySide {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(0)])
-            .split(area);
-        let header_area = chunks[0];
-        let content_area = chunks[1];
+        let [header_area, content_area] = {
+            let c = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(0)])
+                .split(area);
+            [c[0], c[1]]
+        };
 
         let header_chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -260,8 +254,7 @@ impl PagerMode for SideBySide {
         header::render(frame, header_chunks[1], &self.header_right);
 
         let visible_h = content_area.height as usize;
-        let max_scroll = self.pairs.len().saturating_sub(visible_h);
-        self.scroll = self.scroll.min(max_scroll);
+        self.scroll.clamp(self.pairs.len(), visible_h);
 
         if self.pairs.is_empty() {
             return;
@@ -269,9 +262,9 @@ impl PagerMode for SideBySide {
 
         let left_width = content_area.width / 2;
         let right_width = content_area.width - left_width;
-        let end = (self.scroll + visible_h).min(self.pairs.len());
+        let end = (self.scroll.get() + visible_h).min(self.pairs.len());
 
-        for (row, pair_idx) in (self.scroll..end).enumerate() {
+        for (row, pair_idx) in (self.scroll.get()..end).enumerate() {
             let pair = &self.pairs[pair_idx];
             let row_y = content_area.y + row as u16;
 
@@ -287,20 +280,19 @@ impl PagerMode for SideBySide {
     }
 
     fn scroll_up(&mut self, n: usize) {
-        self.scroll = self.scroll.saturating_sub(n);
+        self.scroll.up(n);
     }
 
     fn scroll_down(&mut self, n: usize, viewport_h: usize) {
-        let max = self.pairs.len().saturating_sub(viewport_h);
-        self.scroll = (self.scroll + n).min(max);
+        self.scroll.down(n, self.pairs.len(), viewport_h);
     }
 
     fn scroll_to_top(&mut self) {
-        self.scroll = 0;
+        self.scroll.top();
     }
 
     fn scroll_to_bottom(&mut self, viewport_h: usize) {
-        self.scroll = self.pairs.len().saturating_sub(viewport_h);
+        self.scroll.bottom(self.pairs.len(), viewport_h);
     }
 }
 
@@ -313,7 +305,7 @@ mod tests {
     fn file_index_from_str(s: &str) -> (NamedTempFile, FileIndex) {
         let tmp = NamedTempFile::new().unwrap();
         std::fs::write(tmp.path(), s).unwrap();
-        let fi = FileIndex::new_from_file(File::open(tmp.path()).unwrap()).unwrap();
+        let fi = FileIndex::from_reader(BufReader::new(File::open(tmp.path()).unwrap())).unwrap();
         (tmp, fi)
     }
 

@@ -1,10 +1,10 @@
-pub mod file_viewer;
-pub mod header;
-pub mod side_by_side;
-pub mod single_pane;
+pub(crate) mod file_viewer;
+pub(crate) mod header;
+pub(crate) mod side_by_side;
+pub(crate) mod single_pane;
 
 use std::{
-    io::{self, IsTerminal, stdout},
+    io::{self, BufRead, IsTerminal, Seek, SeekFrom, stdout},
     path::Path,
 };
 
@@ -80,11 +80,72 @@ fn run_app<T: PagerMode>(
     }
 }
 
-pub trait PagerMode: Sized {
+trait PagerMode: Sized {
     fn render(&mut self, frame: &mut Frame, area: Rect);
 
     fn scroll_up(&mut self, _n: usize) {}
     fn scroll_down(&mut self, _n: usize, _viewport_h: usize) {}
     fn scroll_to_top(&mut self) {}
     fn scroll_to_bottom(&mut self, _viewport_h: usize) {}
+}
+
+struct Scroll(usize);
+
+impl Scroll {
+    fn new() -> Self {
+        Self(0)
+    }
+
+    fn get(&self) -> usize {
+        self.0
+    }
+
+    fn up(&mut self, n: usize) {
+        self.0 = self.0.saturating_sub(n);
+    }
+
+    fn down(&mut self, n: usize, total: usize, vp: usize) {
+        let max = total.saturating_sub(vp);
+        self.0 = (self.0 + n).min(max);
+    }
+
+    fn top(&mut self) {
+        self.0 = 0;
+    }
+
+    fn bottom(&mut self, total: usize, vp: usize) {
+        self.0 = total.saturating_sub(vp);
+    }
+
+    fn clamp(&mut self, total: usize, vp: usize) {
+        let max = total.saturating_sub(vp);
+        self.0 = self.0.min(max);
+    }
+}
+
+fn build_offsets(reader: &mut (impl BufRead + Seek + ?Sized)) -> io::Result<(Vec<u64>, Vec<u8>)> {
+    let mut offsets = vec![0u64];
+    let mut buf = Vec::new();
+
+    loop {
+        let bytes = reader.read_until(b'\n', &mut buf)?;
+        if bytes == 0 {
+            break;
+        }
+        offsets.push(offsets.last().unwrap() + bytes as u64);
+        buf.clear();
+    }
+
+    reader.seek(SeekFrom::Start(0))?;
+    Ok((offsets, buf))
+}
+
+fn offsets_from_bytes(data: &[u8]) -> Vec<u64> {
+    let mut offsets = vec![0u64];
+    for (i, &b) in data.iter().enumerate() {
+        if b == b'\n' {
+            offsets.push(i as u64 + 1);
+        }
+    }
+    offsets
 }
