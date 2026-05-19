@@ -223,12 +223,12 @@ fn check_and_collect_collision(
 ) {
     match root.check_entry(target_path, key.to_string()) {
         Ok(Some(existing)) => {
-            let t = target_path.display().to_string();
+            let t = target_path.to_string_lossy().into_owned();
             collisions.entry(t.clone()).or_default().insert(existing);
             collisions.entry(t).or_default().insert(key.to_string());
         }
         Err(_) => {
-            let t = target_path.display().to_string();
+            let t = target_path.to_string_lossy().into_owned();
             collisions
                 .entry(t.clone())
                 .or_default()
@@ -253,7 +253,7 @@ fn resolve_collisions(
 
     for (pattern, target_rel) in portal {
         let pattern_normalized = Path::new(pattern).normalize();
-        let pattern_str = pattern_normalized.to_string_lossy().to_string();
+        let pattern_str = pattern_normalized.to_string_lossy().into_owned();
         let target_rel_normalized = target_rel.normalize();
 
         if is_glob(&pattern_str) {
@@ -327,7 +327,7 @@ fn check_new_entries(
 
     for (computed_target, dest_rel) in entries {
         let target_path = target_dir.join(computed_target).normalize();
-        let key = dest_rel.display().to_string();
+        let key = dest_rel.to_string_lossy().into_owned();
         check_and_collect_collision(tree, &mut new_collisions, &target_path, &key);
     }
 
@@ -477,7 +477,7 @@ fn apply_config_changes(
     let mut auto_add_keys: HashSet<String> = HashSet::with_capacity(analysis.missing.len());
 
     for (dest_rel, computed_target, warn) in &analysis.missing {
-        let key_str = dest_rel.display().to_string();
+        let key_str = dest_rel.to_string_lossy().into_owned();
         auto_add_keys.insert(key_str.clone());
 
         if *warn {
@@ -490,7 +490,7 @@ fn apply_config_changes(
         auto_add_lines.push(format!(
             "{} = {}",
             toml_quote(&key_str),
-            toml_quote(&computed_target.display().to_string())
+            toml_quote(&computed_target.to_string_lossy())
         ));
     }
 
@@ -560,7 +560,7 @@ fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<(
         return Ok(());
     }
 
-    let file = file_path.display().to_string();
+    let file = file_path.to_string_lossy().into_owned();
     let (row, col) = if let Ok(content) = fs::read_to_string(&file) {
         find_portal_cursor(&content)
     } else {
@@ -582,14 +582,14 @@ fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<(
             (config.command, args)
         }
         _ => match env::var_os("VISUAL").or(env::var_os("EDITOR")) {
-            Some(cmd) => (cmd.to_string_lossy().to_string(), vec![file]),
+            Some(cmd) => (cmd.to_string_lossy().into_owned(), vec![file]),
             None => {
                 let config_path = crate::path::global_config_path()
-                    .map(|p| p.display().to_string())
+                    .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_else(|_| "$XDG_CONFIG_HOME/dotrift/config.toml".into());
-                return Err(eyre!("No editor found").suggestion(format!(
-                    "Set $VISUAL or $EDITOR, or configure editor-command in {config_path}"
-                )));
+                return Err(eyre!("No editor found").with_suggestion(|| {
+                    format!("Set $VISUAL or $EDITOR, or configure editor-command in {config_path}")
+                }));
             }
         },
     };
@@ -1162,8 +1162,8 @@ mod tests {
             sorted.sort();
             let rel = Path::new(&k)
                 .safe_strip_prefix(&target_dir)
-                .display()
-                .to_string();
+                .to_string_lossy()
+                .into_owned();
             result.push((rel, sorted));
         }
         result.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1231,8 +1231,8 @@ mod tests {
             sorted.sort();
             let rel = Path::new(&k)
                 .safe_strip_prefix(&target_dir)
-                .display()
-                .to_string();
+                .to_string_lossy()
+                .into_owned();
             result.push((rel, sorted));
         }
         result.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1336,7 +1336,12 @@ mod tests {
         let missing: Vec<(String, String)> = analysis
             .missing
             .iter()
-            .map(|(d, c, _)| (d.display().to_string(), c.display().to_string()))
+            .map(|(d, c, _)| {
+                (
+                    d.to_string_lossy().into_owned(),
+                    c.to_string_lossy().into_owned(),
+                )
+            })
             .collect();
         (missing, analysis.collisions)
     }

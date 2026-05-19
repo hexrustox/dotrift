@@ -1,6 +1,9 @@
 use std::{fs, path::PathBuf};
 
-use color_eyre::eyre::{Context, Result, eyre};
+use color_eyre::{
+    Section,
+    eyre::{Context, Result, eyre},
+};
 use serde::Deserialize;
 
 use crate::path::global_config_path;
@@ -33,14 +36,19 @@ pub fn expand_arg(arg: &str, params: &[(&str, &str)]) -> Result<String> {
                 match params.iter().find(|(n, _)| *n == name) {
                     Some((_, v)) => result.push_str(v),
                     None => {
-                        return Err(eyre!(
-                            "Unknown parameter `{name}` in editor command argument (valid: {})",
-                            params
-                                .iter()
-                                .map(|(k, _)| format!("{{{k}}}"))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ));
+                        return Err(
+                            eyre!("Unknown parameter `{name}` in editor command argument",)
+                                .with_suggestion(|| {
+                                    format!(
+                                        "Valid parameters are: {}",
+                                        params
+                                            .iter()
+                                            .map(|(k, _)| format!("{{{k}}}"))
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    )
+                                }),
+                        );
                     }
                 }
             }

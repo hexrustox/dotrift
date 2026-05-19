@@ -29,7 +29,7 @@ impl Node {
         }
         Ok(comps
             .into_iter()
-            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
             .collect())
     }
 

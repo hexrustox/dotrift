@@ -21,7 +21,7 @@ pub fn portal_str(target: &Path, source: &Path, deploy_type: DeployType) -> Stri
 }
 
 pub fn print_dry_create_dir(path: &Path) {
-    eprintln!("{} {}", "[CREATE]".green().bold(), path.to_string_lossy());
+    eprintln!("{} {}", "[CREATE]".green().bold(), path.display());
 }
 
 pub fn print_dry_create_file(target: &Path, source: &Path, deploy_type: DeployType) {
@@ -33,7 +33,7 @@ pub fn print_dry_create_file(target: &Path, source: &Path, deploy_type: DeployTy
 }
 
 pub fn print_dry_remove(path: &Path) {
-    eprintln!("{} {}", "[REMOVE]".red().bold(), path.to_string_lossy());
+    eprintln!("{} {}", "[REMOVE]".red().bold(), path.display());
 }
 
 pub fn print_managed(target: &Path, source: &Path, deploy_type: DeployType) {
@@ -45,7 +45,7 @@ pub fn print_managed(target: &Path, source: &Path, deploy_type: DeployType) {
 }
 
 pub fn print_unmanaged(target: &Path) {
-    eprintln!("{} {}", "[UNMANAGED]".yellow(), target.to_string_lossy());
+    eprintln!("{} {}", "[UNMANAGED]".yellow(), target.display());
 }
 
 pub fn print_warn(msg: impl std::fmt::Display) {
@@ -57,7 +57,7 @@ pub fn print_ok(msg: impl std::fmt::Display) {
 }
 
 pub fn print_created_dir(path: &Path) {
-    eprintln!("{} {}", "[CREATED]".green().bold(), path.to_string_lossy());
+    eprintln!("{} {}", "[CREATED]".green().bold(), path.display());
 }
 
 pub fn print_created_file(target: &Path, source: &Path, deploy_type: DeployType) {
@@ -69,15 +69,15 @@ pub fn print_created_file(target: &Path, source: &Path, deploy_type: DeployType)
 }
 
 pub fn print_removed(path: &Path) {
-    eprintln!("{} {}", "[REMOVED]".red().bold(), path.to_string_lossy());
+    eprintln!("{} {}", "[REMOVED]".red().bold(), path.display());
 }
 
 pub fn print_added(src: &Path, dest: &Path) {
     eprintln!(
         "{} {} -> {}",
         "[ADDED]".green().bold(),
-        src.to_string_lossy(),
-        dest.to_string_lossy(),
+        src.display(),
+        dest.display(),
     );
 }
 
