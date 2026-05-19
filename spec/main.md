@@ -27,9 +27,10 @@ Commands that read `dotrift.toml` (`apply`, `unapply`, `add`) error if the sourc
 When `--prune-empty-dirs` is active, empty directories are recursively deleted from leaf upward with no upper boundary — the target directory and its ancestors may be pruned.
 
 **Collision Prompt:**
-When an obstruction is encountered during filesystem operations, the user is prompted with `[s]kip / [o]verwrite / [q]uit`. If stdin is not a TTY, defaults to `skip`. Unless otherwise noted:
+When an obstruction is encountered during filesystem operations, the user is prompted with `[s]kip / [o]verwrite / [d]iff / [q]uit`. If stdin is not a TTY, defaults to `skip` is not offered. Unless otherwise noted:
 - **skip:** Skip the operation, continue traversal.
 - **overwrite:** Remove the obstruction and proceed.
+- **diff:** Open the pager TUI (see `spec/pager.md`). After the pager exits, re-display the full collision prompt.
 - **quit:** Halt the program.
 
 ### Global Configuration
@@ -285,6 +286,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
   * **skip:** Abort subtree.
   * **overwrite:** Delete file then creates dir, deletes DB entry to avoid stale state, continue children.
   * **quit:** Halt program.
+  * **diff:** Open pager in single-pane mode, displaying the obstructing file's content with a header noting the directory that dotrift needs to create.
 * Other errors abort subtree.
 
 **File Nodes:**
@@ -294,6 +296,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
      * **skip:** Do not touch the filesystem. Continue traversal.
      * **overwrite:** Delete the directory recursively, delete DB entries under the directory. Proceed to step 4.
      * **quit:** Immediately terminate the program.
+     * **diff:** Open pager in explorer mode. Left pane: source file content. Right pane: file browser at the target directory.
 3. **Exists?** Yes → File or symlink on disk:
    a. **Identical Check:** Determine if the target matches what dotrift would write.
       - `symlink`: target is symlink AND link target == `entry.source` → identical.
@@ -313,6 +316,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
         - **skip:** Do not touch the filesystem. Continue traversal.
         - **overwrite:** Delete the disk entity. Proceed to step 4.
         - **quit:** Immediately terminate the program.
+        - **diff:** Open pager in side-by-side mode. Left pane: source file. Right pane: target file on disk.
 4. **Write:**
    - `symlink`: unlink target (if exists) → `symlink(entry.source, target)`.
    - `copy`: if `entry.source` is a symlink on disk, create a symlink at target pointing to `read_link(entry.source)`. Otherwise, `fs::copy(source, target)`. After write: if `mode` set AND target is regular file → `chmod`.
