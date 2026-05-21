@@ -76,8 +76,6 @@ pub struct SideBySide {
     left: FileIndex,
     right: FileIndex,
     scroll: Scroll,
-    header_left: String,
-    header_right: String,
     buf: Vec<u8>,
 }
 
@@ -176,16 +174,11 @@ impl SideBySide {
         let left = FileIndex::new(BufReader::new(left_file), left_offsets);
         let right = FileIndex::new(BufReader::new(right_file), right_offsets);
 
-        let header_left = path1.to_string_lossy().into_owned();
-        let header_right = path2.to_string_lossy().into_owned();
-
         Ok(Self {
             pairs,
             left,
             right,
             scroll: Scroll::new(),
-            header_left,
-            header_right,
             buf: Vec::new(),
         })
     }
@@ -246,12 +239,7 @@ impl PagerMode for SideBySide {
             [c[0], c[1]]
         };
 
-        let header_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-            .split(header_area);
-        header::render(frame, header_chunks[0], &self.header_left);
-        header::render(frame, header_chunks[1], &self.header_right);
+        header::render(frame, header_area, "");
 
         let visible_h = content_area.height as usize;
         self.scroll.clamp(self.pairs.len(), visible_h);

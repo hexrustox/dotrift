@@ -1,3 +1,4 @@
+pub(crate) mod explorer;
 pub(crate) mod file_viewer;
 pub(crate) mod header;
 pub(crate) mod side_by_side;
@@ -15,6 +16,7 @@ use crossterm::{
 };
 use ratatui::{Frame, Terminal, backend::CrosstermBackend, layout::Rect};
 
+use explorer::Explorer;
 use side_by_side::SideBySide;
 use single_pane::SinglePane;
 
@@ -29,12 +31,19 @@ pub fn run(path1: &Path, path2: Option<&Path>) -> io::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = if let Some(path2) = path2 {
-        let mut pane = SideBySide::new(path1, path2)?;
-        run_app(&mut terminal, &mut pane)
-    } else {
-        let mut pane = SinglePane::new(path1)?;
-        run_app(&mut terminal, &mut pane)
+    let result = match path2 {
+        Some(path2) if path1.is_file() && path2.is_dir() => {
+            let mut pane = Explorer::new(path1, path2)?;
+            run_app(&mut terminal, &mut pane)
+        }
+        Some(path2) => {
+            let mut pane = SideBySide::new(path1, path2)?;
+            run_app(&mut terminal, &mut pane)
+        }
+        None => {
+            let mut pane = SinglePane::new(path1)?;
+            run_app(&mut terminal, &mut pane)
+        }
     };
 
     disable_raw_mode()?;
@@ -54,10 +63,13 @@ fn run_app<T: PagerMode>(
             Event::Key(key) if key.kind == KeyEventKind::Press => {
                 let viewport_h = (terminal.size()?.height.saturating_sub(1) as usize).max(1);
                 match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Char('q') => return Ok(()),
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         return Ok(());
                     }
+                    KeyCode::Esc => pager.on_esc(),
+                    KeyCode::Tab => pager.on_tab(),
+                    KeyCode::Enter => pager.on_enter(),
                     KeyCode::Char('j') | KeyCode::Down => pager.scroll_down(1, viewport_h),
                     KeyCode::Char('k') | KeyCode::Up => pager.scroll_up(1),
                     KeyCode::PageDown | KeyCode::Char('f')
@@ -87,6 +99,9 @@ trait PagerMode: Sized {
     fn scroll_down(&mut self, _n: usize, _viewport_h: usize) {}
     fn scroll_to_top(&mut self) {}
     fn scroll_to_bottom(&mut self, _viewport_h: usize) {}
+    fn on_esc(&mut self) {}
+    fn on_tab(&mut self) {}
+    fn on_enter(&mut self) {}
 }
 
 struct Scroll(usize);

@@ -1,5 +1,5 @@
-use std::io::Write;
-use tempfile::NamedTempFile;
+use std::{fs, io::Write};
+use tempfile::{NamedTempFile, TempDir};
 
 #[ignore]
 #[test]
@@ -10,8 +10,7 @@ fn file() {
     }
     file.flush().unwrap();
 
-    let result = tui::pager::run(file.path(), None);
-    assert!(result.is_ok());
+    tui::pager::run(file.path(), None).unwrap();
 }
 
 #[ignore]
@@ -26,6 +25,20 @@ fn diff() {
     file1.flush().unwrap();
     file2.flush().unwrap();
 
-    let result = tui::pager::run(file1.path(), Some(file2.path()));
-    assert!(result.is_ok());
+    tui::pager::run(file1.path(), Some(file2.path())).unwrap();
+}
+
+#[ignore]
+#[test]
+fn explorer() {
+    let mut path1 = NamedTempFile::new().unwrap();
+    let path2 = TempDir::new().unwrap();
+    for i in 1..=100 {
+        writeln!(path1, "line {i}").unwrap();
+    }
+    path1.flush().unwrap();
+    for i in 1..=100 {
+        fs::write(path2.path().join(format!("file{}", i)), "").unwrap();
+    }
+    tui::pager::run(path1.path(), Some(path2.path())).unwrap();
 }

@@ -17,7 +17,7 @@ impl SinglePane {
         let viewer = FileViewer::new(path)?;
         Ok(Self {
             viewer,
-            header: path.to_string_lossy().into_owned(),
+            header: String::new(),
         })
     }
 }
