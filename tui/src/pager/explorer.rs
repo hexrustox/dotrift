@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{List, ListItem, ListState, Paragraph},
 };
 
-use super::{PagerMode, file_viewer::FileViewer, header};
+use super::{PagerMode, arrow_str, cursor_char, file_viewer::FileViewer, header, splitter_char};
 
 struct DirEntry {
     name: String,
@@ -116,13 +116,22 @@ impl PagerMode for Explorer {
 
         header::render(frame, header_area, "");
 
-        let [browser_area, preview_area] = {
-            let c = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-                .split(content_area);
-            [c[0], c[1]]
-        };
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Ratio(1, 2),
+                Constraint::Length(1),
+                Constraint::Ratio(1, 2),
+            ])
+            .split(content_area);
+        let browser_area = columns[0];
+        let splitter_area = columns[1];
+        let preview_area = columns[2];
+
+        frame.render_widget(
+            Paragraph::new(format!("{}\n", splitter_char()).repeat(splitter_area.height as usize)),
+            splitter_area,
+        );
 
         match &mut self.right_state {
             RightState::Browser {
@@ -137,7 +146,7 @@ impl PagerMode for Explorer {
                         .iter()
                         .map(|e| {
                             let display = match &e.symlink_target {
-                                Some(t) => format!("{} -> {}", e.name, t),
+                                Some(t) => format!("{} {} {}", e.name, arrow_str(), t),
                                 None if e.is_dir => format!("{}/", e.name),
                                 None => e.name.clone(),
                             };
@@ -147,7 +156,7 @@ impl PagerMode for Explorer {
 
                     let list = List::new(items)
                         .highlight_symbol(if self.focus == Focus::Left {
-                            "> "
+                            cursor_char()
                         } else {
                             "  "
                         })

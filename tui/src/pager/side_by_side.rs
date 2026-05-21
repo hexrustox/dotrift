@@ -10,10 +10,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
+    widgets::Paragraph,
 };
 use similar::{DiffOp, TextDiff};
 
-use super::{PagerMode, Scroll, header, offsets_from_bytes};
+use super::{PagerMode, Scroll, header, offsets_from_bytes, splitter_char};
 
 #[derive(Clone, Copy, PartialEq)]
 enum DiffTag {
@@ -248,8 +249,23 @@ impl PagerMode for SideBySide {
             return;
         }
 
-        let left_width = content_area.width / 2;
-        let right_width = content_area.width - left_width;
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Ratio(1, 2),
+                Constraint::Length(1),
+                Constraint::Ratio(1, 2),
+            ])
+            .split(content_area);
+        let left_area = columns[0];
+        let splitter_area = columns[1];
+        let right_area = columns[2];
+
+        frame.render_widget(
+            Paragraph::new(format!("{}\n", splitter_char()).repeat(splitter_area.height as usize)),
+            splitter_area,
+        );
+
         let end = (self.scroll.get() + visible_h).min(self.pairs.len());
 
         for (row, pair_idx) in (self.scroll.get()..end).enumerate() {
@@ -259,10 +275,10 @@ impl PagerMode for SideBySide {
             let (left_line, right_line) =
                 pair_lines(pair, &mut self.left, &mut self.right, &mut self.buf);
 
-            let left_rect = Rect::new(content_area.x, row_y, left_width, 1);
+            let left_rect = Rect::new(left_area.x, row_y, left_area.width, 1);
             frame.render_widget(left_line, left_rect);
 
-            let right_rect = Rect::new(content_area.x + left_width, row_y, right_width, 1);
+            let right_rect = Rect::new(right_area.x, row_y, right_area.width, 1);
             frame.render_widget(right_line, right_rect);
         }
     }

@@ -164,3 +164,22 @@ fn offsets_from_bytes(data: &[u8]) -> Vec<u64> {
     }
     offsets
 }
+
+fn is_unicode() -> bool {
+    ["LC_ALL", "LC_CTYPE", "LANG"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .any(|s| s.contains("UTF-8") || s.contains("utf8"))
+}
+
+fn splitter_char() -> &'static str {
+    if is_unicode() { "│" } else { "|" }
+}
+
+fn arrow_str() -> &'static str {
+    if is_unicode() { "→" } else { "->" }
+}
+
+fn cursor_char() -> &'static str {
+    if is_unicode() { "▶ " } else { "> " }
+}
