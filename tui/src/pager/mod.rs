@@ -1,8 +1,8 @@
 pub(crate) mod explorer;
 pub(crate) mod file_viewer;
 pub(crate) mod header;
-pub(crate) mod side_by_side;
-pub(crate) mod single_pane;
+pub(crate) mod diff;
+pub(crate) mod view;
 
 use std::{
     io::{self, BufRead, IsTerminal, Seek, SeekFrom, stdout},
@@ -17,8 +17,8 @@ use crossterm::{
 use ratatui::{Frame, Terminal, backend::CrosstermBackend, layout::Rect};
 
 use explorer::Explorer;
-use side_by_side::SideBySide;
-use single_pane::SinglePane;
+use diff::Diff;
+use view::View;
 
 pub fn run(path1: &Path, path2: Option<&Path>) -> io::Result<()> {
     if !io::stdin().is_terminal() {
@@ -37,11 +37,11 @@ pub fn run(path1: &Path, path2: Option<&Path>) -> io::Result<()> {
             run_app(&mut terminal, &mut pane)
         }
         Some(path2) => {
-            let mut pane = SideBySide::new(path1, path2)?;
+            let mut pane = Diff::new(path1, path2)?;
             run_app(&mut terminal, &mut pane)
         }
         None => {
-            let mut pane = SinglePane::new(path1)?;
+            let mut pane = View::new(path1)?;
             run_app(&mut terminal, &mut pane)
         }
     };

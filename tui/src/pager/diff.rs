@@ -73,7 +73,7 @@ fn strip_newline(buf: &mut Vec<u8>) {
     }
 }
 
-pub struct SideBySide {
+pub struct Diff {
     pairs: Vec<DiffPair>,
     old: FileIndex,
     new: FileIndex,
@@ -153,7 +153,7 @@ fn compute_pairs_from_ops(old: &str, new: &str) -> Vec<DiffPair> {
     pairs
 }
 
-impl SideBySide {
+impl Diff {
     pub fn new(old: &Path, new: &Path) -> io::Result<Self> {
         let old_file = File::open(old)?;
         let new_file = File::open(new)?;
@@ -233,7 +233,7 @@ fn pair_lines(
     (old_line, new_line)
 }
 
-impl PagerMode for SideBySide {
+impl PagerMode for Diff {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         let [header_area, content_area] = {
             let c = Layout::default()

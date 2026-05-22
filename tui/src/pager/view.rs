@@ -7,12 +7,12 @@ use ratatui::{
 
 use super::{PagerMode, file_viewer::FileViewer, header};
 
-pub struct SinglePane {
+pub struct View {
     viewer: FileViewer,
     header: String,
 }
 
-impl SinglePane {
+impl View {
     pub fn new(path: &Path) -> io::Result<Self> {
         let viewer = FileViewer::new(path)?;
         Ok(Self {
@@ -22,7 +22,7 @@ impl SinglePane {
     }
 }
 
-impl PagerMode for SinglePane {
+impl PagerMode for View {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
