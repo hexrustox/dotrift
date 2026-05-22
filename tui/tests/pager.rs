@@ -3,7 +3,7 @@ use tempfile::{NamedTempFile, TempDir};
 
 #[ignore]
 #[test]
-fn file() {
+fn view() {
     let mut file = NamedTempFile::new().unwrap();
     for i in 1..=100 {
         writeln!(file, "line {i}").unwrap();

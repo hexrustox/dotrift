@@ -14,7 +14,6 @@ use ratatui::{
 };
 use similar::{DiffOp, TextDiff};
 
-
 use super::{PagerMode, Scroll, header, offsets_from_bytes, splitter_char};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -80,6 +79,9 @@ pub struct Diff {
     scroll: Scroll,
     header: String,
     buf: Vec<u8>,
+    added: usize,
+    removed: usize,
+    viewport_h: usize,
 }
 
 fn compute_pairs_from_ops(old: &str, new: &str) -> Vec<DiffPair> {
@@ -168,6 +170,20 @@ impl Diff {
 
         let pairs = compute_pairs_from_ops(old_str, new_str);
 
+        let mut added = 0;
+        let mut removed = 0;
+        for pair in &pairs {
+            match pair.tag {
+                DiffTag::Insert => added += 1,
+                DiffTag::Delete => removed += 1,
+                DiffTag::Change => {
+                    added += 1;
+                    removed += 1;
+                }
+                _ => {}
+            }
+        }
+
         let old_offsets = offsets_from_bytes(old_map.as_ref());
         let new_offsets = offsets_from_bytes(new_map.as_ref());
 
@@ -184,6 +200,9 @@ impl Diff {
             scroll: Scroll::new(),
             header: format!("Replace {} with {}", old.display(), new.display()),
             buf: Vec::new(),
+            added,
+            removed,
+            viewport_h: 0,
         })
     }
 }
@@ -223,9 +242,7 @@ fn pair_lines(
     };
 
     let new_line = match (pair.tag, pair.new_idx) {
-        (DiffTag::Insert | DiffTag::Change, Some(_)) => {
-            styled_cell('+', new_content, Color::Green)
-        }
+        (DiffTag::Insert | DiffTag::Change, Some(_)) => styled_cell('+', new_content, Color::Green),
         (DiffTag::Equal, Some(_)) => Line::from(format!(" {}", &new_content)),
         _ => Line::from(""),
     };
@@ -235,13 +252,18 @@ fn pair_lines(
 
 impl PagerMode for Diff {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let [header_area, content_area] = {
+        let [header_area, content_area, footer_area] = {
             let c = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1), Constraint::Min(0)])
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                    Constraint::Length(1),
+                ])
                 .split(area);
-            [c[0], c[1]]
+            [c[0], c[1], c[2]]
         };
+        self.viewport_h = content_area.height as usize;
 
         header::render(frame, header_area, &self.header);
 
@@ -284,6 +306,23 @@ impl PagerMode for Diff {
             let new_rect = Rect::new(new_area.x, row_y, new_area.width, 1);
             frame.render_widget(new_line, new_rect);
         }
+
+        let max_pos = self.pairs.len().saturating_sub(visible_h) + 1;
+        header::render(
+            frame,
+            footer_area,
+            &format!(
+                "{}/{} +{} −{}",
+                self.scroll.get() + 1,
+                max_pos,
+                self.added,
+                self.removed
+            ),
+        );
+    }
+
+    fn viewport_height(&self) -> usize {
+        self.viewport_h
     }
 
     fn scroll_up(&mut self, n: usize) {

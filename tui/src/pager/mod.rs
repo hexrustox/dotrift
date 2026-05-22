@@ -1,7 +1,7 @@
+pub(crate) mod diff;
 pub(crate) mod explorer;
 pub(crate) mod file_viewer;
 pub(crate) mod header;
-pub(crate) mod diff;
 pub(crate) mod view;
 
 use std::{
@@ -16,8 +16,8 @@ use crossterm::{
 };
 use ratatui::{Frame, Terminal, backend::CrosstermBackend, layout::Rect};
 
-use explorer::Explorer;
 use diff::Diff;
+use explorer::Explorer;
 use view::View;
 
 pub fn run(path1: &Path, path2: Option<&Path>) -> io::Result<()> {
@@ -61,7 +61,7 @@ fn run_app<T: PagerMode>(
 
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
-                let viewport_h = (terminal.size()?.height.saturating_sub(1) as usize).max(1);
+                let viewport_h = pager.viewport_height().max(1);
                 match key.code {
                     KeyCode::Char('q') => return Ok(()),
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -102,6 +102,9 @@ trait PagerMode: Sized {
     fn on_esc(&mut self) {}
     fn on_tab(&mut self) {}
     fn on_enter(&mut self) {}
+    fn viewport_height(&self) -> usize {
+        todo!()
+    }
 }
 
 struct Scroll(usize);

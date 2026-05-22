@@ -31,6 +31,10 @@ impl FileViewer {
         self.offsets.len().saturating_sub(1)
     }
 
+    pub fn scroll_pos(&self) -> usize {
+        self.scroll.get()
+    }
+
     pub fn scroll_up(&mut self, n: usize) {
         self.scroll.up(n);
     }

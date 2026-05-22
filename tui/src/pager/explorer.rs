@@ -47,6 +47,7 @@ pub struct Explorer {
     browser: BrowseState,
     focus: Focus,
     header: String,
+    viewport_h: usize,
 }
 
 impl Explorer {
@@ -63,6 +64,7 @@ impl Explorer {
             browser,
             focus: Focus::Browser,
             header: format!("Directory {} blocks file creation", dir.display()),
+            viewport_h: 0,
         })
     }
 }
@@ -108,13 +110,18 @@ fn read_entries(path: &std::path::Path) -> io::Result<Vec<DirEntry>> {
 
 impl PagerMode for Explorer {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let [header_area, content_area] = {
+        let [header_area, content_area, footer_area] = {
             let c = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1), Constraint::Min(0)])
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                    Constraint::Length(1),
+                ])
                 .split(area);
-            [c[0], c[1]]
+            [c[0], c[1], c[2]]
         };
+        self.viewport_h = content_area.height as usize;
 
         header::render(frame, header_area, &self.header);
 
@@ -178,6 +185,33 @@ impl PagerMode for Explorer {
         }
 
         self.preview.render(frame, preview_area);
+
+        let footer_text = match self.focus {
+            Focus::Browser => match &self.browser {
+                BrowseState::Dir {
+                    entries, cursor, ..
+                } => {
+                    format!("Browser  {}/{}", cursor + 1, entries.len())
+                }
+                BrowseState::File { viewer, .. } => {
+                    let total = viewer.lines_count();
+                    let vp_h = browser_area.height as usize;
+                    let max_pos = total.saturating_sub(vp_h) + 1;
+                    format!("Browser  {}/{}", viewer.scroll_pos() + 1, max_pos)
+                }
+            },
+            Focus::Preview => {
+                let total = self.preview.lines_count();
+                let vp_h = preview_area.height as usize;
+                let max_pos = total.saturating_sub(vp_h) + 1;
+                format!("Preview  {}/{}", self.preview.scroll_pos() + 1, max_pos)
+            }
+        };
+        header::render(frame, footer_area, &footer_text);
+    }
+
+    fn viewport_height(&self) -> usize {
+        self.viewport_h
     }
 
     fn scroll_up(&mut self, n: usize) {
