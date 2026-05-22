@@ -2,9 +2,16 @@ use std::collections::HashMap;
 
 use ratatui::style::{Color, Modifier, Style};
 
+const S_ISUID: u32 = 0o4000;
+const S_ISGID: u32 = 0o2000;
+const S_ISVTX: u32 = 0o1000;
+const S_IWOTH: u32 = 0o0002;
+const S_IXANY: u32 = 0o0111;
+const S_ISVTX_IWOTH: u32 = S_ISVTX | S_IWOTH;
+
 pub struct LsColors {
-    indicators: HashMap<String, String>,
-    patterns: Vec<(String, String)>,
+    indicators: HashMap<String, Style>,
+    patterns: Vec<(String, Style)>,
 }
 
 impl LsColors {
@@ -15,10 +22,11 @@ impl LsColors {
         if let Ok(env) = std::env::var("LS_COLORS") {
             for pair in env.split(':') {
                 if let Some((k, v)) = pair.split_once('=') {
-                    if k.starts_with('*') {
-                        patterns.push((k.to_string(), v.to_string()));
+                    let style = parse_sgr(v);
+                    if let Some(suffix) = k.strip_prefix('*') {
+                        patterns.push((suffix.to_string(), style));
                     } else {
-                        indicators.insert(k.to_string(), v.to_string());
+                        indicators.insert(k.to_string(), style);
                     }
                 }
             }
@@ -28,6 +36,10 @@ impl LsColors {
             indicators,
             patterns,
         }
+    }
+
+    fn indicator(&self, key: &str) -> Style {
+        self.indicators.get(key).copied().unwrap_or_default()
     }
 
     pub fn style_for(
@@ -40,9 +52,9 @@ impl LsColors {
     ) -> Style {
         if is_symlink {
             if is_broken {
-                return parse_sgr(self.indicators.get("or").map(String::as_str).unwrap_or(""));
+                return self.indicator("or");
             }
-            return parse_sgr(self.indicators.get("ln").map(String::as_str).unwrap_or(""));
+            return self.indicator("ln");
         }
 
         if is_dir {
@@ -54,57 +66,51 @@ impl LsColors {
 
     fn dir_style(&self, mode: Option<u32>) -> Style {
         if let Some(m) = mode {
-            let tw = m & 0o1002 == 0o1002;
-            let ow = m & 0o0002 != 0;
-            let st = m & 0o1000 != 0;
-
-            if tw {
-                return parse_sgr(self.indicators.get("tw").map(String::as_str).unwrap_or(""));
+            if m & S_ISVTX_IWOTH == S_ISVTX_IWOTH {
+                return self.indicator("tw");
             }
-            if ow {
-                return parse_sgr(self.indicators.get("ow").map(String::as_str).unwrap_or(""));
+            if m & S_IWOTH != 0 {
+                return self.indicator("ow");
             }
-            if st {
-                return parse_sgr(self.indicators.get("st").map(String::as_str).unwrap_or(""));
+            if m & S_ISVTX != 0 {
+                return self.indicator("st");
             }
         }
-        parse_sgr(self.indicators.get("di").map(String::as_str).unwrap_or(""))
+        self.indicator("di")
     }
 
     fn file_style(&self, name: &str, mode: Option<u32>) -> Style {
         if let Some(m) = mode {
-            if m & 0o4000 != 0 {
-                return parse_sgr(self.indicators.get("su").map(String::as_str).unwrap_or(""));
+            if m & S_ISUID != 0 {
+                return self.indicator("su");
             }
-            if m & 0o2000 != 0 {
-                return parse_sgr(self.indicators.get("sg").map(String::as_str).unwrap_or(""));
+            if m & S_ISGID != 0 {
+                return self.indicator("sg");
             }
-            if m & 0o1002 == 0o1002 {
-                return parse_sgr(self.indicators.get("tw").map(String::as_str).unwrap_or(""));
+            if m & S_ISVTX_IWOTH == S_ISVTX_IWOTH {
+                return self.indicator("tw");
             }
-            if m & 0o0002 != 0 {
-                return parse_sgr(self.indicators.get("ow").map(String::as_str).unwrap_or(""));
+            if m & S_IWOTH != 0 {
+                return self.indicator("ow");
             }
-            if m & 0o1000 != 0 {
-                return parse_sgr(self.indicators.get("st").map(String::as_str).unwrap_or(""));
+            if m & S_ISVTX != 0 {
+                return self.indicator("st");
             }
         }
 
-        for (key, sgr) in &self.patterns {
-            if let Some(suffix) = key.strip_prefix('*')
-                && name.ends_with(suffix)
-            {
-                return parse_sgr(sgr);
+        for (suffix, style) in &self.patterns {
+            if name.ends_with(suffix) {
+                return *style;
             }
         }
 
         if let Some(m) = mode
-            && m & 0o0111 != 0
+            && m & S_IXANY != 0
         {
-            return parse_sgr(self.indicators.get("ex").map(String::as_str).unwrap_or(""));
+            return self.indicator("ex");
         }
 
-        parse_sgr(self.indicators.get("fi").map(String::as_str).unwrap_or(""))
+        self.indicator("fi")
     }
 }
 

@@ -3,7 +3,7 @@ use std::fmt::Display;
 use strum::EnumIter;
 use tui::prompt::{HotKey, SelectPrompt};
 
-#[derive(Default, PartialEq, EnumIter)]
+#[derive(Default, Clone, PartialEq, EnumIter)]
 enum Fruits {
     #[default]
     Apple,

@@ -14,7 +14,7 @@ use ratatui::{
 };
 use similar::{DiffOp, TextDiff};
 
-use super::{PagerMode, Scroll, footer, offsets_from_bytes, splitter_char};
+use super::{PagerMode, Scroll, footer, offsets_from_bytes, scroll_status, splitter_char};
 
 #[derive(Clone, Copy, PartialEq)]
 enum DiffTag {
@@ -43,7 +43,7 @@ impl FileIndex {
     #[cfg(test)]
     fn from_reader(mut file: BufReader<File>) -> io::Result<Self> {
         use super::build_offsets;
-        let (offsets, _) = build_offsets(&mut file)?;
+        let offsets = build_offsets(&mut file)?;
         Ok(Self { file, offsets })
     }
 
@@ -301,15 +301,13 @@ impl PagerMode for Diff {
             frame.render_widget(new_line, new_rect);
         }
 
-        let max_pos = self.pairs.len().saturating_sub(visible_h) + 1;
         footer::render(
             frame,
             footer_area,
             &self.path,
             &format!(
-                "({}/{}) (+{} −{})",
-                self.scroll.get() + 1,
-                max_pos,
+                "{} (+{} −{})",
+                scroll_status(self.scroll.get(), self.pairs.len(), visible_h),
                 self.added,
                 self.removed
             ),

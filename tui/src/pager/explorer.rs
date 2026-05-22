@@ -9,7 +9,10 @@ use ratatui::{
 
 use crate::ls_colors::LsColors;
 
-use super::{PagerMode, arrow_char, cursor_char, file_viewer::FileViewer, footer, splitter_char};
+use super::{
+    PagerMode, arrow_char, cursor_char, file_viewer::FileViewer, footer, scroll_status,
+    splitter_char,
+};
 
 struct DirEntry {
     name: String,
@@ -224,15 +227,19 @@ impl PagerMode for Explorer {
                 BrowseState::File { viewer, .. } => {
                     let total = viewer.lines_count();
                     let vp_h = browser_area.height as usize;
-                    let max_pos = total.saturating_sub(vp_h) + 1;
-                    format!("Browser ({}/{})", viewer.scroll_pos() + 1, max_pos)
+                    format!(
+                        "Browser {}",
+                        scroll_status(viewer.scroll_pos(), total, vp_h)
+                    )
                 }
             },
             Focus::Preview => {
                 let total = self.preview.lines_count();
                 let vp_h = preview_area.height as usize;
-                let max_pos = total.saturating_sub(vp_h) + 1;
-                format!("Preview ({}/{})", self.preview.scroll_pos() + 1, max_pos)
+                format!(
+                    "Preview {}",
+                    scroll_status(self.preview.scroll_pos(), total, vp_h)
+                )
             }
         };
         footer::render(frame, footer_area, &self.path, &footer_text);

@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
 };
 
-use super::{PagerMode, file_viewer::FileViewer, footer};
+use super::{PagerMode, file_viewer::FileViewer, footer, scroll_status};
 
 pub struct View {
     viewer: FileViewer,
@@ -40,8 +40,7 @@ impl PagerMode for View {
         let total = self.viewer.lines_count();
         let vp_h = content_area.height as usize;
         let status = if total > vp_h {
-            let max_pos = total.saturating_sub(vp_h) + 1;
-            format!("({}/{})", self.viewer.scroll_pos() + 1, max_pos)
+            scroll_status(self.viewer.scroll_pos(), total, vp_h)
         } else {
             String::new()
         };

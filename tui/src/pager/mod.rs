@@ -7,6 +7,7 @@ pub(crate) mod view;
 use std::{
     io::{self, BufRead, IsTerminal, Seek, SeekFrom, stdout},
     path::Path,
+    sync::OnceLock,
 };
 
 use crossterm::{
@@ -103,7 +104,7 @@ trait PagerMode: Sized {
     fn on_tab(&mut self) {}
     fn on_enter(&mut self) {}
     fn viewport_height(&self) -> usize {
-        todo!()
+        0
     }
 }
 
@@ -141,7 +142,12 @@ impl Scroll {
     }
 }
 
-fn build_offsets(reader: &mut (impl BufRead + Seek + ?Sized)) -> io::Result<(Vec<u64>, Vec<u8>)> {
+pub fn scroll_status(scroll_pos: usize, total: usize, viewport_h: usize) -> String {
+    let max_pos = total.saturating_sub(viewport_h) + 1;
+    format!("({}/{})", scroll_pos + 1, max_pos)
+}
+
+fn build_offsets(reader: &mut (impl BufRead + Seek + ?Sized)) -> io::Result<Vec<u64>> {
     let mut offsets = vec![0u64];
     let mut buf = Vec::new();
 
@@ -155,7 +161,7 @@ fn build_offsets(reader: &mut (impl BufRead + Seek + ?Sized)) -> io::Result<(Vec
     }
 
     reader.seek(SeekFrom::Start(0))?;
-    Ok((offsets, buf))
+    Ok(offsets)
 }
 
 fn offsets_from_bytes(data: &[u8]) -> Vec<u64> {
@@ -169,10 +175,13 @@ fn offsets_from_bytes(data: &[u8]) -> Vec<u64> {
 }
 
 fn is_unicode() -> bool {
-    ["LC_ALL", "LC_CTYPE", "LANG"]
-        .iter()
-        .filter_map(|v| std::env::var(v).ok())
-        .any(|s| s.contains("UTF-8") || s.contains("utf8"))
+    static UNICODE: OnceLock<bool> = OnceLock::new();
+    *UNICODE.get_or_init(|| {
+        ["LC_ALL", "LC_CTYPE", "LANG"]
+            .iter()
+            .filter_map(|v| std::env::var(v).ok())
+            .any(|s| s.contains("UTF-8") || s.contains("utf8"))
+    })
 }
 
 fn splitter_char() -> &'static str {

@@ -38,7 +38,7 @@ pub struct SelectPrompt<I> {
 
 impl<I> SelectPrompt<I>
 where
-    I: Default + HotKey + Display + IntoEnumIterator + PartialEq,
+    I: Default + Clone + HotKey + Display + IntoEnumIterator + PartialEq,
 {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
@@ -71,7 +71,10 @@ where
     }
 
     pub fn interact(self) -> io::Result<I> {
+        let variants: Vec<I> = I::iter().collect();
+        let len = variants.len();
         let mut select = self.default.unwrap_or_default();
+        let mut index = 0;
 
         let stdin = io::stdin();
         if !stdin.is_terminal() {
@@ -89,8 +92,9 @@ where
                 Print(format!(
                     "{}({})",
                     self.prompt,
-                    I::iter()
-                        .map(|item| if item == select {
+                    variants
+                        .iter()
+                        .map(|item| if *item == select {
                             format!("{}{}", self.anchor, item)
                                 .with(Color::Blue)
                                 .attribute(Attribute::Bold)
@@ -108,28 +112,22 @@ where
                 if let Event::Key(key_event) = event::read()? {
                     match key_event.code {
                         KeyCode::Char(c) => {
-                            if let Some(s) = I::iter().find(|item| item.hot_key() == c) {
-                                select = s;
+                            if let Some(pos) = variants.iter().position(|item| item.hot_key() == c)
+                            {
+                                select = variants[pos].clone();
+                                index = pos;
                                 break;
                             }
                         }
                         KeyCode::Left => {
-                            let mut iter = I::iter();
-                            let len = iter.len();
-                            if let Some(index) = iter.position(|item| item == select) {
-                                let skip = (index + len - 1) % len;
-                                select = I::iter().nth(skip).unwrap_or(select);
-                                break;
-                            }
+                            index = (index + len - 1) % len;
+                            select = variants[index].clone();
+                            break;
                         }
                         KeyCode::Right => {
-                            let mut iter = I::iter();
-                            let len = iter.len();
-                            if let Some(index) = iter.position(|item| item == select) {
-                                let skip = (index + 1) % len;
-                                select = I::iter().nth(skip).unwrap_or(select);
-                                break;
-                            }
+                            index = (index + 1) % len;
+                            select = variants[index].clone();
+                            break;
                         }
                         KeyCode::Enter => {
                             crossterm::terminal::disable_raw_mode()?;

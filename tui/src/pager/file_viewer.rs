@@ -18,12 +18,12 @@ pub struct FileViewer {
 impl FileViewer {
     pub fn new(path: &Path) -> std::io::Result<Self> {
         let mut file = BufReader::new(File::open(path)?);
-        let (offsets, buf) = build_offsets(&mut file)?;
+        let offsets = build_offsets(&mut file)?;
         Ok(Self {
             file,
             offsets,
             scroll: Scroll::new(),
-            buf,
+            buf: Vec::new(),
         })
     }
 
