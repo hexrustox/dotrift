@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{List, ListItem, ListState, Paragraph},
 };
 
-use super::{PagerMode, arrow_char, cursor_char, file_viewer::FileViewer, header, splitter_char};
+use super::{PagerMode, arrow_char, cursor_char, file_viewer::FileViewer, footer, splitter_char};
 
 struct DirEntry {
     name: String,
@@ -46,7 +46,7 @@ pub struct Explorer {
     preview: FileViewer,
     browser: BrowseState,
     focus: Focus,
-    header: String,
+    path: String,
     viewport_h: usize,
 }
 
@@ -63,7 +63,7 @@ impl Explorer {
             preview,
             browser,
             focus: Focus::Browser,
-            header: format!("Directory {} blocks file creation", dir.display()),
+            path: dir.to_string_lossy().into_owned(),
             viewport_h: 0,
         })
     }
@@ -110,20 +110,14 @@ fn read_entries(path: &std::path::Path) -> io::Result<Vec<DirEntry>> {
 
 impl PagerMode for Explorer {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let [header_area, content_area, footer_area] = {
+        let [content_area, footer_area] = {
             let c = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(1),
-                    Constraint::Min(0),
-                    Constraint::Length(1),
-                ])
+                .constraints([Constraint::Min(0), Constraint::Length(1)])
                 .split(area);
-            [c[0], c[1], c[2]]
+            [c[0], c[1]]
         };
         self.viewport_h = content_area.height as usize;
-
-        header::render(frame, header_area, &self.header);
 
         let columns = Layout::default()
             .direction(Direction::Horizontal)
@@ -191,23 +185,23 @@ impl PagerMode for Explorer {
                 BrowseState::Dir {
                     entries, cursor, ..
                 } => {
-                    format!("Browser  {}/{}", cursor + 1, entries.len())
+                    format!("Browser ({}/{})", cursor + 1, entries.len())
                 }
                 BrowseState::File { viewer, .. } => {
                     let total = viewer.lines_count();
                     let vp_h = browser_area.height as usize;
                     let max_pos = total.saturating_sub(vp_h) + 1;
-                    format!("Browser  {}/{}", viewer.scroll_pos() + 1, max_pos)
+                    format!("Browser ({}/{})", viewer.scroll_pos() + 1, max_pos)
                 }
             },
             Focus::Preview => {
                 let total = self.preview.lines_count();
                 let vp_h = preview_area.height as usize;
                 let max_pos = total.saturating_sub(vp_h) + 1;
-                format!("Preview  {}/{}", self.preview.scroll_pos() + 1, max_pos)
+                format!("Preview ({}/{})", self.preview.scroll_pos() + 1, max_pos)
             }
         };
-        header::render(frame, footer_area, &footer_text);
+        footer::render(frame, footer_area, &self.path, &footer_text);
     }
 
     fn viewport_height(&self) -> usize {

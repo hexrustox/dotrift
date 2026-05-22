@@ -1,7 +1,7 @@
 pub(crate) mod diff;
 pub(crate) mod explorer;
 pub(crate) mod file_viewer;
-pub(crate) mod header;
+pub(crate) mod footer;
 pub(crate) mod view;
 
 use std::{

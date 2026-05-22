@@ -14,7 +14,7 @@ use ratatui::{
 };
 use similar::{DiffOp, TextDiff};
 
-use super::{PagerMode, Scroll, header, offsets_from_bytes, splitter_char};
+use super::{PagerMode, Scroll, footer, offsets_from_bytes, splitter_char};
 
 #[derive(Clone, Copy, PartialEq)]
 enum DiffTag {
@@ -77,7 +77,7 @@ pub struct Diff {
     old: FileIndex,
     new: FileIndex,
     scroll: Scroll,
-    header: String,
+    path: String,
     buf: Vec<u8>,
     added: usize,
     removed: usize,
@@ -198,7 +198,7 @@ impl Diff {
             old: old_fi,
             new: new_fi,
             scroll: Scroll::new(),
-            header: format!("Replace {} with {}", old.display(), new.display()),
+            path: old.to_string_lossy().into_owned(),
             buf: Vec::new(),
             added,
             removed,
@@ -252,20 +252,14 @@ fn pair_lines(
 
 impl PagerMode for Diff {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let [header_area, content_area, footer_area] = {
+        let [content_area, footer_area] = {
             let c = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(1),
-                    Constraint::Min(0),
-                    Constraint::Length(1),
-                ])
+                .constraints([Constraint::Min(0), Constraint::Length(1)])
                 .split(area);
-            [c[0], c[1], c[2]]
+            [c[0], c[1]]
         };
         self.viewport_h = content_area.height as usize;
-
-        header::render(frame, header_area, &self.header);
 
         let visible_h = content_area.height as usize;
         self.scroll.clamp(self.pairs.len(), visible_h);
@@ -308,11 +302,12 @@ impl PagerMode for Diff {
         }
 
         let max_pos = self.pairs.len().saturating_sub(visible_h) + 1;
-        header::render(
+        footer::render(
             frame,
             footer_area,
+            &self.path,
             &format!(
-                "{}/{} +{} −{}",
+                "({}/{}) (+{} −{})",
                 self.scroll.get() + 1,
                 max_pos,
                 self.added,
