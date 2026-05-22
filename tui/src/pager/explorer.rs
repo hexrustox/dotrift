@@ -1,11 +1,13 @@
-use std::{fs, io, path::PathBuf};
+use std::{fs, io, os::unix::fs::PermissionsExt, path::PathBuf};
 
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::Style,
+    text::Line,
     widgets::{List, ListItem, ListState, Paragraph},
 };
+
+use crate::ls_colors::LsColors;
 
 use super::{PagerMode, arrow_char, cursor_char, file_viewer::FileViewer, footer, splitter_char};
 
@@ -13,6 +15,8 @@ struct DirEntry {
     name: String,
     is_dir: bool,
     symlink_target: Option<String>,
+    mode: Option<u32>,
+    is_broken: bool,
 }
 
 enum BrowseState {
@@ -48,6 +52,7 @@ pub struct Explorer {
     focus: Focus,
     path: String,
     viewport_h: usize,
+    ls_colors: LsColors,
 }
 
 impl Explorer {
@@ -65,6 +70,7 @@ impl Explorer {
             focus: Focus::Browser,
             path: dir.to_string_lossy().into_owned(),
             viewport_h: 0,
+            ls_colors: LsColors::new(),
         })
     }
 }
@@ -76,17 +82,27 @@ fn read_entries(path: &std::path::Path) -> io::Result<Vec<DirEntry>> {
         let ft = entry.file_type()?;
         let name = entry.file_name().to_string_lossy().into_owned();
         let is_dir = ft.is_dir();
-        let symlink_target = if ft.is_symlink() {
+        let is_symlink = ft.is_symlink();
+        let meta = entry.metadata();
+        let symlink_target = if is_symlink {
             fs::read_link(entry.path())
                 .ok()
                 .map(|p| p.display().to_string())
         } else {
             None
         };
+        let is_broken = is_symlink && meta.is_err();
+        let mode = if is_symlink {
+            None
+        } else {
+            meta.ok().map(|m| m.permissions().mode())
+        };
         entries.push(DirEntry {
             name,
             is_dir,
             symlink_target,
+            mode,
+            is_broken,
         });
     }
     entries.sort_by(|a, b| {
@@ -96,12 +112,17 @@ fn read_entries(path: &std::path::Path) -> io::Result<Vec<DirEntry>> {
             .then_with(|| a.name.cmp(&b.name))
     });
     if path.parent().is_some() {
+        let mode = fs::metadata(path.join(".."))
+            .ok()
+            .map(|m| m.permissions().mode());
         entries.insert(
             0,
             DirEntry {
                 name: "..".to_string(),
                 is_dir: true,
                 symlink_target: None,
+                mode,
+                is_broken: false,
             },
         );
     }
@@ -127,7 +148,7 @@ impl PagerMode for Explorer {
                 Constraint::Ratio(1, 2),
             ])
             .split(content_area);
-        let browser_area = columns[0];
+        let mut browser_area = columns[0];
         let splitter_area = columns[1];
         let preview_area = columns[2];
 
@@ -136,42 +157,55 @@ impl PagerMode for Explorer {
             splitter_area,
         );
 
+        if let BrowseState::Dir { path, .. } = &self.browser {
+            let cwd_layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(0)])
+                .split(browser_area);
+            let cwd_area = cwd_layout[0];
+            browser_area = cwd_layout[1];
+
+            frame.render_widget(Line::from(path.to_string_lossy()), cwd_area);
+        }
+
         match &mut self.browser {
             BrowseState::Dir {
                 entries,
                 cursor,
                 path: _,
             } => {
-                if entries.is_empty() {
-                    frame.render_widget(Paragraph::new("(empty)"), browser_area);
+                let items: Vec<ListItem> = entries
+                    .iter()
+                    .map(|e| {
+                        let display = match &e.symlink_target {
+                            Some(t) => format!("{} {} {}", e.name, arrow_char(), t),
+                            None if e.is_dir => format!("{}/", e.name),
+                            None => e.name.clone(),
+                        };
+                        let is_symlink = e.symlink_target.is_some();
+                        let style = self.ls_colors.style_for(
+                            &e.name,
+                            e.mode,
+                            e.is_dir,
+                            is_symlink,
+                            e.is_broken,
+                        );
+                        ListItem::new(display).style(style)
+                    })
+                    .collect();
+
+                let list = List::new(items).highlight_symbol(if self.focus == Focus::Browser {
+                    cursor_char()
                 } else {
-                    let items: Vec<ListItem> = entries
-                        .iter()
-                        .map(|e| {
-                            let display = match &e.symlink_target {
-                                Some(t) => format!("{} {} {}", e.name, arrow_char(), t),
-                                None if e.is_dir => format!("{}/", e.name),
-                                None => e.name.clone(),
-                            };
-                            ListItem::new(display)
-                        })
-                        .collect();
+                    "  "
+                });
 
-                    let list = List::new(items)
-                        .highlight_symbol(if self.focus == Focus::Browser {
-                            cursor_char()
-                        } else {
-                            "  "
-                        })
-                        .highlight_style(Style::default());
+                let mut state = ListState::default();
+                let max_cursor = entries.len().saturating_sub(1);
+                *cursor = (*cursor).min(max_cursor);
+                state.select(Some(*cursor));
 
-                    let mut state = ListState::default();
-                    let max_cursor = entries.len().saturating_sub(1);
-                    *cursor = (*cursor).min(max_cursor);
-                    state.select(Some(*cursor));
-
-                    frame.render_stateful_widget(list, browser_area, &mut state);
-                }
+                frame.render_stateful_widget(list, browser_area, &mut state);
             }
             BrowseState::File { viewer, .. } => {
                 viewer.render(frame, browser_area);
