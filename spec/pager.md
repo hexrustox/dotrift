@@ -1,78 +1,107 @@
 # Pager TUI Specification
 
-The pager is a terminal UI invoked by dotrift to display file contents and browse directories.
+The pager is a terminal UI invoked by dotrift via the `[d]iff` collision prompt
+option. It has three modes selected automatically based on the paths:
 
-## Layout Modes
+- **View**: one path → single file viewer
+- **Diff**: two files → side-by-side line diff
+- **Explorer**: file + directory → browse directory, preview file
 
-### Side-by-Side Mode
+All modes share a 3-row layout: header, content, footer.
 
-Two panes split evenly across the terminal, displaying two files side by side.
+---
 
-- Left pane: content of file A.
-- Right pane: content of file B.
+## View Mode
+
+Single file viewer. Used when a file on disk blocks directory creation.
+
+**Header:** `File <path> blocks directory creation`
+**Content:** Full-terminal file display with line-by-line scrolling.
+**Footer:** `{pos}/{max}` — 1-indexed scroll position over max reachable position.
+Hidden if all lines fit in the viewport.
+
+## Diff Mode
+
+Two panes split evenly by a vertical separator, showing a computed line diff.
+
+**Header:** `Replace <old> with <new>`
+**Content:**
+- Old file on left, new file on right.
+- Lines prefixed with `-` (red, old-only), `+` (green, new-only), or ` ` (unchanged).
+- Consecutive delete+insert pairs are collapsed into a single Change row
+  (old line on left, new line on right).
 - Scroll is locked — both panes always scroll together.
+**Footer:** `{pos}/{max} +{added} −{removed}` — scroll position + change counts.
+Hidden if all diff pairs fit in the viewport.
 
-### Explorer Mode
+## Explorer Mode
 
-Two panes. Left pane shows a static file; right pane is an interactive file browser.
+Two panes split evenly by a vertical separator. Browser on the left, file preview
+on the right. Used when a directory on disk blocks file creation.
 
-- Left pane: content of a file (scrollable independently).
-- Right pane: file browser rooted at a given directory.
-  - Lists directory entries (files, subdirectories, symlinks).
-  - Enter on a directory: descend into it.
-  - Enter on a file: display its content in-place (fills the right pane).
-  - Esc while viewing a file: return to the directory listing.
-  - Esc at the root directory: no-op (stays in explorer).
-- **Tab**: switch focus between left and right panes. The focused pane responds to scroll/navigation keys.
-
-### Single-Pane Mode
-
-Full-terminal display of a single file.
-
-- A header line is displayed at the top, supplied by the caller.
-- The file content fills the remainder of the terminal.
-
-## Header
-
-Each pane has a single header line at the top, visually distinct from content (inverted colors).
-
-- **File pane:** Displays the absolute file path.
-- **File explorer pane:** Displays the current working directory (absolute path). Updates as the user navigates subdirectories.
-- **Single-pane mode:** The caller-supplied header is displayed. If not supplied, the file path is displayed.
-- **Symlink:** The header appends ` → /link/target` to the file path (e.g., `/home/user/cfg → /etc/cfg`). The content area shows the resolved target's content (symlink is followed for display only; the filesystem is not modified).
+**Header:** `Directory <dir> blocks file creation`
+**Content:**
+- **Left pane (browser):** Directory listing with `..` entry for parent.
+  Entries sorted: directories first, files second, alphabetically within groups.
+  - Directories shown as `name/`
+  - Symlinks shown as `name -> /target`
+  - Selected entry marked with `> ` prefix. Cursor only visible when browser
+    has focus.
+  - `Enter`: descend into directory, or open file for preview.
+  - Directory preview opens a file viewer in-place, replacing the listing.
+  - `Esc` from file preview: return to directory listing.
+  - `Esc` from listing: go to parent directory (no-op at root).
+- **Right pane (preview):** Source file content (scrollable independently).
+- **Tab**: toggle focus between browser and preview panes.
+  The focused pane responds to scroll keys.
+**Footer:** `{Focus}  {pos}/{max}` — focus label + position:
+- Browser (Dir state): cursor index / entry count
+- Browser (File state): scroll position / max of opened file
+- Preview: scroll position / max of source file
 
 ## Rendering
 
-- Plain text. No syntax highlighting.
-- No line numbers.
-- Lines longer than the available pane width are truncated (no wrapping).
+- Plain text. No syntax highlighting. No line numbers.
+- Lines longer than the available column width are truncated (no wrapping).
 - Empty files display as an empty line.
+- Files are read via line-offset index — only visible lines are read per frame.
+  Full file content is not held in memory.
+
+## Headers and Footers
+
+- One full-width header line per mode.
+- One full-width footer line per mode.
+- Footer row collapses to zero height when content fits entirely in the viewport
+  and no status information would be displayed.
 
 ## Keybindings
 
 | Key | Action |
 |-----|--------|
-| Arrow Up / k | Scroll up / move selection up |
-| Arrow Down / j | Scroll down / move selection down |
+| Arrow Up / k | Scroll up / move cursor up |
+| Arrow Down / j | Scroll down / move cursor down |
 | Page Up / Ctrl+B | Page up |
 | Page Down / Ctrl+F | Page down |
 | Home / g | Jump to top |
 | End / G | Jump to bottom |
-| Tab | (Explorer mode) Switch focus between panes |
-| Enter | (Explorer mode) Enter directory / open file |
-| Esc | (Explorer mode) Go back (file view → listing, subdir → parent) |
 | q | Quit pager |
 | Ctrl+C | Quit pager |
+| Tab | (Explorer) Switch focus between panes |
+| Enter | (Explorer) Enter directory / open file |
+| Esc | (Explorer) Go back (file view → listing, subdir → parent) |
 
-### Context-Specific Behavior
-
-- In side-by-side and single-pane modes, j/k scroll the content.
-- In explorer mode with focus on the right pane, j/k move the selection cursor.
-- In explorer mode with focus on the left pane, j/k scroll the source file content.
+All modes respond to scroll keys (j/k, arrows, PgUp/PgDn, Home/End).
+Tab, Enter, Esc dispatch to the mode via trait methods and are no-ops in View
+and Diff modes. 
 
 ## Edge Cases
 
-- **Terminal resize:** Re-render layout, preserving scroll positions as closely as possible.
-- **Long lines:** Truncated to pane width. No wrapping.
-- **File error:** If a file cannot be read, display an error message in the affected pane (e.g. `Error: <message>`).
-- **Very large files:** Load and display content; performance is implementation-defined.
+- **Terminal resize:** Re-render layout, preserving scroll positions as closely
+  as possible.
+- **Long lines:** Truncated to column width. No wrapping.
+- **File error:** `FileViewer` propagates I/O error up to `run()`, which returns
+  `Err`.
+- **Large files:** Line-offset index built once (~8 bytes per line). Only visible
+  lines read per frame via seek + read. No whole-file memory.
+- **Non-TTY:** `run()` returns `Ok(())` immediately if stdin is not a terminal.
+  The `diff` option is not offered in the collision prompt when no TTY.
