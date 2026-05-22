@@ -17,7 +17,7 @@ impl SinglePane {
         let viewer = FileViewer::new(path)?;
         Ok(Self {
             viewer,
-            header: String::new(),
+            header: format!("File {} blocks directory creation", path.display()),
         })
     }
 }

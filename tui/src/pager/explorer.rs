@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{List, ListItem, ListState, Paragraph},
 };
 
-use super::{PagerMode, arrow_str, cursor_char, file_viewer::FileViewer, header, splitter_char};
+use super::{PagerMode, arrow_char, cursor_char, file_viewer::FileViewer, header, splitter_char};
 
 struct DirEntry {
     name: String,
@@ -15,13 +15,13 @@ struct DirEntry {
     symlink_target: Option<String>,
 }
 
-enum RightState {
-    Browser {
+enum BrowseState {
+    Dir {
         entries: Vec<DirEntry>,
         cursor: usize,
         path: PathBuf,
     },
-    FileView {
+    File {
         viewer: FileViewer,
         path: PathBuf,
     },
@@ -29,38 +29,40 @@ enum RightState {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Focus {
-    Left,
-    Right,
+    Browser,
+    Preview,
 }
 
 impl Focus {
     fn toggle(self) -> Self {
         match self {
-            Focus::Left => Focus::Right,
-            Focus::Right => Focus::Left,
+            Focus::Browser => Focus::Preview,
+            Focus::Preview => Focus::Browser,
         }
     }
 }
 
 pub struct Explorer {
-    left: FileViewer,
-    right_state: RightState,
+    preview: FileViewer,
+    browser: BrowseState,
     focus: Focus,
+    header: String,
 }
 
 impl Explorer {
-    pub fn new(source: &std::path::Path, target: &std::path::Path) -> io::Result<Self> {
-        let left = FileViewer::new(source)?;
-        let entries = read_entries(target)?;
-        let right_state = RightState::Browser {
+    pub fn new(file: &std::path::Path, dir: &std::path::Path) -> io::Result<Self> {
+        let preview = FileViewer::new(file)?;
+        let entries = read_entries(dir)?;
+        let browser = BrowseState::Dir {
             entries,
             cursor: 0,
-            path: target.to_path_buf(),
+            path: dir.to_path_buf(),
         };
         Ok(Self {
-            left,
-            right_state,
-            focus: Focus::Left,
+            preview,
+            browser,
+            focus: Focus::Browser,
+            header: format!("Directory {} blocks file creation", dir.display()),
         })
     }
 }
@@ -114,7 +116,7 @@ impl PagerMode for Explorer {
             [c[0], c[1]]
         };
 
-        header::render(frame, header_area, "");
+        header::render(frame, header_area, &self.header);
 
         let columns = Layout::default()
             .direction(Direction::Horizontal)
@@ -133,8 +135,8 @@ impl PagerMode for Explorer {
             splitter_area,
         );
 
-        match &mut self.right_state {
-            RightState::Browser {
+        match &mut self.browser {
+            BrowseState::Dir {
                 entries,
                 cursor,
                 path: _,
@@ -146,7 +148,7 @@ impl PagerMode for Explorer {
                         .iter()
                         .map(|e| {
                             let display = match &e.symlink_target {
-                                Some(t) => format!("{} {} {}", e.name, arrow_str(), t),
+                                Some(t) => format!("{} {} {}", e.name, arrow_char(), t),
                                 None if e.is_dir => format!("{}/", e.name),
                                 None => e.name.clone(),
                             };
@@ -155,7 +157,7 @@ impl PagerMode for Explorer {
                         .collect();
 
                     let list = List::new(items)
-                        .highlight_symbol(if self.focus == Focus::Left {
+                        .highlight_symbol(if self.focus == Focus::Browser {
                             cursor_char()
                         } else {
                             "  "
@@ -170,88 +172,88 @@ impl PagerMode for Explorer {
                     frame.render_stateful_widget(list, browser_area, &mut state);
                 }
             }
-            RightState::FileView { viewer, .. } => {
+            BrowseState::File { viewer, .. } => {
                 viewer.render(frame, browser_area);
             }
         }
 
-        self.left.render(frame, preview_area);
+        self.preview.render(frame, preview_area);
     }
 
     fn scroll_up(&mut self, n: usize) {
         match self.focus {
-            Focus::Left => match &mut self.right_state {
-                RightState::Browser { cursor, .. } => {
+            Focus::Browser => match &mut self.browser {
+                BrowseState::Dir { cursor, .. } => {
                     *cursor = cursor.saturating_sub(n);
                 }
-                RightState::FileView { viewer, .. } => viewer.scroll_up(n),
+                BrowseState::File { viewer, .. } => viewer.scroll_up(n),
             },
-            Focus::Right => self.left.scroll_up(n),
+            Focus::Preview => self.preview.scroll_up(n),
         }
     }
 
     fn scroll_down(&mut self, n: usize, viewport_h: usize) {
         match self.focus {
-            Focus::Left => match &mut self.right_state {
-                RightState::Browser {
+            Focus::Browser => match &mut self.browser {
+                BrowseState::Dir {
                     entries, cursor, ..
                 } => {
                     let max = entries.len().saturating_sub(1);
                     *cursor = (*cursor + n).min(max);
                 }
-                RightState::FileView { viewer, .. } => viewer.scroll_down(n, viewport_h),
+                BrowseState::File { viewer, .. } => viewer.scroll_down(n, viewport_h),
             },
-            Focus::Right => self.left.scroll_down(n, viewport_h),
+            Focus::Preview => self.preview.scroll_down(n, viewport_h),
         }
     }
 
     fn scroll_to_top(&mut self) {
         match self.focus {
-            Focus::Left => match &mut self.right_state {
-                RightState::Browser { cursor, .. } => *cursor = 0,
-                RightState::FileView { viewer, .. } => viewer.scroll_to_top(),
+            Focus::Browser => match &mut self.browser {
+                BrowseState::Dir { cursor, .. } => *cursor = 0,
+                BrowseState::File { viewer, .. } => viewer.scroll_to_top(),
             },
-            Focus::Right => self.left.scroll_to_top(),
+            Focus::Preview => self.preview.scroll_to_top(),
         }
     }
 
     fn scroll_to_bottom(&mut self, viewport_h: usize) {
         match self.focus {
-            Focus::Left => match &mut self.right_state {
-                RightState::Browser {
+            Focus::Browser => match &mut self.browser {
+                BrowseState::Dir {
                     entries, cursor, ..
                 } => {
                     *cursor = entries.len().saturating_sub(1);
                 }
-                RightState::FileView { viewer, .. } => viewer.scroll_to_bottom(viewport_h),
+                BrowseState::File { viewer, .. } => viewer.scroll_to_bottom(viewport_h),
             },
-            Focus::Right => self.left.scroll_to_bottom(viewport_h),
+            Focus::Preview => self.preview.scroll_to_bottom(viewport_h),
         }
     }
 
     fn on_esc(&mut self) {
-        if self.focus != Focus::Left {
+        if self.focus != Focus::Browser {
             return;
         }
-        match &self.right_state {
-            RightState::Browser { path, .. } => {
+        match &self.browser {
+            BrowseState::Dir { path, .. } => {
                 if let Some(parent) = path.parent()
                     && let Ok(entries) = read_entries(parent)
                 {
-                    self.right_state = RightState::Browser {
+                    self.browser = BrowseState::Dir {
                         entries,
                         cursor: 0,
                         path: parent.to_path_buf(),
                     };
                 }
             }
-            RightState::FileView { path, .. } => {
+            BrowseState::File { path, .. } => {
                 let parent = path
                     .parent()
                     .map(|p| p.to_path_buf())
                     .unwrap_or_else(|| path.clone());
                 if let Ok(entries) = read_entries(&parent) {
-                    self.right_state = RightState::Browser {
+                    self.browser = BrowseState::Dir {
                         entries,
                         cursor: 0,
                         path: parent,
@@ -262,11 +264,11 @@ impl PagerMode for Explorer {
     }
 
     fn on_enter(&mut self) {
-        if self.focus != Focus::Left {
+        if self.focus != Focus::Browser {
             return;
         }
-        let (entry, path) = match &self.right_state {
-            RightState::Browser {
+        let (entry, path) = match &self.browser {
+            BrowseState::Dir {
                 entries,
                 cursor,
                 path,
@@ -276,14 +278,14 @@ impl PagerMode for Explorer {
                 };
                 (entry, path.clone())
             }
-            RightState::FileView { .. } => return,
+            BrowseState::File { .. } => return,
         };
 
         if entry.name == ".." {
             if let Some(parent) = path.parent()
                 && let Ok(entries) = read_entries(parent)
             {
-                self.right_state = RightState::Browser {
+                self.browser = BrowseState::Dir {
                     entries,
                     cursor: 0,
                     path: parent.to_path_buf(),
@@ -304,7 +306,7 @@ impl PagerMode for Explorer {
 
         if is_dir {
             if let Ok(entries) = read_entries(&full_path) {
-                self.right_state = RightState::Browser {
+                self.browser = BrowseState::Dir {
                     entries,
                     cursor: 0,
                     path: full_path,
@@ -312,7 +314,7 @@ impl PagerMode for Explorer {
             }
         } else {
             if let Ok(viewer) = FileViewer::new(&full_path) {
-                self.right_state = RightState::FileView {
+                self.browser = BrowseState::File {
                     viewer,
                     path: full_path,
                 };

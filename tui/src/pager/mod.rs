@@ -176,7 +176,7 @@ fn splitter_char() -> &'static str {
     if is_unicode() { "│" } else { "|" }
 }
 
-fn arrow_str() -> &'static str {
+fn arrow_char() -> &'static str {
     if is_unicode() { "→" } else { "->" }
 }
 

@@ -14,6 +14,7 @@ use ratatui::{
 };
 use similar::{DiffOp, TextDiff};
 
+
 use super::{PagerMode, Scroll, header, offsets_from_bytes, splitter_char};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -25,8 +26,8 @@ enum DiffTag {
 }
 
 struct DiffPair {
-    left_idx: Option<usize>,
-    right_idx: Option<usize>,
+    old_idx: Option<usize>,
+    new_idx: Option<usize>,
     tag: DiffTag,
 }
 
@@ -74,9 +75,10 @@ fn strip_newline(buf: &mut Vec<u8>) {
 
 pub struct SideBySide {
     pairs: Vec<DiffPair>,
-    left: FileIndex,
-    right: FileIndex,
+    old: FileIndex,
+    new: FileIndex,
     scroll: Scroll,
+    header: String,
     buf: Vec<u8>,
 }
 
@@ -94,8 +96,8 @@ fn compute_pairs_from_ops(old: &str, new: &str) -> Vec<DiffPair> {
             } => {
                 for i in 0..len {
                     pairs.push(DiffPair {
-                        left_idx: Some(old_index + i),
-                        right_idx: Some(new_index + i),
+                        old_idx: Some(old_index + i),
+                        new_idx: Some(new_index + i),
                         tag: DiffTag::Equal,
                     });
                 }
@@ -105,8 +107,8 @@ fn compute_pairs_from_ops(old: &str, new: &str) -> Vec<DiffPair> {
             } => {
                 for i in 0..old_len {
                     pairs.push(DiffPair {
-                        left_idx: Some(old_index + i),
-                        right_idx: None,
+                        old_idx: Some(old_index + i),
+                        new_idx: None,
                         tag: DiffTag::Delete,
                     });
                 }
@@ -116,8 +118,8 @@ fn compute_pairs_from_ops(old: &str, new: &str) -> Vec<DiffPair> {
             } => {
                 for i in 0..new_len {
                     pairs.push(DiffPair {
-                        left_idx: None,
-                        right_idx: Some(new_index + i),
+                        old_idx: None,
+                        new_idx: Some(new_index + i),
                         tag: DiffTag::Insert,
                     });
                 }
@@ -130,8 +132,8 @@ fn compute_pairs_from_ops(old: &str, new: &str) -> Vec<DiffPair> {
             } => {
                 let max = old_len.max(new_len);
                 for i in 0..max {
-                    let left_idx = (i < old_len).then_some(old_index + i);
-                    let right_idx = (i < new_len).then_some(new_index + i);
+                    let old_idx = (i < old_len).then_some(old_index + i);
+                    let new_idx = (i < new_len).then_some(new_index + i);
                     let tag = match (i < old_len, i < new_len) {
                         (true, true) => DiffTag::Change,
                         (true, false) => DiffTag::Delete,
@@ -139,8 +141,8 @@ fn compute_pairs_from_ops(old: &str, new: &str) -> Vec<DiffPair> {
                         (false, false) => unreachable!(),
                     };
                     pairs.push(DiffPair {
-                        left_idx,
-                        right_idx,
+                        old_idx,
+                        new_idx,
                         tag,
                     });
                 }
@@ -152,34 +154,35 @@ fn compute_pairs_from_ops(old: &str, new: &str) -> Vec<DiffPair> {
 }
 
 impl SideBySide {
-    pub fn new(path1: &Path, path2: &Path) -> io::Result<Self> {
-        let left_file = File::open(path1)?;
-        let right_file = File::open(path2)?;
+    pub fn new(old: &Path, new: &Path) -> io::Result<Self> {
+        let old_file = File::open(old)?;
+        let new_file = File::open(new)?;
 
-        let left_map = unsafe { Mmap::map(&left_file)? };
-        let right_map = unsafe { Mmap::map(&right_file)? };
+        let old_map = unsafe { Mmap::map(&old_file)? };
+        let new_map = unsafe { Mmap::map(&new_file)? };
 
-        let left_str = std::str::from_utf8(&left_map)
+        let old_str = std::str::from_utf8(&old_map)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        let right_str = std::str::from_utf8(&right_map)
+        let new_str = std::str::from_utf8(&new_map)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        let pairs = compute_pairs_from_ops(left_str, right_str);
+        let pairs = compute_pairs_from_ops(old_str, new_str);
 
-        let left_offsets = offsets_from_bytes(left_map.as_ref());
-        let right_offsets = offsets_from_bytes(right_map.as_ref());
+        let old_offsets = offsets_from_bytes(old_map.as_ref());
+        let new_offsets = offsets_from_bytes(new_map.as_ref());
 
-        drop(left_map);
-        drop(right_map);
+        drop(old_map);
+        drop(new_map);
 
-        let left = FileIndex::new(BufReader::new(left_file), left_offsets);
-        let right = FileIndex::new(BufReader::new(right_file), right_offsets);
+        let old_fi = FileIndex::new(BufReader::new(old_file), old_offsets);
+        let new_fi = FileIndex::new(BufReader::new(new_file), new_offsets);
 
         Ok(Self {
             pairs,
-            left,
-            right,
+            old: old_fi,
+            new: new_fi,
             scroll: Scroll::new(),
+            header: format!("Replace {} with {}", old.display(), new.display()),
             buf: Vec::new(),
         })
     }
@@ -206,28 +209,28 @@ fn read_content(fi: &mut FileIndex, idx: Option<usize>, buf: &mut Vec<u8>) -> St
 
 fn pair_lines(
     pair: &DiffPair,
-    left: &mut FileIndex,
-    right: &mut FileIndex,
+    old_fi: &mut FileIndex,
+    new_fi: &mut FileIndex,
     buf: &mut Vec<u8>,
 ) -> (Line<'static>, Line<'static>) {
-    let left_content = read_content(left, pair.left_idx, buf);
-    let right_content = read_content(right, pair.right_idx, buf);
+    let old_content = read_content(old_fi, pair.old_idx, buf);
+    let new_content = read_content(new_fi, pair.new_idx, buf);
 
-    let left_line = match (pair.tag, pair.left_idx) {
-        (DiffTag::Delete | DiffTag::Change, Some(_)) => styled_cell('-', left_content, Color::Red),
-        (DiffTag::Equal, Some(_)) => Line::from(format!(" {}", &left_content)),
+    let old_line = match (pair.tag, pair.old_idx) {
+        (DiffTag::Delete | DiffTag::Change, Some(_)) => styled_cell('-', old_content, Color::Red),
+        (DiffTag::Equal, Some(_)) => Line::from(format!(" {}", &old_content)),
         _ => Line::from(""),
     };
 
-    let right_line = match (pair.tag, pair.right_idx) {
+    let new_line = match (pair.tag, pair.new_idx) {
         (DiffTag::Insert | DiffTag::Change, Some(_)) => {
-            styled_cell('+', right_content, Color::Green)
+            styled_cell('+', new_content, Color::Green)
         }
-        (DiffTag::Equal, Some(_)) => Line::from(format!(" {}", &right_content)),
+        (DiffTag::Equal, Some(_)) => Line::from(format!(" {}", &new_content)),
         _ => Line::from(""),
     };
 
-    (left_line, right_line)
+    (old_line, new_line)
 }
 
 impl PagerMode for SideBySide {
@@ -240,7 +243,7 @@ impl PagerMode for SideBySide {
             [c[0], c[1]]
         };
 
-        header::render(frame, header_area, "");
+        header::render(frame, header_area, &self.header);
 
         let visible_h = content_area.height as usize;
         self.scroll.clamp(self.pairs.len(), visible_h);
@@ -257,9 +260,9 @@ impl PagerMode for SideBySide {
                 Constraint::Ratio(1, 2),
             ])
             .split(content_area);
-        let left_area = columns[0];
+        let old_area = columns[0];
         let splitter_area = columns[1];
-        let right_area = columns[2];
+        let new_area = columns[2];
 
         frame.render_widget(
             Paragraph::new(format!("{}\n", splitter_char()).repeat(splitter_area.height as usize)),
@@ -272,14 +275,14 @@ impl PagerMode for SideBySide {
             let pair = &self.pairs[pair_idx];
             let row_y = content_area.y + row as u16;
 
-            let (left_line, right_line) =
-                pair_lines(pair, &mut self.left, &mut self.right, &mut self.buf);
+            let (old_line, new_line) =
+                pair_lines(pair, &mut self.old, &mut self.new, &mut self.buf);
 
-            let left_rect = Rect::new(left_area.x, row_y, left_area.width, 1);
-            frame.render_widget(left_line, left_rect);
+            let old_rect = Rect::new(old_area.x, row_y, old_area.width, 1);
+            frame.render_widget(old_line, old_rect);
 
-            let right_rect = Rect::new(right_area.x, row_y, right_area.width, 1);
-            frame.render_widget(right_line, right_rect);
+            let new_rect = Rect::new(new_area.x, row_y, new_area.width, 1);
+            frame.render_widget(new_line, new_rect);
         }
     }
 
@@ -331,23 +334,23 @@ mod tests {
     #[test_case("",          "",          "",                 "";                 "both empty")]
     #[test_case("",          "x\n",       "",               "+x";             "empty old")]
     #[test_case("x\n",       "",          "-x",             "";               "empty new")]
-    fn diff(old: &str, new: &str, expected_left: &str, expected_right: &str) {
+    fn diff(old: &str, new: &str, expected_old: &str, expected_new: &str) {
         let pairs = compute_pairs_from_ops(old, new);
 
-        let (_tmp1, mut left) = file_index_from_str(old);
-        let (_tmp2, mut right) = file_index_from_str(new);
+        let (_tmp1, mut old_fi) = file_index_from_str(old);
+        let (_tmp2, mut new_fi) = file_index_from_str(new);
 
         let mut buf = Vec::new();
-        let mut actual_left = Vec::new();
-        let mut actual_right = Vec::new();
+        let mut actual_old = Vec::new();
+        let mut actual_new = Vec::new();
 
         for pair in &pairs {
-            let (l, r) = pair_lines(pair, &mut left, &mut right, &mut buf);
-            actual_left.push(spans_to_string(&l));
-            actual_right.push(spans_to_string(&r));
+            let (l, r) = pair_lines(pair, &mut old_fi, &mut new_fi, &mut buf);
+            actual_old.push(spans_to_string(&l));
+            actual_new.push(spans_to_string(&r));
         }
 
-        assert_eq!(actual_left.join("\n"), expected_left);
-        assert_eq!(actual_right.join("\n"), expected_right);
+        assert_eq!(actual_old.join("\n"), expected_old);
+        assert_eq!(actual_new.join("\n"), expected_new);
     }
 }
