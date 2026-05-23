@@ -33,11 +33,21 @@ impl HotKey for Fruits {
 
 #[ignore]
 #[test]
-fn main() {
+fn basic() {
     let select = SelectPrompt::<Fruits>::new()
         .prompt("What fruit? ")
+        .help()
         .interact()
         .unwrap();
 
     println!("{select}");
+}
+
+#[ignore]
+#[test]
+fn long_msg() {
+    SelectPrompt::<Fruits>::new()
+        .prompt("Very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very very long message. ")
+        .interact()
+        .unwrap();
 }

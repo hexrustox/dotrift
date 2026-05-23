@@ -6,7 +6,7 @@ use tui::{
     prompt::{HotKey, SelectPrompt},
 };
 
-use crate::command::util::PathLiteral;
+use crate::{command::util::PathLiteral, output::print_warn};
 
 #[derive(Default, Clone, Copy, PartialEq, EnumIter)]
 pub enum CollisionOptions {
@@ -71,19 +71,28 @@ pub fn prompt_collision(
             source: s,
             target: t,
         },
-        _ => unreachable!(),
+        _ => {
+            if cfg!(test) {
+                unreachable!()
+            } else {
+                return CollisionOptions::default();
+            }
+        }
     };
 
     loop {
         match SelectPrompt::new().prompt(&msg).interact() {
             Ok(CollisionOptions::Diff) => {
-                tui::pager::run(arg.clone());
+                if let Err(e) = tui::pager::run(arg.clone()) {
+                    print_warn(format!("Failed to open pager: {e}, skipping"));
+                }
             }
             Ok(o) => {
                 return o;
             }
-            Err(_) => {
-                return CollisionOptions::default();
+            Err(e) => {
+                print_warn(format!("Failed to display prompt: {e}, skipping"));
+                return CollisionOptions::Skip;
             }
         }
     }
