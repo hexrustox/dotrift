@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io::{self, BufRead, BufReader, Seek, SeekFrom},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use memmap2::Mmap;
@@ -73,7 +73,7 @@ pub struct Diff {
     old: FileIndex,
     new: FileIndex,
     scroll: Scroll,
-    path: String,
+    path: PathBuf,
     buf: Vec<u8>,
     added: usize,
     removed: usize,
@@ -195,7 +195,7 @@ impl Diff {
             old: old_fi,
             new: new_fi,
             scroll: Scroll::new(),
-            path: old.to_string_lossy().into_owned(),
+            path: old.to_path_buf(),
             buf: Vec::new(),
             added,
             removed,
@@ -308,7 +308,6 @@ impl PagerMode for Diff {
                 self.removed
             ),
             &self.path,
-            "h help",
         );
     }
 

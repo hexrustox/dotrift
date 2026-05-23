@@ -11,7 +11,7 @@ use ratatui::{
     widgets::{List, ListItem, ListState, Paragraph},
 };
 
-use crate::ls_colors::LsColors;
+use crate::{ls_colors::LsColors, pager::compact_path};
 
 use super::{
     PagerMode, arrow_char, cursor_char, file_viewer::FileViewer, footer, scroll_status,
@@ -70,7 +70,7 @@ pub struct Explorer {
     preview: FileViewer,
     browser: BrowseState,
     focus: Focus,
-    path: String,
+    path: PathBuf,
     viewport_h: usize,
     ls_colors: LsColors,
 }
@@ -88,7 +88,7 @@ impl Explorer {
             preview,
             browser,
             focus: Focus::Browser,
-            path: dir.to_string_lossy().into_owned(),
+            path: dir.to_path_buf(),
             viewport_h: 0,
             ls_colors: LsColors::new(),
         })
@@ -188,7 +188,10 @@ impl PagerMode for Explorer {
             let cwd_area = cwd_layout[0];
             browser_area = cwd_layout[1];
 
-            frame.render_widget(Line::from(path.to_string_lossy()), cwd_area);
+            frame.render_widget(
+                Line::from(compact_path(path, cwd_area.width as usize)),
+                cwd_area,
+            );
         }
 
         match &mut self.browser {
@@ -270,7 +273,7 @@ impl PagerMode for Explorer {
                 )
             }
         };
-        footer::render(frame, footer_area, &status_text, &self.path, "h help");
+        footer::render(frame, footer_area, &status_text, &self.path);
     }
 
     fn viewport_height(&self) -> usize {

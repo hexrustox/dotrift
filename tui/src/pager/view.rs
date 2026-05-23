@@ -1,4 +1,7 @@
-use std::{io, path::Path};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 use ratatui::{
     Frame,
@@ -9,7 +12,7 @@ use super::{PagerMode, file_viewer::FileViewer, footer, scroll_status};
 
 pub struct View {
     viewer: FileViewer,
-    path: String,
+    path: PathBuf,
     viewport_h: usize,
 }
 
@@ -18,7 +21,7 @@ impl View {
         let viewer = FileViewer::new(path)?;
         Ok(Self {
             viewer,
-            path: path.to_string_lossy().into_owned(),
+            path: path.to_path_buf(),
             viewport_h: 0,
         })
     }
@@ -44,7 +47,7 @@ impl PagerMode for View {
         } else {
             String::new()
         };
-        footer::render(frame, footer_area, &status, &self.path, "h help");
+        footer::render(frame, footer_area, &status, &self.path);
     }
 
     fn viewport_height(&self) -> usize {
