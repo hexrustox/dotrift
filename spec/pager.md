@@ -53,6 +53,9 @@ on the right. Used when a directory on disk blocks file creation.
     file for in-place preview.
   - `Esc` from file preview: return to directory listing.
   - `Esc` from listing: go to parent directory (no-op at root).
+- **Error state:** When entering a directory or opening a file fails (e.g.
+  permission denied), the browser pane displays the error message and the footer
+  shows `Error`. Press `Esc` to return to the previous directory.
 - **Right pane (preview):** Source file content (scrollable independently).
 - **Tab**: toggle focus between browser and preview panes. The focused pane
   responds to scroll keys.
@@ -60,6 +63,7 @@ on the right. Used when a directory on disk blocks file creation.
 focus-aware status right-aligned:
 - Browser (directory listing): `Browser (N/M)` — 1-indexed cursor over entry count.
 - Browser (file preview): `Browser (pos/max)` — scroll position.
+- Browser (error): `Browser` — error message displayed in pane.
 - Preview: `Preview (pos/max)` — scroll position.
 
 ## Rendering

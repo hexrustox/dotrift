@@ -1,4 +1,8 @@
-use std::{fs, io, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{
+    fs, io,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+};
 
 use ratatui::{
     Frame,
@@ -32,6 +36,19 @@ enum BrowseState {
         viewer: FileViewer,
         path: PathBuf,
     },
+    Error {
+        message: String,
+        prev_path: PathBuf,
+    },
+}
+
+impl BrowseState {
+    fn current_path(&self) -> &PathBuf {
+        match self {
+            BrowseState::Dir { path, .. } | BrowseState::File { path, .. } => path,
+            BrowseState::Error { prev_path, .. } => prev_path,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -59,7 +76,7 @@ pub struct Explorer {
 }
 
 impl Explorer {
-    pub fn new(file: &std::path::Path, dir: &std::path::Path) -> io::Result<Self> {
+    pub fn new(file: &Path, dir: &Path) -> io::Result<Self> {
         let preview = FileViewer::new(file)?;
         let entries = read_entries(dir)?;
         let browser = BrowseState::Dir {
@@ -76,9 +93,27 @@ impl Explorer {
             ls_colors: LsColors::new(),
         })
     }
+
+    fn navigate_to(&mut self, target: PathBuf, fallback: PathBuf) {
+        match read_entries(&target) {
+            Ok(entries) => {
+                self.browser = BrowseState::Dir {
+                    entries,
+                    cursor: 0,
+                    path: target,
+                };
+            }
+            Err(e) => {
+                self.browser = BrowseState::Error {
+                    message: e.to_string(),
+                    prev_path: fallback,
+                };
+            }
+        }
+    }
 }
 
-fn read_entries(path: &std::path::Path) -> io::Result<Vec<DirEntry>> {
+fn read_entries(path: &Path) -> io::Result<Vec<DirEntry>> {
     let mut entries = Vec::new();
     for entry in fs::read_dir(path)? {
         let entry = entry?;
@@ -114,21 +149,6 @@ fn read_entries(path: &std::path::Path) -> io::Result<Vec<DirEntry>> {
             .reverse()
             .then_with(|| a.name.cmp(&b.name))
     });
-    if path.parent().is_some() {
-        let mode = fs::metadata(path.join(".."))
-            .ok()
-            .map(|m| m.permissions().mode());
-        entries.insert(
-            0,
-            DirEntry {
-                name: "..".to_string(),
-                is_dir: true,
-                symlink_target: None,
-                mode,
-                is_broken: false,
-            },
-        );
-    }
     Ok(entries)
 }
 
@@ -177,41 +197,48 @@ impl PagerMode for Explorer {
                 cursor,
                 path: _,
             } => {
-                let items: Vec<ListItem> = entries
-                    .iter()
-                    .map(|e| {
-                        let display = match &e.symlink_target {
-                            Some(t) => format!("{} {} {}", e.name, arrow_char(), t),
-                            None if e.is_dir => format!("{}/", e.name),
-                            None => e.name.clone(),
-                        };
-                        let is_symlink = e.symlink_target.is_some();
-                        let style = self.ls_colors.style_for(
-                            &e.name,
-                            e.mode,
-                            e.is_dir,
-                            is_symlink,
-                            e.is_broken,
-                        );
-                        ListItem::new(display).style(style)
-                    })
-                    .collect();
-
-                let list = List::new(items).highlight_symbol(if self.focus == Focus::Browser {
-                    cursor_char()
+                if entries.is_empty() {
+                    frame.render_widget(Paragraph::new("(empty)"), browser_area);
                 } else {
-                    "  "
-                });
+                    let items: Vec<ListItem> = entries
+                        .iter()
+                        .map(|e| {
+                            let display = match &e.symlink_target {
+                                Some(t) => format!("{} {} {}", e.name, arrow_char(), t),
+                                None if e.is_dir => format!("{}/", e.name),
+                                None => e.name.clone(),
+                            };
+                            let is_symlink = e.symlink_target.is_some();
+                            let style = self.ls_colors.style_for(
+                                &e.name,
+                                e.mode,
+                                e.is_dir,
+                                is_symlink,
+                                e.is_broken,
+                            );
+                            ListItem::new(display).style(style)
+                        })
+                        .collect();
 
-                let mut state = ListState::default();
-                let max_cursor = entries.len().saturating_sub(1);
-                *cursor = (*cursor).min(max_cursor);
-                state.select(Some(*cursor));
+                    let list = List::new(items).highlight_symbol(if self.focus == Focus::Browser {
+                        cursor_char()
+                    } else {
+                        "  "
+                    });
 
-                frame.render_stateful_widget(list, browser_area, &mut state);
+                    let mut state = ListState::default();
+                    let max_cursor = entries.len().saturating_sub(1);
+                    *cursor = (*cursor).min(max_cursor);
+                    state.select(Some(*cursor));
+
+                    frame.render_stateful_widget(list, browser_area, &mut state);
+                }
             }
             BrowseState::File { viewer, .. } => {
                 viewer.render(frame, browser_area);
+            }
+            BrowseState::Error { message, .. } => {
+                frame.render_widget(Paragraph::new(message.as_str()), browser_area);
             }
         }
 
@@ -232,6 +259,7 @@ impl PagerMode for Explorer {
                         scroll_status(viewer.scroll_pos(), total, vp_h)
                     )
                 }
+                BrowseState::Error { .. } => "Browser".to_string(),
             },
             Focus::Preview => {
                 let total = self.preview.lines_count();
@@ -256,6 +284,7 @@ impl PagerMode for Explorer {
                     *cursor = cursor.saturating_sub(n);
                 }
                 BrowseState::File { viewer, .. } => viewer.scroll_up(n),
+                BrowseState::Error { .. } => {}
             },
             Focus::Preview => self.preview.scroll_up(n),
         }
@@ -271,6 +300,7 @@ impl PagerMode for Explorer {
                     *cursor = (*cursor + n).min(max);
                 }
                 BrowseState::File { viewer, .. } => viewer.scroll_down(n, viewport_h),
+                BrowseState::Error { .. } => {}
             },
             Focus::Preview => self.preview.scroll_down(n, viewport_h),
         }
@@ -281,6 +311,7 @@ impl PagerMode for Explorer {
             Focus::Browser => match &mut self.browser {
                 BrowseState::Dir { cursor, .. } => *cursor = 0,
                 BrowseState::File { viewer, .. } => viewer.scroll_to_top(),
+                BrowseState::Error { .. } => {}
             },
             Focus::Preview => self.preview.scroll_to_top(),
         }
@@ -295,6 +326,7 @@ impl PagerMode for Explorer {
                     *cursor = entries.len().saturating_sub(1);
                 }
                 BrowseState::File { viewer, .. } => viewer.scroll_to_bottom(viewport_h),
+                BrowseState::Error { .. } => {}
             },
             Focus::Preview => self.preview.scroll_to_bottom(viewport_h),
         }
@@ -304,31 +336,9 @@ impl PagerMode for Explorer {
         if self.focus != Focus::Browser {
             return;
         }
-        match &self.browser {
-            BrowseState::Dir { path, .. } => {
-                if let Some(parent) = path.parent()
-                    && let Ok(entries) = read_entries(parent)
-                {
-                    self.browser = BrowseState::Dir {
-                        entries,
-                        cursor: 0,
-                        path: parent.to_path_buf(),
-                    };
-                }
-            }
-            BrowseState::File { path, .. } => {
-                let parent = path
-                    .parent()
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|| path.clone());
-                if let Ok(entries) = read_entries(&parent) {
-                    self.browser = BrowseState::Dir {
-                        entries,
-                        cursor: 0,
-                        path: parent,
-                    };
-                }
-            }
+        let path = self.browser.current_path().clone();
+        if let Some(parent) = path.parent() {
+            self.navigate_to(parent.to_path_buf(), path);
         }
     }
 
@@ -348,17 +358,12 @@ impl PagerMode for Explorer {
                 (entry, path.clone())
             }
             BrowseState::File { .. } => return,
+            BrowseState::Error { .. } => return,
         };
 
         if entry.name == ".." {
-            if let Some(parent) = path.parent()
-                && let Ok(entries) = read_entries(parent)
-            {
-                self.browser = BrowseState::Dir {
-                    entries,
-                    cursor: 0,
-                    path: parent.to_path_buf(),
-                };
+            if let Some(parent) = path.parent() {
+                self.navigate_to(parent.to_path_buf(), path);
             }
             return;
         }
@@ -374,19 +379,21 @@ impl PagerMode for Explorer {
         };
 
         if is_dir {
-            if let Ok(entries) = read_entries(&full_path) {
-                self.browser = BrowseState::Dir {
-                    entries,
-                    cursor: 0,
-                    path: full_path,
-                };
-            }
+            self.navigate_to(full_path, path);
         } else {
-            if let Ok(viewer) = FileViewer::new(&full_path) {
-                self.browser = BrowseState::File {
-                    viewer,
-                    path: full_path,
-                };
+            match FileViewer::new(&full_path) {
+                Ok(viewer) => {
+                    self.browser = BrowseState::File {
+                        viewer,
+                        path: full_path,
+                    };
+                }
+                Err(e) => {
+                    self.browser = BrowseState::Error {
+                        message: e.to_string(),
+                        prev_path: path,
+                    };
+                }
             }
         }
     }
