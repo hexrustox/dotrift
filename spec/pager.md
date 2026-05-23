@@ -7,7 +7,7 @@ option. It has three modes selected automatically based on the paths:
 - **Diff**: two files → side-by-side line diff
 - **Explorer**: file + directory → browse directory, preview file
 
-All modes share a 3-row layout: header, content, footer.
+All modes share a 2-row layout: content area and a footer bar.
 
 ---
 
@@ -15,49 +15,52 @@ All modes share a 3-row layout: header, content, footer.
 
 Single file viewer. Used when a file on disk blocks directory creation.
 
-**Header:** `File <path> blocks directory creation`
 **Content:** Full-terminal file display with line-by-line scrolling.
-**Footer:** `{pos}/{max}` — 1-indexed scroll position over max reachable position.
-Hidden if all lines fit in the viewport.
+**Footer:** A reversed-style bar showing the file path. When the file has more lines
+than the viewport, a scroll indicator `(pos/max)` is appended right-aligned
+(1-indexed position over max reachable position). Otherwise only the path is shown.
 
 ## Diff Mode
 
 Two panes split evenly by a vertical separator, showing a computed line diff.
 
-**Header:** `Replace <old> with <new>`
 **Content:**
 - Old file on left, new file on right.
 - Lines prefixed with `-` (red, old-only), `+` (green, new-only), or ` ` (unchanged).
-- Consecutive delete+insert pairs are collapsed into a single Change row
-  (old line on left, new line on right).
+- Replace regions are decomposed into per-line pairs: lines present on both sides
+  are marked as Change (`-`/`+`), and extra lines on either side are marked as
+  standalone Delete or Insert.
 - Scroll is locked — both panes always scroll together.
-**Footer:** `{pos}/{max} +{added} −{removed}` — scroll position + change counts.
-Hidden if all diff pairs fit in the viewport.
+**Footer:** A reversed-style bar with the old file path on the left and
+`(pos/max) (+N −M)` right-aligned, showing scroll position and total
+add/remove counts across the entire diff. The footer bar is always visible.
 
 ## Explorer Mode
 
 Two panes split evenly by a vertical separator. Browser on the left, file preview
 on the right. Used when a directory on disk blocks file creation.
 
-**Header:** `Directory <dir> blocks file creation`
 **Content:**
+- **CWD line:** A single line above the listing showing the current directory path.
 - **Left pane (browser):** Directory listing with `..` entry for parent.
   Entries sorted: directories first, files second, alphabetically within groups.
-  - Directories shown as `name/`
-  - Symlinks shown as `name -> /target`
-  - Selected entry marked with `> ` prefix. Cursor only visible when browser
-    has focus.
-  - `Enter`: descend into directory, or open file for preview.
-  - Directory preview opens a file viewer in-place, replacing the listing.
+  - Directories shown as `name/`.
+  - Symlinks shown as `name → /target`. Broken symlinks receive a distinct color.
+  - Entry colors follow `LS_COLORS` conventions using mode bits and file extensions.
+  - Selected entry marked with a cursor prefix (e.g. `> `). Cursor only visible
+    when browser has focus.
+  - `Enter`: descend into directory (including symlinks to directories), or open
+    file for in-place preview.
   - `Esc` from file preview: return to directory listing.
   - `Esc` from listing: go to parent directory (no-op at root).
 - **Right pane (preview):** Source file content (scrollable independently).
-- **Tab**: toggle focus between browser and preview panes.
-  The focused pane responds to scroll keys.
-**Footer:** `{Focus}  {pos}/{max}` — focus label + position:
-- Browser (Dir state): cursor index / entry count
-- Browser (File state): scroll position / max of opened file
-- Preview: scroll position / max of source file
+- **Tab**: toggle focus between browser and preview panes. The focused pane
+  responds to scroll keys.
+**Footer:** A reversed-style bar with the directory path on the left and a
+focus-aware status right-aligned:
+- Browser (directory listing): `Browser (N/M)` — 1-indexed cursor over entry count.
+- Browser (file preview): `Browser (pos/max)` — scroll position.
+- Preview: `Preview (pos/max)` — scroll position.
 
 ## Rendering
 
@@ -66,13 +69,19 @@ on the right. Used when a directory on disk blocks file creation.
 - Empty files display as an empty line.
 - Files are read via line-offset index — only visible lines are read per frame.
   Full file content is not held in memory.
+- The vertical separator is `│` under UTF-8 locales and `|` otherwise. The
+  symlink arrow is `→` under UTF-8 locales and `->` otherwise. The cursor
+  prefix is `▶ ` under UTF-8 locales and `> ` otherwise. Locale is detected
+  from the `LC_ALL`, `LC_CTYPE`, and `LANG` environment variables.
 
-## Headers and Footers
+## Footer Bar
 
-- One full-width header line per mode.
-- One full-width footer line per mode.
-- Footer row collapses to zero height when content fits entirely in the viewport
-  and no status information would be displayed.
+- One full-width reversed-style row at the bottom of the screen.
+- Left side: context-dependent path (file path in View/Diff modes, directory
+  path in Explorer mode).
+- Right side: mode-specific status.
+- In View mode, when content fits entirely in the viewport, the status portion
+  is omitted and only the path is displayed.
 
 ## Keybindings
 
@@ -82,6 +91,8 @@ on the right. Used when a directory on disk blocks file creation.
 | Arrow Down / j | Scroll down / move cursor down |
 | Page Up / Ctrl+B | Page up |
 | Page Down / Ctrl+F | Page down |
+| Ctrl+D | Scroll half page down |
+| Ctrl+U | Scroll half page up |
 | Home / g | Jump to top |
 | End / G | Jump to bottom |
 | q | Quit pager |
@@ -91,17 +102,17 @@ on the right. Used when a directory on disk blocks file creation.
 | Esc | (Explorer) Go back (file view → listing, subdir → parent) |
 
 All modes respond to scroll keys (j/k, arrows, PgUp/PgDn, Home/End).
-Tab, Enter, Esc dispatch to the mode via trait methods and are no-ops in View
-and Diff modes. 
+Tab, Enter, Esc are no-ops in View and Diff modes.
 
 ## Edge Cases
 
 - **Terminal resize:** Re-render layout, preserving scroll positions as closely
   as possible.
 - **Long lines:** Truncated to column width. No wrapping.
-- **File error:** `FileViewer` propagates I/O error up to `run()`, which returns
-  `Err`.
+- **File error:** If a file cannot be read, the pager exits with an error.
 - **Large files:** Line-offset index built once (~8 bytes per line). Only visible
   lines read per frame via seek + read. No whole-file memory.
-- **Non-TTY:** `run()` returns `Ok(())` immediately if stdin is not a terminal.
-  The `diff` option is not offered in the collision prompt when no TTY.
+- **Non-TTY:** The pager returns immediately if stdin is not a terminal.
+  The `[d]iff` option is not offered in the collision prompt when no TTY.
+- **Unicode:** If the locale does not declare UTF-8, ASCII fallback characters are
+  used for separators, arrows, and cursor indicators.

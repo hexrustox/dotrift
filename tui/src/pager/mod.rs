@@ -90,6 +90,16 @@ fn run_app<T: PagerMode>(
                     {
                         pager.scroll_up(viewport_h);
                     }
+                    KeyCode::Char('d')
+                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
+                        pager.scroll_down(viewport_h / 2, viewport_h);
+                    }
+                    KeyCode::Char('u')
+                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
+                        pager.scroll_up(viewport_h / 2);
+                    }
                     KeyCode::Char('g') | KeyCode::Home => pager.scroll_to_top(),
                     KeyCode::Char('G') | KeyCode::End => pager.scroll_to_bottom(viewport_h),
                     _ => {}
