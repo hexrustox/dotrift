@@ -178,6 +178,10 @@ fn offsets_from_bytes(data: &[u8]) -> Vec<u64> {
             offsets.push(i as u64 + 1);
         }
     }
+    let last = *offsets.last().unwrap() as usize;
+    if last != data.len() {
+        offsets.push(data.len() as u64);
+    }
     offsets
 }
 

@@ -58,17 +58,13 @@ impl FileIndex {
         }
         self.file.seek(SeekFrom::Start(self.offsets[idx]))?;
         self.file.read_until(b'\n', buf)?;
-        strip_newline(buf);
-        Ok(())
-    }
-}
-
-fn strip_newline(buf: &mut Vec<u8>) {
-    if buf.ends_with(b"\n") {
-        buf.pop();
-        if buf.ends_with(b"\r") {
+        if buf.ends_with(b"\n") {
             buf.pop();
+            if buf.ends_with(b"\r") {
+                buf.pop();
+            }
         }
+        Ok(())
     }
 }
 

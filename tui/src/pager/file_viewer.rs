@@ -72,6 +72,7 @@ impl FileViewer {
             }
         }
 
+        self.buf.retain(|&b| b != b'\r');
         let content = String::from_utf8_lossy(&self.buf);
         frame.render_widget(Paragraph::new(content.as_ref()), area);
     }

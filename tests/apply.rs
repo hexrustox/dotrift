@@ -292,8 +292,8 @@ fn test_prompt() {
 "#;
     let (_temp_dir, source_dir, target_dir, db_path) = setup_test(config);
 
-    fs::write(source_dir.join("a.txt"), "new\n").unwrap();
-    fs::write(target_dir.join("a.txt"), "old\n").unwrap();
+    fs::write(source_dir.join("a.txt"), "new").unwrap();
+    fs::write(target_dir.join("a.txt"), "old").unwrap();
 
     apply::run(
         GlobalFlags::new(
