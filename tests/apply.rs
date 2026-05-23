@@ -282,3 +282,31 @@ fn test_clean_up_dry_run_print() {
     )
     .unwrap();
 }
+
+#[ignore]
+#[test]
+fn test_prompt() {
+    let config = r#"
+[portal]
+"a.txt" = "a.txt"
+"#;
+    let (_temp_dir, source_dir, target_dir, db_path) = setup_test(config);
+
+    fs::write(source_dir.join("a.txt"), "new\n").unwrap();
+    fs::write(target_dir.join("a.txt"), "old\n").unwrap();
+
+    apply::run(
+        GlobalFlags::new(
+            Some(source_dir.to_path_buf()),
+            Some(target_dir.to_path_buf()),
+            None,
+        ),
+        &db_path,
+        ApplyFlags {
+            dry_run: false,
+            clean_up: false,
+            prune_empty_dirs: false,
+        },
+    )
+    .unwrap();
+}

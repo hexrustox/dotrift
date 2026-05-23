@@ -356,16 +356,16 @@ mod tests {
             .concat()
     }
 
-    #[test_case("a\nb\n",    "a\nb\n",    " a\n b",      " a\n b";      "equal")]
-    #[test_case("a\nb\nc\n", "a\nc\n",    " a\n-b\n c", " a\n\n c";   "delete mid")]
-    #[test_case("a\nc\n",    "a\nb\nc\n", " a\n\n c",   " a\n+b\n c"; "insert mid")]
-    #[test_case("old\n",     "new\n",     "-old",           "+new";           "change")]
+    #[test_case("a\nb\n", "a\nb\n", " a\n b", " a\n b"; "equal")]
+    #[test_case("a\nb\nc\n", "a\nc\n", " a\n-b\n c", " a\n\n c"; "delete mid")]
+    #[test_case("a\nc\n", "a\nb\nc\n", " a\n\n c", " a\n+b\n c"; "insert mid")]
+    #[test_case("old\n", "new\n", "-old", "+new"; "change")]
     #[test_case("a\nb\nc\n", "a\nx\nc\n", " a\n-b\n c", " a\n+x\n c"; "mixed change")]
-    #[test_case("a\nb\n",    "a\n",       " a\n-b",       " a\n";         "solo delete")]
-    #[test_case("a\n",       "a\nb\n",    " a\n",         " a\n+b";       "solo insert")]
-    #[test_case("",          "",          "",                 "";                 "both empty")]
-    #[test_case("",          "x\n",       "",               "+x";             "empty old")]
-    #[test_case("x\n",       "",          "-x",             "";               "empty new")]
+    #[test_case("a\nb\n", "a\n", " a\n-b", " a\n"; "solo delete")]
+    #[test_case("a\n", "a\nb\n", " a\n", " a\n+b"; "solo insert")]
+    #[test_case("", "", "", ""; "both empty")]
+    #[test_case("", "x\n", "", "+x"; "empty old")]
+    #[test_case("x\n", "", "-x", ""; "empty new")]
     fn diff(old: &str, new: &str, expected_old: &str, expected_new: &str) {
         let pairs = compute_pairs_from_ops(old, new);
 

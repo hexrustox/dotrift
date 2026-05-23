@@ -1,3 +1,3 @@
-pub(crate) mod ls_colors;
+mod ls_colors;
 pub mod pager;
 pub mod prompt;

@@ -1,8 +1,8 @@
-pub(crate) mod diff;
-pub(crate) mod explorer;
-pub(crate) mod file_viewer;
-pub(crate) mod footer;
-pub(crate) mod view;
+mod diff;
+mod explorer;
+mod file_viewer;
+mod footer;
+mod view;
 
 use std::{
     io::{self, BufRead, IsTerminal, Seek, SeekFrom, stdout},
@@ -21,7 +21,14 @@ use diff::Diff;
 use explorer::Explorer;
 use view::View;
 
-pub fn run(path1: &Path, path2: Option<&Path>) -> io::Result<()> {
+#[derive(Clone)]
+pub enum PagerArgs<'a> {
+    View(&'a Path),
+    Diff { source: &'a Path, target: &'a Path },
+    Explorer { source: &'a Path, target: &'a Path },
+}
+
+pub fn run(arg: PagerArgs) -> io::Result<()> {
     if !io::stdin().is_terminal() {
         return Ok(());
     }
@@ -32,17 +39,17 @@ pub fn run(path1: &Path, path2: Option<&Path>) -> io::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = match path2 {
-        Some(path2) if path1.is_file() && path2.is_dir() => {
-            let mut pane = Explorer::new(path1, path2)?;
+    let result = match arg {
+        PagerArgs::View(path) => {
+            let mut pane = View::new(path)?;
             run_app(&mut terminal, &mut pane)
         }
-        Some(path2) => {
-            let mut pane = Diff::new(path1, path2)?;
+        PagerArgs::Diff { source, target } => {
+            let mut pane = Diff::new(target, source)?;
             run_app(&mut terminal, &mut pane)
         }
-        None => {
-            let mut pane = View::new(path1)?;
+        PagerArgs::Explorer { source, target } => {
+            let mut pane = Explorer::new(source, target)?;
             run_app(&mut terminal, &mut pane)
         }
     };

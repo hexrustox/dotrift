@@ -1,8 +1,12 @@
 use std::{fmt::Display, path::Path};
 
-use color_eyre::Result;
 use strum::EnumIter;
-use tui::prompt::HotKey;
+use tui::{
+    pager::PagerArgs,
+    prompt::{HotKey, SelectPrompt},
+};
+
+use crate::command::util::PathLiteral;
 
 #[derive(Default, Clone, Copy, PartialEq, EnumIter)]
 pub enum CollisionOptions {
@@ -37,25 +41,52 @@ impl HotKey for CollisionOptions {
     }
 }
 
-#[cfg(test)]
-pub fn prompt_collision(_: &Path, _: bool) -> Result<CollisionOptions> {
-    Ok(tests::PROMPT_SELECTION.with_borrow(|n| *n))
-}
+pub fn prompt_collision(
+    source: Option<&Path>,
+    target: &Path,
+    create_dir: bool,
+    existing_dir: bool,
+) -> CollisionOptions {
+    if cfg!(test) {
+        #[cfg(test)]
+        return tests::PROMPT_SELECTION.with_borrow(|n| *n);
+    }
 
-#[cfg(not(test))]
-pub fn prompt_collision(path: &Path, is_dir: bool) -> Result<CollisionOptions> {
-    use color_eyre::eyre::Context;
-    use tui::prompt::SelectPrompt;
+    let type_str = |b| {
+        if b { "directory" } else { "file" }
+    };
+    let msg = format!(
+        "Trying to create {} {} but another {} already exists ",
+        type_str(create_dir),
+        target.display(),
+        type_str(existing_dir)
+    );
+    let arg = match (source, target) {
+        (None, p) => PagerArgs::View(p),
+        (Some(s), t) if s.path_is_file() && t.path_is_file() => PagerArgs::Diff {
+            source: s,
+            target: t,
+        },
+        (Some(s), t) if s.path_is_file() && t.path_is_dir() => PagerArgs::Explorer {
+            source: s,
+            target: t,
+        },
+        _ => unreachable!(),
+    };
 
-    let type_str = if is_dir { "directory" } else { "file" };
-    SelectPrompt::new()
-        .prompt(format!(
-            "`{}` is an existing {}, ",
-            path.display(),
-            type_str
-        ))
-        .interact()
-        .wrap_err("Failed to get user input")
+    loop {
+        match SelectPrompt::new().prompt(&msg).interact() {
+            Ok(CollisionOptions::Diff) => {
+                tui::pager::run(arg.clone());
+            }
+            Ok(o) => {
+                return o;
+            }
+            Err(_) => {
+                return CollisionOptions::default();
+            }
+        }
+    }
 }
 
 #[cfg(test)]

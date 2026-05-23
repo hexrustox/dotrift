@@ -1,16 +1,17 @@
 use std::{fs, io::Write};
 use tempfile::{NamedTempFile, TempDir};
+use tui::pager::PagerArgs;
 
 #[ignore]
 #[test]
 fn view() {
     let mut file = NamedTempFile::new().unwrap();
-    for i in 1..=100 {
+    for i in 1..=20 {
         writeln!(file, "line {i}").unwrap();
     }
     file.flush().unwrap();
 
-    tui::pager::run(file.path(), None).unwrap();
+    tui::pager::run(PagerArgs::View(file.path())).unwrap();
 }
 
 #[ignore]
@@ -18,27 +19,35 @@ fn view() {
 fn diff() {
     let mut file1 = NamedTempFile::new().unwrap();
     let mut file2 = NamedTempFile::new().unwrap();
-    for i in 1..=50 {
+    for i in 1..=10 {
         writeln!(file1, "line {i}").unwrap();
-        writeln!(file2, "line {}", 50 - i + 1).unwrap();
+        writeln!(file2, "line {}", 10 - i + 1).unwrap();
     }
     file1.flush().unwrap();
     file2.flush().unwrap();
 
-    tui::pager::run(file1.path(), Some(file2.path())).unwrap();
+    tui::pager::run(PagerArgs::Diff {
+        source: file2.path(),
+        target: file1.path(),
+    })
+    .unwrap();
 }
 
 #[ignore]
 #[test]
 fn explorer() {
-    let mut path1 = NamedTempFile::new().unwrap();
-    let path2 = TempDir::new().unwrap();
+    let mut file = NamedTempFile::new().unwrap();
+    let dir = TempDir::new().unwrap();
     for i in 1..=100 {
-        writeln!(path1, "line {i}").unwrap();
+        writeln!(file, "line {i}").unwrap();
     }
-    path1.flush().unwrap();
+    file.flush().unwrap();
     for i in 1..=100 {
-        fs::write(path2.path().join(format!("file{}", i)), "").unwrap();
+        fs::write(dir.path().join(format!("file{}", i)), "").unwrap();
     }
-    tui::pager::run(path1.path(), Some(path2.path())).unwrap();
+    tui::pager::run(PagerArgs::Explorer {
+        source: file.path(),
+        target: dir.path(),
+    })
+    .unwrap();
 }

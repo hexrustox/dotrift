@@ -349,7 +349,7 @@ fn deploy_dir(path: &Path, db: &Db, verbose: bool) -> Result<bool> {
         if path.path_is_dir() {
             return Ok(false);
         }
-        let choice = prompt_collision(path, true)?;
+        let choice = prompt_collision(None, path, true, false);
         match choice {
             CollisionOptions::Skip => return Ok(true),
             CollisionOptions::Overwrite => {
@@ -414,7 +414,7 @@ fn deploy_file(
 
     if target.path_exists() {
         if target.path_is_dir() {
-            let choice = prompt_collision(target, false)?;
+            let choice = prompt_collision(Some(&entry.source), target, false, true);
             match choice {
                 CollisionOptions::Skip => return Ok(()),
                 CollisionOptions::Overwrite => {
@@ -450,7 +450,7 @@ fn deploy_file(
             }
             let managed = is_managed(target, db, target_hash);
             if !managed {
-                let choice = prompt_collision(target, false)?;
+                let choice = prompt_collision(Some(&entry.source), target, false, false);
                 match choice {
                     CollisionOptions::Skip => return Ok(()),
                     CollisionOptions::Overwrite => {}
