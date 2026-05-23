@@ -44,7 +44,7 @@ impl PagerMode for View {
         } else {
             String::new()
         };
-        footer::render(frame, footer_area, &self.path, &status);
+        footer::render(frame, footer_area, &status, &self.path, "h help");
     }
 
     fn viewport_height(&self) -> usize {

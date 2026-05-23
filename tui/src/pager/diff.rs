@@ -300,13 +300,14 @@ impl PagerMode for Diff {
         footer::render(
             frame,
             footer_area,
-            &self.path,
             &format!(
-                "{} (+{} −{})",
+                "{} (+{} -{})",
                 scroll_status(self.scroll.get(), self.pairs.len(), visible_h),
                 self.added,
                 self.removed
             ),
+            &self.path,
+            "h help",
         );
     }
 

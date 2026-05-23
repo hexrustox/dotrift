@@ -15,11 +15,45 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{Frame, Terminal, backend::CrosstermBackend, layout::Rect};
+use ratatui::{
+    Frame, Terminal,
+    backend::CrosstermBackend,
+    layout::Rect,
+    widgets::{Block, Clear, Padding, Paragraph},
+};
 
 use diff::Diff;
 use explorer::Explorer;
 use view::View;
+
+const HELP_TOP: &str = r#"j / ↓         Scroll down
+k / ↑         Scroll up
+Ctrl+D        Half page down
+Ctrl+U        Half page up
+PgDn / Ctrl+F Page down
+PgUp / Ctrl+B Page up
+g / Home      Jump to top
+G / End       Jump to bottom"#;
+
+const HELP_EXPLORER_EXTRAS: &str = r#"
+Tab           Switch focus
+Enter         Open entry / file
+Esc           Go back"#;
+
+const HELP_BOTTOM: &str = r#"
+h             Toggle help
+q / Ctrl+C    Quit
+
+Press any key to close"#;
+
+fn help_text(explorer: bool) -> String {
+    let mut s = String::from(HELP_TOP);
+    if explorer {
+        s.push_str(HELP_EXPLORER_EXTRAS);
+    }
+    s.push_str(HELP_BOTTOM);
+    s
+}
 
 #[derive(Clone)]
 pub enum PagerArgs<'a> {
@@ -42,15 +76,15 @@ pub fn run(arg: PagerArgs) -> io::Result<()> {
     let result = match arg {
         PagerArgs::View(path) => {
             let mut pane = View::new(path)?;
-            run_app(&mut terminal, &mut pane)
+            run_app(&mut terminal, &mut pane, &help_text(false))
         }
         PagerArgs::Diff { source, target } => {
             let mut pane = Diff::new(target, source)?;
-            run_app(&mut terminal, &mut pane)
+            run_app(&mut terminal, &mut pane, &help_text(false))
         }
         PagerArgs::Explorer { source, target } => {
             let mut pane = Explorer::new(source, target)?;
-            run_app(&mut terminal, &mut pane)
+            run_app(&mut terminal, &mut pane, &help_text(true))
         }
     };
 
@@ -63,11 +97,27 @@ pub fn run(arg: PagerArgs) -> io::Result<()> {
 fn run_app<T: PagerMode>(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     pager: &mut T,
+    help_text: &str,
 ) -> io::Result<()> {
+    let mut help_visible = false;
     loop {
-        terminal.draw(|f| pager.render(f, f.area()))?;
+        terminal.draw(|f| {
+            pager.render(f, f.area());
+            if help_visible {
+                render_help_popup(f, f.area(), help_text);
+            }
+        })?;
 
-        match event::read()? {
+        let event = event::read()?;
+        if help_visible {
+            if let Event::Key(key) = event
+                && key.kind == KeyEventKind::Press
+            {
+                help_visible = false;
+            }
+            continue;
+        }
+        match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
                 let viewport_h = pager.viewport_height().max(1);
                 match key.code {
@@ -75,6 +125,7 @@ fn run_app<T: PagerMode>(
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         return Ok(());
                     }
+                    KeyCode::Char('h') => help_visible = true,
                     KeyCode::Esc => pager.on_esc(),
                     KeyCode::Tab => pager.on_tab(),
                     KeyCode::Enter => pager.on_enter(),
@@ -90,14 +141,10 @@ fn run_app<T: PagerMode>(
                     {
                         pager.scroll_up(viewport_h);
                     }
-                    KeyCode::Char('d')
-                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                    {
+                    KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         pager.scroll_down(viewport_h / 2, viewport_h);
                     }
-                    KeyCode::Char('u')
-                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                    {
+                    KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         pager.scroll_up(viewport_h / 2);
                     }
                     KeyCode::Char('g') | KeyCode::Home => pager.scroll_to_top(),
@@ -162,6 +209,29 @@ impl Scroll {
 pub fn scroll_status(scroll_pos: usize, total: usize, viewport_h: usize) -> String {
     let max_pos = total.saturating_sub(viewport_h) + 1;
     format!("({}/{})", scroll_pos + 1, max_pos)
+}
+
+fn render_help_popup(frame: &mut Frame, screen: Rect, text: &str) {
+    let lines = text.lines().count() as u16;
+    let popup_w = (screen.width * 3 / 4).max(40);
+    let popup_h = lines + 4;
+    let area = center(screen, popup_w, popup_h);
+
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(text).block(
+            Block::bordered()
+                .title_top(" Help ")
+                .padding(Padding::proportional(1)),
+        ),
+        area,
+    );
+}
+
+fn center(screen: Rect, w: u16, h: u16) -> Rect {
+    let x = screen.x + (screen.width.saturating_sub(w)) / 2;
+    let y = screen.y + (screen.height.saturating_sub(h)) / 2;
+    Rect::new(x, y, w, h)
 }
 
 fn build_offsets(reader: &mut (impl BufRead + Seek + ?Sized)) -> io::Result<Vec<u64>> {

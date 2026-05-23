@@ -244,7 +244,7 @@ impl PagerMode for Explorer {
 
         self.preview.render(frame, preview_area);
 
-        let footer_text = match self.focus {
+        let status_text = match self.focus {
             Focus::Browser => match &self.browser {
                 BrowseState::Dir {
                     entries, cursor, ..
@@ -270,7 +270,7 @@ impl PagerMode for Explorer {
                 )
             }
         };
-        footer::render(frame, footer_area, &self.path, &footer_text);
+        footer::render(frame, footer_area, &status_text, &self.path, "h help");
     }
 
     fn viewport_height(&self) -> usize {

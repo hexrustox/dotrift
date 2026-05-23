@@ -16,8 +16,8 @@ All modes share a 2-row layout: content area and a footer bar.
 Single file viewer. Used when a file on disk blocks directory creation.
 
 **Content:** Full-terminal file display with line-by-line scrolling.
-**Footer:** A reversed-style bar showing the file path. When the file has more lines
-than the viewport, a scroll indicator `(pos/max)` is appended right-aligned
+**Footer:** A reversed-style bar. When the file has more lines
+than the viewport, a scroll indicator `(pos/max)` is shown left-aligned
 (1-indexed position over max reachable position). Otherwise only the path is shown.
 
 ## Diff Mode
@@ -31,9 +31,9 @@ Two panes split evenly by a vertical separator, showing a computed line diff.
   are marked as Change (`-`/`+`), and extra lines on either side are marked as
   standalone Delete or Insert.
 - Scroll is locked — both panes always scroll together.
-**Footer:** A reversed-style bar with the old file path on the left and
-`(pos/max) (+N −M)` right-aligned, showing scroll position and total
-add/remove counts across the entire diff. The footer bar is always visible.
+**Footer:** A reversed-style bar with `(pos/max) (+N −M)` left-aligned as the
+status, showing scroll position and total add/remove counts across the entire
+diff. The footer bar is always visible.
 
 ## Explorer Mode
 
@@ -59,8 +59,7 @@ on the right. Used when a directory on disk blocks file creation.
 - **Right pane (preview):** Source file content (scrollable independently).
 - **Tab**: toggle focus between browser and preview panes. The focused pane
   responds to scroll keys.
-**Footer:** A reversed-style bar with the directory path on the left and a
-focus-aware status right-aligned:
+**Footer:** A reversed-style bar (see Footer Bar section). Status appears left-aligned:
 - Browser (directory listing): `Browser (N/M)` — 1-indexed cursor over entry count.
 - Browser (file preview): `Browser (pos/max)` — scroll position.
 - Browser (error): `Browser` — error message displayed in pane.
@@ -81,11 +80,14 @@ focus-aware status right-aligned:
 ## Footer Bar
 
 - One full-width reversed-style row at the bottom of the screen.
-- Left side: context-dependent path (file path in View/Diff modes, directory
+- Three-section layout: status (left), path (center), help hint (right).
+- **Left:** Mode-specific status. In View mode, when content fits entirely in the
+  viewport, the scroll status portion is omitted.
+- **Center:** Truly centered path (file path in View/Diff modes, current directory
   path in Explorer mode).
-- Right side: mode-specific status.
-- In View mode, when content fits entirely in the viewport, the status portion
-  is omitted and only the path is displayed.
+- **Right:** `h help` hint.
+- When the bar is too narrow for all three sections, center is dropped and the
+  layout falls back to left-aligned status + right-aligned help.
 
 ## Keybindings
 
@@ -101,6 +103,7 @@ focus-aware status right-aligned:
 | End / G | Jump to bottom |
 | q | Quit pager |
 | Ctrl+C | Quit pager |
+| h | Toggle help popup |
 | Tab | (Explorer) Switch focus between panes |
 | Enter | (Explorer) Enter directory / open file |
 | Esc | (Explorer) Go back (file view → listing, subdir → parent) |
