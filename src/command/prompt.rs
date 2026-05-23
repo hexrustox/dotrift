@@ -41,16 +41,15 @@ impl HotKey for CollisionOptions {
     }
 }
 
+#[allow(unused)]
 pub fn prompt_collision(
     source: Option<&Path>,
     target: &Path,
     create_dir: bool,
     existing_dir: bool,
 ) -> CollisionOptions {
-    if cfg!(test) {
-        #[cfg(test)]
-        return tests::PROMPT_SELECTION.with_borrow(|n| *n);
-    }
+    #[cfg(test)]
+    return tests::PROMPT_SELECTION.with_borrow(|n| *n);
 
     let type_str = |b| {
         if b { "directory" } else { "file" }
@@ -72,11 +71,9 @@ pub fn prompt_collision(
             target: t,
         },
         _ => {
-            if cfg!(test) {
-                unreachable!()
-            } else {
-                return CollisionOptions::default();
-            }
+            #[cfg(test)]
+            unreachable!();
+            return CollisionOptions::default();
         }
     };
 

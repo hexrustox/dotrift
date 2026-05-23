@@ -306,6 +306,7 @@ fn print_tree(path: &Path, node: &Node) -> Result<usize> {
             output::print_dry_create_file(path, &entry.source, entry.deploy_type);
         }
         Node::Marked(_) => {
+            #[cfg(test)]
             unreachable!()
         }
     }
@@ -333,6 +334,7 @@ fn traverse_tree(
             deploy_file(target, entry, db, overwrite_identical, verbose)?;
         }
         Node::Marked(_) => {
+            #[cfg(test)]
             unreachable!()
         }
     }

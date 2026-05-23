@@ -555,10 +555,10 @@ fn prepare_config(
     }
 }
 
+#[allow(unused)]
 fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<()> {
-    if cfg!(test) {
-        return Ok(());
-    }
+    #[cfg(test)]
+    return Ok(());
 
     let file = file_path.to_string_lossy().into_owned();
     let (row, col) = if let Ok(content) = fs::read_to_string(&file) {

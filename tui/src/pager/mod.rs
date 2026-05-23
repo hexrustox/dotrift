@@ -243,7 +243,12 @@ fn build_offsets(reader: &mut (impl BufRead + Seek + ?Sized)) -> io::Result<Vec<
         if bytes == 0 {
             break;
         }
-        offsets.push(offsets.last().unwrap() + bytes as u64);
+        offsets.push(
+            offsets
+                .last()
+                .ok_or_else(|| io::Error::other("offsets unexpectedly empty"))?
+                + bytes as u64,
+        );
         buf.clear();
     }
 
@@ -258,8 +263,10 @@ fn offsets_from_bytes(data: &[u8]) -> Vec<u64> {
             offsets.push(i as u64 + 1);
         }
     }
-    let last = *offsets.last().unwrap() as usize;
-    if last != data.len() {
+    let Some(last) = offsets.last() else {
+        return offsets;
+    };
+    if *last != data.len() as u64 {
         offsets.push(data.len() as u64);
     }
     offsets

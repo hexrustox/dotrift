@@ -53,11 +53,14 @@ impl Node {
                                         path.display()
                                     ));
                                 }
+                                Node::File(_) => {
+                                    return Err(eyre!(
+                                        "File already exists at `{}`",
+                                        path.display()
+                                    ));
+                                }
                                 Node::Marked(key) => {
                                     return Ok(Some(key.clone()));
-                                }
-                                _ => {
-                                    unreachable!();
                                 }
                             }
                         }

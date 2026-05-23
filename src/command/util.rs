@@ -83,11 +83,10 @@ impl<P: AsRef<Path> + Debug> SafeStripPrefix<P> for Path {
         match self.strip_prefix(&base) {
             Ok(p) => p,
             Err(_) => {
-                if cfg!(test) {
-                    panic!("{base:?} is not prefix of {self:?}");
-                } else {
-                    self
-                }
+                #[cfg(test)]
+                panic!("{base:?} is not prefix of {self:?}");
+                #[cfg(not(test))]
+                self
             }
         }
     }
@@ -159,7 +158,7 @@ pub fn read_mtime(path: &Path) -> Option<i64> {
         .ok()?
         .duration_since(UNIX_EPOCH)
         .ok()
-        .map(|d| d.as_nanos() as i64)
+        .map(|d| d.as_millis() as i64)
 }
 
 pub fn is_managed_entry(entry: &DbEntry, target: &Path, target_hash: Option<u64>) -> bool {
@@ -409,7 +408,7 @@ pub mod tests {
     #[test_case(
         |_, t| {
             fs::write(t.join("file"), "same").unwrap();
-            std::thread::sleep(std::time::Duration::from_secs(1));
+            std::thread::sleep(std::time::Duration::from_millis(200));
             fs::write(t.join("file"), "same").unwrap();
         },
         |t| t.join("file"),
