@@ -42,12 +42,12 @@ impl PagerMode for View {
 
         let total = self.viewer.lines_count();
         let vp_h = content_area.height as usize;
-        let status = if total > vp_h {
-            scroll_status(self.viewer.scroll_pos(), total, vp_h)
-        } else {
-            String::new()
-        };
-        footer::render(frame, footer_area, &status, &self.path);
+        footer::render(
+            frame,
+            footer_area,
+            &scroll_status(self.viewer.scroll_pos(), total, vp_h),
+            &self.path,
+        );
     }
 
     fn viewport_height(&self) -> usize {

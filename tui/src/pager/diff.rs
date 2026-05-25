@@ -261,10 +261,6 @@ impl PagerMode for Diff {
         let visible_h = content_area.height as usize;
         self.scroll.clamp(self.pairs.len(), visible_h);
 
-        if self.pairs.is_empty() {
-            return;
-        }
-
         let columns = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
