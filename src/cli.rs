@@ -152,6 +152,12 @@ pub enum Commands {
         destination: Option<PathBuf>,
     },
 
+    /// Show a side-by-side diff between a managed file and its source.
+    Diff {
+        /// Path to a managed file to diff. If relative, resolved against cwd.
+        path: PathBuf,
+    },
+
     /// Report management status of the target filesystem.
     Status {
         #[command(subcommand)]

@@ -3,7 +3,7 @@ use cli::{Cli, Commands};
 use color_eyre::eyre::Context;
 use dotrift::{
     cli::{self, StatusSubcommand},
-    command::{add, apply, init, status, unapply},
+    command::{add, apply, diff, init, status, unapply},
     path::db_path,
 };
 
@@ -32,6 +32,12 @@ fn main() -> color_eyre::Result<()> {
             let db = db_path()?;
             add::run(cli.global, path.clone(), destination, flags, &db)
                 .wrap_err_with(|| format!("Failed to add `{}`", path.display()))?;
+        }
+        Commands::Diff { path } => {
+            let db = db_path()?;
+            let p = path.clone();
+            diff::run(path, &db)
+                .wrap_err_with(|| format!("Failed to print `{}` diff", p.display()))?;
         }
         Commands::Status { command } => {
             let db = db_path()?;
