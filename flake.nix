@@ -6,7 +6,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-parts.url = "github:hercules-ci/flake-parts";
-    nix-capsule.url = "gitlab:codnixus/nix-capsule?ref=v0.3.0";
+    nix-capsule.url = "gitlab:codnixus/nix-capsule?ref=v0.4.0";
   };
 
   outputs =
@@ -30,23 +30,24 @@
         {
           devShells = {
             default = capsule-lib.mkShell {
-              image = "ubuntu:latest";
+              image = "alpine:latest";
               devShell = "container";
               socketPath = "/tmp/dotrift/ncap-socket";
               containerName = "dotrift";
-              options = [
+              extraOptions = [
                 "-e HOME"
-                "-e NIX_PATH"
-                "-e HOME"
-                "-v \"$HOME/.cargo\":\"$HOME/.cargo\""
+                "-e CARGO_HOME"
+                "-v \"$CARGO_HOME\":\"$CARGO_HOME\""
               ];
               wrappers = [
                 "cargo"
                 "codebook-lsp"
                 "rust-analyzer"
-                "nixd"
                 "taplo"
               ];
+              preShellHook = ''
+                export CARGO_HOME=''${CARGO_HOME:-$HOME/.cargo}
+              '';
             };
 
             container =
@@ -69,8 +70,6 @@
                   clang
                   codebook
                   mold
-                  nixd
-                  nixfmt
                   rust
                   taplo
 
