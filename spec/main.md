@@ -1,6 +1,6 @@
 # Dotrift Specification
 
-This document defines the CLI structure, global behaviors, database schema, configuration format, and specifications for all `dotrift` subcommands. The manager evaluates configurations defined in `dotrift.toml`.
+This document defines the CLI structure, global behaviors, database schema, configuration format, and specifications for all `dotrift` subcommands. The manager evaluates configurations defined in `dotrift.toml`, which is processed as a [template](#dotrift-template-syntax) before being parsed.
 
 ---
 
@@ -82,7 +82,7 @@ Expands to: `vim -f /path/to/dotrift.toml +42`
 
 ---
 
-## Database Schema
+## Database Tables
 
 The local database tracks managed files. It is the single source of truth for resolving states in `diff`, `status`, `apply`, and `unapply`.
 
@@ -104,17 +104,30 @@ CREATE TABLE managed_files (
 
 **Columns:**
 * `target_path`: Absolute path of the managed file (primary key).
-* `deploy_type`: Enum (`symlink` | `copy`).
+* `deploy_type`: Enum (`symlink` | `copy` | `tmpl`).
 * `source_path`: Absolute path in `source-dir`. Used to read content for copies, or verify link targets for symlinks.
 * `hash`: Hex digest using `xxHash64` of target file content at last apply. NULL for symlinks. Used to detect external modifications to the target (managed check compares target-on-disk hash against DB hash).
-* `symlink_target`: The symlink destination stored at deploy time (i.e., `read_link(source_path)`). Present when deploy type is `copy` and source is a symlink. NULL otherwise. Decouples managed check from current source filesystem state.
+* `symlink_target`: `read_link(source_path)` if source is a symlink and deploy type is `copy`, NULL otherwise. Decouples managed check from current source filesystem state.
 * `mtime`: Modification time of the target file at last apply, stored as milliseconds since Unix epoch. NULL for symlinks. When the on-disk mtime matches this value, the file is considered managed without computing the hash.
+
+Tracks which template profiles are currently active. The activation timestamp determines variable precedence during template evaluation — last-activated (highest `activated_at`) wins on conflict.
+
+```sql
+CREATE TABLE IF NOT EXISTS active_profiles (
+    activated_at INTEGER NOT NULL,
+    name         TEXT NOT NULL UNIQUE
+);
+```
+
+**Columns:**
+* `activated_at`: Unix timestamp in milliseconds when the profile was activated. Last-activated (highest timestamp) wins on variable conflict.
+* `name`: Profile name, matches a `[profile.<name>]` section in `dotrift_data.toml`.
 
 ---
 
 ## Configuration (`dotrift.toml`)
 
-Defines the file mapping, filtering, and deployment rules.
+Defines the file mapping, filtering, and deployment rules. Before being parsed, `dotrift.toml` is evaluated as a template (see [Template Syntax](#dotrift-template-syntax)). The evaluated result must be valid TOML conforming to the structure below. Template context is resolved from `dotrift_data.toml` (see [Template Data](#template-data-dotrift_datatoml)).
 
 ```toml
 # Optional root-level keys
@@ -141,6 +154,7 @@ ignore = ["pattern1", "pattern2"]
 * **Description:** A list of patterns defining deployment targets to exclude. This is useful for temporarily disabling a mapping or resolving ambiguities when one source file is mapped to multiple locations.
 * **Syntax:** Follows exact **Gitignore-style semantics** (including `!` for negation and trailing `/` for directory-only matching). Order matters — `!` patterns re-include previously excluded paths.
 * **Matching Context:** Matched against the **resolved target path**, relative to `target-directory`.
+* **Implicit Ignores:** `dotrift.toml` and `dotrift_data.toml` are implicitly excluded from deployment. They match no portal and are never written to the target directory.
 
 ### `[portal]` (Mapping Logic)
 
@@ -207,7 +221,8 @@ Defines the deployment method (`type`) and file permissions (`mode`), directory 
 * **Empty Tables:** Empty `[portal]` or `[rule]` tables are valid and treated as no-ops.
 
 #### Properties
-* `type` (String): `"symlink"` or `"copy"`. Defaults to `"symlink"` if no rule matches.
+* `type` (String): `"symlink"`, `"copy"`, or `"tmpl"`. Defaults to `"symlink"` if no rule matches.
+  * **tmpl:** The source file is evaluated as a template (see [Template Syntax](#dotrift-template-syntax)) before being written to the target.
 * `mode` (String): File permissions represented as an octal string of digits only (e.g., `"600"`, `"0600"`). No `0o` prefix. Must be a valid octal value in the range `000`–`777` (error otherwise). Defaults to none (no explicit modification) if omitted.
 
 ### Globbing & Path Normalization
@@ -219,6 +234,7 @@ Defines the deployment method (`type`) and file permissions (`mode`), directory 
 * **Symlinks in Source:** Symbolic links encountered in the source directory are treated as regular files. The manager does not follow them to resolve their targets during discovery; the symlink itself is deployed.
   * When `type = "copy"`: the symlink itself is copied — target becomes a symlink pointing to the same destination as the source symlink (e.g., source→`/a/b`, target→`/a/b`).
   * When `type = "symlink"`: target becomes a symlink pointing to the source symlink path (e.g., source→`/a/b`, target→source).
+  * When `type = "tmpl"`: follow the symlink chain to its ultimate resolution, read the resolved file's content, parse as template, evaluate, write result to target. Source must resolve to a regular file (error otherwise).
 
 ### Validation & Error Handling
 
@@ -227,6 +243,43 @@ Defines the deployment method (`type`) and file permissions (`mode`), directory 
 * **Source-Target Overlap:** Error if `source-dir` equals `target-dir` (prevents self-modification loops).
 * **Target Inside Source:** Error if `target-dir` is inside `source-dir` (prevents self-modification).
 * **Target Collisions:** If two different source paths resolve to the exact same target path. Show all colliding source paths and the collision target. Halts program.
+
+---
+
+## Template Data (`dotrift_data.toml`)
+
+Located in the source directory, next to `dotrift.toml`. Optional. When present, variables feed into both `dotrift.toml` evaluation and `tmpl`-type source file rendering.
+
+### Format
+
+```toml
+[variable]
+key = "value"
+
+[profile.<name>]
+key = "override"
+```
+
+### Sections
+
+**`[variable]`:** Key-value pairs forming the base template context. Values can be any valid TOML type: string, integer, boolean, array, or inline table. These map to the template value types String, Int, Bool, List, and Map respectively.
+
+**`[profile.<name>]`:** Named profiles with additional or overriding variables. Same value types as `[variable]`. Activated via `dotrift profile activate <name>` (see [`profile` Command](#profile-command)). Multiple profiles can be active simultaneously.
+
+### Resolution
+
+1. `[variable]` is the base layer.
+2. Active profiles (from DB, in activation order) overlay on top.
+3. Last-activated profile (highest `activated_at`) wins on conflict.
+4. Profiles active in DB but missing from `dotrift_data.toml` are silently ignored.
+
+### Errors
+
+Parse errors are fatal. Missing file is treated as empty (no variables defined).
+
+## Template Syntax
+
+See `spec/templater.md` for the full template syntax specification.
 
 ---
 
@@ -243,7 +296,7 @@ Evaluates `dotrift.toml` and applies the defined state to the target filesystem.
 ### Execution Pipeline
 
 #### Phase 1: State Resolution
-1. Parse `dotrift.toml`, resolve target dir, normalize paths (see Path Normalization).
+1. **Template Evaluation:** Load `dotrift_data.toml` from source dir (if present), query DB for active profiles, resolve template context. Read `dotrift.toml`, evaluate as template, then parse the result as TOML config. Template errors (parse or render) are fatal.
 2. **Portal Resolution:** Glob `[portal]` keys against source files/dirs. Calculate `target_path` via Stripping Rule. Filter using `ignore` list (see Configuration). Store in `HashMap<TargetPath, (SourcePath, DeployType, Option<Mode>)>`. A source file/dir can match multiple portals if no target collision.
    * Literal directory keys expand to one entry per contained file (not one entry for the directory itself).
    * *Error:* Target path collision. Show all colliding source paths and the collision target. Halt program.
@@ -268,6 +321,7 @@ The plan is printed to `stdout` and includes:
 2.  **Deployment Plan:** The structured tree of files to be created is printed.
     *   `[CREATE] /path/to/file (symlink)`
     *   `[CREATE] /path/to/file (file)`
+    *   `[CREATE] /path/to/file (tmpl)`
 
 **Note:** The dry run does not simulate recursive deletion of empty directories (`--prune-empty-dirs`).
 
@@ -299,17 +353,18 @@ Traverse Rose Tree top-down (Pre-order DFS).
      * **diff:** Open pager in explorer mode. Left pane: source file content. Right pane: file browser at the target directory.
 3. **Exists?** Yes → File or symlink on disk:
    a. **Identical Check:** Determine if the target matches what dotrift would write.
-      - `symlink`: target is symlink AND link target == `entry.source` → identical.
-      - `copy` where source is regular file: target is regular file AND hash of source file content equals hash of target file content on disk → identical.
-      - `copy` where source is symlink: target is symlink AND link target == `read_link(entry.source)` → identical.
-      - If identical: if `overwrite_identical` flag (see Global Configuration) set, update DB entry. Skip write. Return.
+       - `symlink`: target is symlink AND link target == `entry.source` → identical.
+       - `copy` where source is regular file: target is regular file AND hash of source file content equals hash of target file content on disk → identical.
+       - `copy` where source is symlink: target is symlink AND link target == `read_link(entry.source)` → identical.
+       - `tmpl`: never identical. Always proceed to management check.
+       - If identical: if `overwrite_identical` flag (see Global Configuration) set, update DB entry. Skip write. Return.
    b. **Management Check** (if not identical): Determine if the target is unchanged since dotrift last wrote it.
-       - Query DB for entry at target path. No entry → unmanaged.
-       - If DB entry exists:
-         - DB type is symlink: target symlink points to `DB.source_path` → managed.
-         - DB type is copy with stored hash: target is a regular file. If `DB.mtime` is non-NULL and matches the on-disk mtime → managed (skip hash). Otherwise, fall back to hash: on-disk hash matches `DB.hash` → managed, else → unmanaged.
-         - DB type is copy with `symlink_target`: target is a symlink pointing to `DB.symlink_target` → managed.
-         - Otherwise → unmanaged.
+        - Query DB for entry at target path. No entry → unmanaged.
+        - If DB entry exists:
+          - DB type is symlink: target symlink points to `DB.source_path` → managed.
+          - DB type is copy or tmpl with stored hash: target is a regular file. If `DB.mtime` is non-NULL and matches the on-disk mtime → managed (skip hash). Otherwise, fall back to hash: on-disk hash matches `DB.hash` → managed, else → unmanaged.
+          - DB type is copy with `symlink_target`: target is a symlink pointing to `DB.symlink_target` → managed.
+          - Otherwise → unmanaged.
    c. **Action:**
       - **Managed:** Proceed to step 4 (write) silently. Safe to overwrite — no external modification detected.
       - **Unmanaged:** Collision prompt.
@@ -318,15 +373,16 @@ Traverse Rose Tree top-down (Pre-order DFS).
         - **quit:** Immediately terminate the program.
         - **diff:** Open pager in side-by-side mode. Left pane: source file. Right pane: target file on disk.
 4. **Write:**
-   - `symlink`: unlink target (if exists) → `symlink(entry.source, target)`.
-   - `copy`: if `entry.source` is a symlink on disk, create a symlink at target pointing to `read_link(entry.source)`. Otherwise, `fs::copy(source, target)`. After write: if `mode` set AND target is regular file → `chmod`.
+    - `symlink`: unlink target (if exists) → `symlink(entry.source, target)`.
+    - `copy`: if `entry.source` is a symlink on disk, create a symlink at target pointing to `read_link(entry.source)`. Otherwise, `fs::copy(source, target)`. After write: if `mode` set AND target is regular file → `chmod`.
+    - `tmpl`: resolve template context from `dotrift_data.toml` (base + active profiles). If source is a symlink, resolve it first. Parse the source file as a template, evaluate with context, write rendered output to target via streaming writer. After write: if `mode` set AND target is regular file → `chmod`.
 5. **DB Sync:** Insert/update DB entry after every successful write. Fields:
-   - `target_path`: absolute target path.
-   - `deploy_type`: `symlink` or `copy` (from rule).
-   - `source_path`: absolute source path (from portal entry).
-   - `hash`: hex digest of target file content if source is regular file (same hash compared during identical and managed checks), NULL if source is symlink or deploy type is `symlink`.
-   - `symlink_target`: `read_link(source_path)` if source is a symlink and deploy type is `copy`, NULL otherwise.
-   - `mtime`: modification time of the target file after write, read via `symlink_metadata().modified()`, stored as milliseconds since Unix epoch. NULL for symlinks.
+    - `target_path`: absolute target path.
+    - `deploy_type`: `symlink`, `copy`, or `tmpl` (from rule).
+    - `source_path`: absolute source path (from portal entry).
+    - `hash`: hex digest of target file content if source resolves to a regular file (same hash compared during identical and managed checks), NULL if source is a symlink or deploy type is `symlink`. For `tmpl`, hash is computed on the **rendered** target file.
+    - `symlink_target`: `read_link(source_path)` if source is a symlink and deploy type is `copy`, NULL otherwise.
+    - `mtime`: modification time of the target file after write, read via `symlink_metadata().modified()`, stored as milliseconds since Unix epoch. NULL for symlinks.
 
 ---
 
@@ -342,14 +398,15 @@ Reverses the `apply` process, removing managed files from the target. Config mus
 
 ### Execution Pipeline
 
+0. **Load Config:** Same as `apply` Phase 1 Step 1 — evaluate `dotrift.toml` as template, parse result. Used for target directory resolution and to determine which portal entries exist under the current config. Only files currently matched by configured portals are eligible for unapply.
 1. **`--dry-run` Behavior (if active):**
    * Iterate all DB entries.
    * Print `[REMOVE] <path>`: File is managed and exists on disk (would be deleted from disk and DB).
    * **Note:** Do not simulate recursive empty directory deletion for `--prune-empty-dirs`; only show the file deletions that would initiate the process.
 
-2. **Execution (if not `--dry-run`):** Iterate all DB entries.
-   * **Managed File:** Delete from disk. Delete from DB. ("Managed" determined by the same logic as `apply` step 3b.)
-   * **Unmanaged/Missing File:** Do not touch disk. Delete from DB.
+2. **Execution (if not `--dry-run`):** Iterate all DB entries. Skip any entry whose target path is not matched by a currently configured portal.
+    * **Managed File:** Delete from disk. Delete from DB. ("Managed" determined by the same logic as `apply` step 3b.)
+    * **Unmanaged/Missing File:** Do not touch disk. Delete from DB.
 
 3. **Prune Phase:** If `--prune-empty-dirs` is active, prune empty directories (see Pruning).
 
@@ -450,6 +507,41 @@ Shows a side-by-side diff between a managed target file and its corresponding so
 6. **Open Pager:** Open the pager TUI in side-by-side diff mode (see `spec/pager.md` — Diff Mode).
    * **Left pane:** Target file (the managed file on disk).
    * **Right pane:** Source file (the dotfile in the source directory).
+
+---
+
+## `profile` Command
+
+Manages template profiles.
+
+**Usage:** `dotrift profile <SUBCOMMAND> [ARGS]`
+
+**Subcommands:**
+- `list`: Show all profiles from `dotrift_data.toml`, mark active ones.
+- `activate <name>`: Activate a profile. Re-activating an already-active profile updates its timestamp to now (moves it to last in precedence).
+- `deactivate <name>`: Deactivate a profile. No error if not active.
+- `show`: Print the resolved variable context as a two-column key-value table.
+
+### Execution Pipeline
+
+**`list`:**
+1. Parse `dotrift_data.toml`. Error if it is missing or has no `[profile]` entries.
+2. Query DB for active profiles.
+3. Print each profile name. Active ones annotated with `(active)`.
+
+**`activate <name>`:**
+1. Parse `dotrift_data.toml`.
+2. Error if `<name>` is not defined in `[profile]`.
+3. `INSERT OR REPLACE` into `active_profiles` (REPLACE updates `activated_at`).
+
+**`deactivate <name>`:**
+1. Delete from `active_profiles` where `name` = `<name>`. No error if not found.
+
+**`show`:**
+1. Parse `dotrift_data.toml`.
+2. Query active profiles in activation order.
+3. Merge variables: `[variable]` base, then each profile in activation order (last wins).
+4. Print as a two-column table (`key` | `value`). If no variables and no active profiles, print nothing.
 
 ---
 
