@@ -67,12 +67,15 @@ impl FileViewer {
 
         self.buf.clear();
         for _ in start..end {
-            if self.file.read_until(b'\n', &mut self.buf).is_err() {
+            let n = match self.file.read_until(b'\n', &mut self.buf) {
+                Ok(n) => n,
+                Err(_) => break,
+            };
+            if n == 0 {
                 break;
             }
         }
 
-        self.buf.retain(|&b| b != b'\r');
         let content = String::from_utf8_lossy(&self.buf);
         frame.render_widget(Paragraph::new(content.as_ref()), area);
     }

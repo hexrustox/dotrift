@@ -1,0 +1,10 @@
+---
+source: tui/src/pager/view.rs
+assertion_line: 95
+expression: terminal.backend()
+---
+"a                                       "
+"b                                       "
+"c                                       "
+"d                                       "
+"(1/5)            /t/n/.t          h help"

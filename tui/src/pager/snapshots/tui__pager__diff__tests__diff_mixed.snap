@@ -1,0 +1,10 @@
+---
+source: tui/src/pager/diff.rs
+assertion_line: 354
+expression: terminal.backend()
+---
+" a                 | a                  "
+"-b                 |+x                  "
+" c                 | c                  "
+"                   |                    "
+"(1/1) (+1 -1)    /t/n/.t          h help"

@@ -1,0 +1,14 @@
+---
+source: tui/src/pager/explorer.rs
+expression: terminal.backend()
+---
+"hello                                            |preview                                           "
+"world                                            |                                                  "
+"                                                 |                                                  "
+"                                                 |                                                  "
+"                                                 |                                                  "
+"                                                 |                                                  "
+"                                                 |                                                  "
+"                                                 |                                                  "
+"                                                 |                                                  "
+"Browser (1/1)                     [            TMPDIR            ]                            h help"

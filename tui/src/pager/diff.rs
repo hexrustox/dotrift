@@ -33,18 +33,16 @@ struct DiffPair {
 struct FileIndex {
     file: BufReader<File>,
     offsets: Vec<u64>,
+    read_seq: Option<usize>,
 }
 
 impl FileIndex {
     fn new(file: BufReader<File>, offsets: Vec<u64>) -> Self {
-        Self { file, offsets }
-    }
-
-    #[cfg(test)]
-    fn from_reader(mut file: BufReader<File>) -> io::Result<Self> {
-        use super::build_offsets;
-        let offsets = build_offsets(&mut file)?;
-        Ok(Self { file, offsets })
+        Self {
+            file,
+            offsets,
+            read_seq: None,
+        }
     }
 
     fn lines_count(&self) -> usize {
@@ -56,13 +54,13 @@ impl FileIndex {
         if idx >= self.lines_count() {
             return Ok(());
         }
-        self.file.seek(SeekFrom::Start(self.offsets[idx]))?;
+        if self.read_seq != Some(idx.saturating_sub(1)) {
+            self.file.seek(SeekFrom::Start(self.offsets[idx]))?;
+        }
         self.file.read_until(b'\n', buf)?;
+        self.read_seq = Some(idx);
         if buf.ends_with(b"\n") {
             buf.pop();
-            if buf.ends_with(b"\r") {
-                buf.pop();
-            }
         }
         Ok(())
     }
@@ -330,52 +328,57 @@ impl PagerMode for Diff {
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, io::Write};
+
     use super::*;
+    use insta::assert_snapshot;
+    use ratatui::{Terminal, backend::TestBackend};
     use tempfile::NamedTempFile;
     use test_case::test_case;
 
-    fn file_index_from_str(s: &str) -> (NamedTempFile, FileIndex) {
-        let tmp = NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), s).unwrap();
-        let fi = FileIndex::from_reader(BufReader::new(File::open(tmp.path()).unwrap())).unwrap();
-        (tmp, fi)
+    #[test_case("diff_empty", "", ""; "empty")]
+    #[test_case("diff_equal", "hello\nworld\n", "hello\nworld\n"; "equal")]
+    #[test_case("diff_insert", "keep\n", "keep\nadded\n"; "insert")]
+    #[test_case("diff_delete", "keep\nremove\n", "keep\n"; "delete")]
+    #[test_case("diff_change", "old\n", "new\n"; "change")]
+    #[test_case("diff_mixed", "a\nb\nc\n", "a\nx\nc\n"; "mixed")]
+    fn test_render(snap_name: &str, old_str: &str, new_str: &str) {
+        let old = NamedTempFile::new().unwrap();
+        let new = NamedTempFile::new().unwrap();
+        fs::write(old.path(), old_str).unwrap();
+        fs::write(new.path(), new_str).unwrap();
+
+        let mut diff = Diff::new(old.path(), new.path()).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(40, 5)).unwrap();
+        terminal
+            .draw(|f| {
+                diff.render(f, f.area());
+            })
+            .unwrap();
+        assert_snapshot!(snap_name, terminal.backend());
     }
 
-    fn spans_to_string(line: &Line) -> String {
-        line.spans
-            .iter()
-            .map(|s| s.content.as_ref())
-            .collect::<Vec<_>>()
-            .concat()
-    }
-
-    #[test_case("a\nb\n", "a\nb\n", " a\n b", " a\n b"; "equal")]
-    #[test_case("a\nb\nc\n", "a\nc\n", " a\n-b\n c", " a\n\n c"; "delete mid")]
-    #[test_case("a\nc\n", "a\nb\nc\n", " a\n\n c", " a\n+b\n c"; "insert mid")]
-    #[test_case("old\n", "new\n", "-old", "+new"; "change")]
-    #[test_case("a\nb\nc\n", "a\nx\nc\n", " a\n-b\n c", " a\n+x\n c"; "mixed change")]
-    #[test_case("a\nb\n", "a\n", " a\n-b", " a\n"; "solo delete")]
-    #[test_case("a\n", "a\nb\n", " a\n", " a\n+b"; "solo insert")]
-    #[test_case("", "", "", ""; "both empty")]
-    #[test_case("", "x\n", "", "+x"; "empty old")]
-    #[test_case("x\n", "", "-x", ""; "empty new")]
-    fn diff(old: &str, new: &str, expected_old: &str, expected_new: &str) {
-        let pairs = compute_pairs_from_ops(old, new);
-
-        let (_tmp1, mut old_fi) = file_index_from_str(old);
-        let (_tmp2, mut new_fi) = file_index_from_str(new);
-
-        let mut buf = Vec::new();
-        let mut actual_old = Vec::new();
-        let mut actual_new = Vec::new();
-
-        for pair in &pairs {
-            let (l, r) = pair_lines(pair, &mut old_fi, &mut new_fi, &mut buf);
-            actual_old.push(spans_to_string(&l));
-            actual_new.push(spans_to_string(&r));
+    #[test]
+    fn test_scroll() {
+        let mut old = NamedTempFile::new().unwrap();
+        let mut new = NamedTempFile::new().unwrap();
+        for i in 1..=20 {
+            writeln!(old, "line {i}").unwrap();
+            writeln!(new, "line {i}").unwrap();
         }
+        old.flush().unwrap();
+        new.flush().unwrap();
 
-        assert_eq!(actual_old.join("\n"), expected_old);
-        assert_eq!(actual_new.join("\n"), expected_new);
+        let mut diff = Diff::new(old.path(), new.path()).unwrap();
+        let vp_h = 5;
+        diff.scroll_down(5, vp_h);
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        terminal
+            .draw(|f| {
+                diff.render(f, f.area());
+            })
+            .unwrap();
+        assert_snapshot!("diff_scroll", terminal.backend());
     }
 }

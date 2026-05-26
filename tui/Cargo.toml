@@ -13,5 +13,6 @@ similar = "2"
 strum.workspace = true
 
 [dev-dependencies]
+insta = { version = "1.47.2", features = ["filters"] }
 tempfile.workspace = true
 test-case.workspace = true

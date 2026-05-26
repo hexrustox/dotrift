@@ -405,3 +405,98 @@ impl PagerMode for Explorer {
         self.focus = self.focus.toggle();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, io::Write};
+
+    use super::*;
+    use insta::{assert_snapshot, with_settings};
+    use ratatui::{Terminal, backend::TestBackend};
+    use tempfile::{NamedTempFile, TempDir};
+    use test_case::test_case;
+
+    #[test_case(
+        "explorer_dir_files",
+        "preview\n",
+        |dir| {
+            for name in &["b.txt", "a.txt", "c.txt"] {
+                fs::write(dir.join(name), format!("content of {name}\n")).unwrap();
+            }
+        },
+        |_explorer| {};
+        "dir_files"
+    )]
+    #[test_case(
+        "explorer_dir_empty", "preview\n", |_dir| {}, |_explorer| {}; "dir_empty"
+    )]
+    #[test_case(
+        "explorer_focus_preview",
+        "preview\n",
+        |dir| {
+            for name in &["a.txt", "b.txt"] {
+                fs::write(dir.join(name), format!("content of {name}\n")).unwrap();
+            }
+        },
+        |explorer| {
+            explorer.on_tab();
+        };
+        "focus_preview"
+    )]
+    #[test_case(
+        "explorer_browser_file",
+        "preview\n",
+        |dir| {
+            fs::write(dir.join("data.txt"), "hello\nworld\n").unwrap();
+        },
+        |explorer| {
+            explorer.on_enter();
+        };
+        "browser_file"
+    )]
+    #[test_case(
+        "explorer_scroll_browser",
+        "preview\n",
+        |dir| {
+            for i in 1..=30 {
+                let mut f = fs::File::create(dir.join(format!("file{i:02}"))).unwrap();
+                writeln!(f, "content {i}").unwrap();
+            }
+        },
+        |explorer| {
+            explorer.scroll_down(10, 8);
+        };
+        "scroll_browser"
+    )]
+    fn test_render(
+        snap_name: &str,
+        preview_content: &str,
+        setup_dir: impl FnOnce(&Path),
+        setup_explorer: impl FnOnce(&mut Explorer),
+    ) {
+        unsafe {
+            std::env::remove_var("LS_COLORS");
+        }
+
+        let dir = TempDir::new().unwrap();
+        setup_dir(dir.path());
+
+        let preview_file = NamedTempFile::new().unwrap();
+        fs::write(preview_file.path(), preview_content).unwrap();
+
+        let mut explorer = Explorer::new(preview_file.path(), dir.path()).unwrap();
+        setup_explorer(&mut explorer);
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 10)).unwrap();
+        terminal
+            .draw(|f| {
+                explorer.render(f, f.area());
+            })
+            .unwrap();
+
+        let dir = dir.path().display().to_string();
+        with_settings!({filters => vec![(dir.as_str(), format!("[{:^p$}]", "TMPDIR", p = dir.len().saturating_sub(2)).as_str())]}, {
+            assert_snapshot!(snap_name, terminal.backend());
+        });
+    }
+}

@@ -66,6 +66,7 @@
                 packages = with pkgs; [
                   cargo-deny
                   cargo-edit
+                  cargo-insta
                   cargo-machete
                   clang
                   codebook

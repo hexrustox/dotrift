@@ -1,0 +1,10 @@
+---
+source: tui/src/pager/view.rs
+assertion_line: 95
+expression: terminal.backend()
+---
+"line1                                   "
+"line2                                   "
+"line3                                   "
+"                                        "
+"(1/1)            /t/n/.t          h help"

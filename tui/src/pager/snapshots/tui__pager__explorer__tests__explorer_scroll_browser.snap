@@ -1,0 +1,14 @@
+---
+source: tui/src/pager/explorer.rs
+expression: terminal.backend()
+---
+"[            TMPDIR            ]                 |preview                                           "
+"  file04                                         |                                                  "
+"  file05                                         |                                                  "
+"  file06                                         |                                                  "
+"  file07                                         |                                                  "
+"  file08                                         |                                                  "
+"  file09                                         |                                                  "
+"  file10                                         |                                                  "
+"> file11                                         |                                                  "
+"Browser (11/30)                   [            TMPDIR            ]                            h help"

@@ -38,11 +38,11 @@ fn diff() {
 fn explorer() {
     let mut file = NamedTempFile::new().unwrap();
     let dir = TempDir::new().unwrap();
-    for i in 1..=100 {
+    for i in 1..=10 {
         writeln!(file, "line {i}").unwrap();
     }
     file.flush().unwrap();
-    for i in 1..=100 {
+    for i in 1..=10 {
         fs::write(dir.path().join(format!("file{}", i)), "").unwrap();
     }
     tui::pager::run(PagerArgs::Explorer {

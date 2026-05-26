@@ -70,3 +70,54 @@ impl PagerMode for View {
         self.viewer.scroll_to_bottom(viewport_h);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, io::Write};
+
+    use super::*;
+
+    use insta::assert_snapshot;
+    use ratatui::{Terminal, backend::TestBackend};
+    use tempfile::NamedTempFile;
+    use test_case::test_case;
+
+    #[test_case("view_empty", ""; "empty")]
+    #[test_case("view_single_line", "hello\n"; "single_line")]
+    #[test_case("view_multiple_fit", "line1\nline2\nline3\n"; "multiple_fit")]
+    #[test_case("view_overflow_viewport", "a\nb\nc\nd\ne\nf\ng\nh\n"; "overflow_viewport")]
+    fn test_render(snap_name: &str, content: &str) {
+        let file = NamedTempFile::new().unwrap();
+        fs::write(file.path(), content).unwrap();
+
+        let mut view = View::new(file.path()).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(40, 5)).unwrap();
+        terminal
+            .draw(|f| {
+                view.render(f, f.area());
+            })
+            .unwrap();
+        assert_snapshot!(snap_name, terminal.backend());
+    }
+
+    #[test]
+    fn test_scroll() {
+        let mut file = NamedTempFile::new().unwrap();
+        for i in 1..=20 {
+            writeln!(file, "line {i}").unwrap();
+        }
+        file.flush().unwrap();
+
+        let mut view = View::new(file.path()).unwrap();
+        let vp_h = 5;
+        view.scroll_down(5, vp_h);
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        terminal
+            .draw(|f| {
+                view.render(f, f.area());
+            })
+            .unwrap();
+        assert_snapshot!("view_scroll", terminal.backend());
+    }
+}
