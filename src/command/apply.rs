@@ -16,11 +16,10 @@ use crate::{
     cli::{ApplyFlags, GlobalFlags},
     command::{
         prompt::{CollisionOptions, prompt_collision},
-        resolve,
         tree::{Node, build_tree},
         util::{
-            GLOB_OPTION, PathLiteral, SafeStripPrefix, clean_up, clone_file, hash_file,
-            is_managed, read_mtime, resolve_target,
+            GLOB_OPTION, PathLiteral, SafeStripPrefix, clean_up, clone_file, hash_file, is_managed,
+            read_mtime, resolve_portal_entries, resolve_target,
         },
     },
     config::{Config, DeployType, FileMode, Rules},
@@ -125,7 +124,7 @@ fn resolve_portals(
 ) -> Result<HashMap<PathBuf, PortalEntry>> {
     let mut portal_entries: HashMap<PathBuf, PortalEntry> = HashMap::new();
 
-    resolve::resolve_portal_entries(
+    resolve_portal_entries(
         source_dir,
         target_dir,
         portals,

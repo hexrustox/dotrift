@@ -17,11 +17,10 @@ use crate::{
     cli::{AddFlags, GlobalFlags, OpenEditor},
     command::{
         apply::build_ignore,
-        resolve,
         to_absolute_path, tree,
         util::{
-            GLOB_OPTION, PathLiteral, SafeStripPrefix, copy_recursive, is_glob, resolve_target,
-            walk_files,
+            GLOB_OPTION, PathLiteral, SafeStripPrefix, copy_recursive, is_glob,
+            resolve_portal_entries, resolve_target, walk_files,
         },
     },
     config::Config,
@@ -252,7 +251,7 @@ fn resolve_collisions(
     let mut root = tree::Node::default();
     let mut collisions: HashMap<String, HashSet<String>> = HashMap::new();
 
-    resolve::resolve_portal_entries(
+    resolve_portal_entries(
         source_dir,
         target_dir,
         portal,
