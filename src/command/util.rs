@@ -13,6 +13,7 @@ use std::{
 use color_eyre::Section;
 use color_eyre::eyre::{Context, Result, eyre};
 use glob::MatchOptions;
+use ignore::gitignore::Gitignore;
 use normalize_path::NormalizePath;
 use twox_hash::XxHash64;
 use walkdir::WalkDir;
@@ -196,6 +197,10 @@ pub fn is_managed(target: &Path, db: &Db, target_hash: Option<u64>) -> bool {
     }
 }
 
+pub fn is_ignored(matcher: &Gitignore, path: &Path) -> bool {
+    matcher.matched_path_or_any_parents(path, false).is_ignore()
+}
+
 pub fn walk_all(path: &Path) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
     WalkDir::new(path).into_iter().flatten()
 }
@@ -259,7 +264,7 @@ pub fn clean_up(
         }
 
         if path.path_exists() {
-            let managed = is_managed(path, db, None);
+            let managed = is_managed_entry(&entry, path, None);
             if managed {
                 if dry_run {
                     count += 1;

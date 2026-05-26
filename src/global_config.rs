@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs, io::ErrorKind, path::PathBuf};
 
 use color_eyre::{
     Section,
@@ -118,12 +118,15 @@ impl GlobalConfig {
             None => global_config_path()?,
         };
 
-        let result = fs::read_to_string(&path);
-        if result.is_err() && !specific {
-            return Ok(Self::default());
-        }
-
-        let content = crate::read_file_err!(result, &path)?;
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == ErrorKind::NotFound && !specific => return Ok(Self::default()),
+            Err(e) => {
+                return Err(e).wrap_err_with(|| {
+                    format!("Failed to read global config `{}`", path.display())
+                });
+            }
+        };
         crate::parse_err!(toml::from_str(&content), &path)
     }
 }

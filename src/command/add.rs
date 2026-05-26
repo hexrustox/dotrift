@@ -16,11 +16,12 @@ use normalize_path::NormalizePath;
 use crate::{
     cli::{AddFlags, GlobalFlags, OpenEditor},
     command::{
-        apply::{build_ignore, is_ignored},
+        apply::build_ignore,
+        resolve,
         to_absolute_path, tree,
         util::{
             GLOB_OPTION, PathLiteral, SafeStripPrefix, copy_recursive, is_glob, resolve_target,
-            strip_prefix_filter_glob, walk_files,
+            walk_files,
         },
     },
     config::Config,
@@ -251,68 +252,17 @@ fn resolve_collisions(
     let mut root = tree::Node::default();
     let mut collisions: HashMap<String, HashSet<String>> = HashMap::new();
 
-    for (pattern, target_rel) in portal {
-        let pattern_normalized = Path::new(pattern).normalize();
-        let pattern_str = pattern_normalized.to_string_lossy().into_owned();
-        let target_rel_normalized = target_rel.normalize();
-
-        if is_glob(&pattern_str) {
-            let prefix = strip_prefix_filter_glob(&pattern_str);
-            let full_pattern = source_dir.join(&pattern_str);
-            let full_pattern_str = full_pattern.to_string_lossy();
-
-            let Ok(paths) = crate::glob_err!(
-                glob::glob_with(&full_pattern_str, GLOB_OPTION),
-                &full_pattern_str
-            ) else {
-                continue;
-            };
-            for source_path in paths.flatten() {
-                if source_path.path_is_dir() {
-                    continue;
-                }
-                let source_rel = source_path.safe_strip_prefix(source_dir);
-                let stripped = if prefix.is_empty() {
-                    source_rel.to_path_buf()
-                } else {
-                    source_rel.safe_strip_prefix(&prefix).to_path_buf()
-                };
-                let target_path = target_dir.join(&target_rel_normalized).join(stripped);
-                if is_ignored(&ignore_matcher, &target_path) {
-                    continue;
-                }
-                check_and_collect_collision(&mut root, &mut collisions, &target_path, &pattern_str);
-            }
-        } else {
-            let source_path = source_dir.join(&pattern_normalized);
-            if !source_path.path_exists() {
-                continue;
-            }
-
-            if source_path.path_is_dir() {
-                for entry in walk_files(&source_path) {
-                    let file_source = entry.path().to_path_buf();
-                    let rel_to_pattern = file_source.safe_strip_prefix(&source_path);
-                    let target_path = target_dir.join(&target_rel_normalized).join(rel_to_pattern);
-                    if is_ignored(&ignore_matcher, &target_path) {
-                        continue;
-                    }
-                    check_and_collect_collision(
-                        &mut root,
-                        &mut collisions,
-                        &target_path,
-                        &pattern_str,
-                    );
-                }
-            } else {
-                let target_path = target_dir.join(&target_rel_normalized);
-                if is_ignored(&ignore_matcher, &target_path) {
-                    continue;
-                }
-                check_and_collect_collision(&mut root, &mut collisions, &target_path, &pattern_str);
-            }
-        }
-    }
+    resolve::resolve_portal_entries(
+        source_dir,
+        target_dir,
+        portal,
+        &ignore_matcher,
+        true,
+        |_, target_path, pattern_str| {
+            check_and_collect_collision(&mut root, &mut collisions, &target_path, &pattern_str);
+            Ok(())
+        },
+    )?;
 
     Ok((root, collisions))
 }

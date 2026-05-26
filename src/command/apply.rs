@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
-    fs::{self, remove_file},
-    os::unix::fs::{self as unix_fs, PermissionsExt},
+    fs::{self, remove_file, symlink_metadata},
+    os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
 };
 
@@ -9,18 +9,18 @@ use color_eyre::{
     Section,
     eyre::{Context, Result, eyre},
 };
-use glob::{Pattern, glob_with};
+use glob::Pattern;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
-use normalize_path::NormalizePath;
 
 use crate::{
     cli::{ApplyFlags, GlobalFlags},
     command::{
         prompt::{CollisionOptions, prompt_collision},
+        resolve,
         tree::{Node, build_tree},
         util::{
-            GLOB_OPTION, PathLiteral, SafeStripPrefix, clean_up, clone_file, hash_file, is_glob,
-            is_managed, read_mtime, resolve_target, strip_prefix_filter_glob, walk_files,
+            GLOB_OPTION, PathLiteral, SafeStripPrefix, clean_up, clone_file, hash_file,
+            is_managed, read_mtime, resolve_target,
         },
     },
     config::{Config, DeployType, FileMode, Rules},
@@ -125,115 +125,18 @@ fn resolve_portals(
 ) -> Result<HashMap<PathBuf, PortalEntry>> {
     let mut portal_entries: HashMap<PathBuf, PortalEntry> = HashMap::new();
 
-    for (pattern, target_rel) in portals {
-        let pattern_normalized = Path::new(pattern).normalize();
-        let target_rel_normalized = target_rel.normalize();
-
-        if is_glob(&pattern_normalized.to_string_lossy()) {
-            resolve_glob_portal(
-                source_dir,
-                target_dir,
-                &pattern_normalized,
-                &target_rel_normalized,
-                ignore_matcher,
-                &mut portal_entries,
-            )?;
-        } else {
-            resolve_literal_portal(
-                source_dir,
-                target_dir,
-                &pattern_normalized,
-                &target_rel_normalized,
-                ignore_matcher,
-                &mut portal_entries,
-            )?;
-        }
-    }
+    resolve::resolve_portal_entries(
+        source_dir,
+        target_dir,
+        portals,
+        ignore_matcher,
+        false,
+        |source_path, target_path, _| {
+            insert_portal_entry(&mut portal_entries, target_path, source_path)
+        },
+    )?;
 
     Ok(portal_entries)
-}
-
-fn resolve_glob_portal(
-    source_dir: &Path,
-    target_dir: &Path,
-    pattern: &Path,
-    target_rel: &Path,
-    ignore_matcher: &Gitignore,
-    portal_entries: &mut HashMap<PathBuf, PortalEntry>,
-) -> Result<()> {
-    let prefix = strip_prefix_filter_glob(&pattern.to_string_lossy());
-    let full_pattern = source_dir.join(pattern);
-    let full_pattern_str = full_pattern.to_string_lossy();
-
-    for source_path in
-        crate::glob_err!(glob_with(&full_pattern_str, GLOB_OPTION), &full_pattern_str)?.flatten()
-    {
-        if source_path.path_is_dir() {
-            continue;
-        }
-
-        let source_rel = source_path.safe_strip_prefix(source_dir);
-
-        let stripped = if prefix.is_empty() {
-            source_rel.to_path_buf()
-        } else {
-            source_rel.safe_strip_prefix(&prefix).to_path_buf()
-        };
-
-        let target_path = target_dir.join(target_rel).join(stripped);
-
-        if is_ignored(ignore_matcher, &target_path) {
-            continue;
-        }
-
-        insert_portal_entry(portal_entries, target_path, source_path)?;
-    }
-
-    Ok(())
-}
-
-fn resolve_literal_portal(
-    source_dir: &Path,
-    target_dir: &Path,
-    pattern: &Path,
-    target_rel: &Path,
-    ignore_matcher: &Gitignore,
-    portal_entries: &mut HashMap<PathBuf, PortalEntry>,
-) -> Result<()> {
-    let source_path = source_dir.join(pattern);
-
-    if !source_path.path_exists() {
-        return Err(eyre!(
-            "Source path does not exist: `{}`",
-            source_path.display()
-        ));
-    }
-
-    if source_path.path_is_dir() {
-        for entry in walk_files(&source_path) {
-            let file_source = entry.path().to_path_buf();
-
-            let rel_to_pattern = file_source.safe_strip_prefix(&source_path);
-
-            let target_path = target_dir.join(target_rel).join(rel_to_pattern);
-
-            if is_ignored(ignore_matcher, &target_path) {
-                continue;
-            }
-
-            insert_portal_entry(portal_entries, target_path, file_source)?;
-        }
-    } else {
-        let target_path = target_dir.join(target_rel);
-
-        if is_ignored(ignore_matcher, &target_path) {
-            return Ok(());
-        }
-
-        insert_portal_entry(portal_entries, target_path, source_path)?;
-    }
-
-    Ok(())
 }
 
 fn insert_portal_entry(
@@ -257,10 +160,6 @@ fn insert_portal_entry(
         ));
     }
     Ok(())
-}
-
-pub fn is_ignored(matcher: &Gitignore, path: &Path) -> bool {
-    matcher.matched_path_or_any_parents(path, false).is_ignore()
 }
 
 fn apply_rules(
@@ -393,6 +292,8 @@ fn is_identical(
         DeployType::Copy => {
             source.path_is_file()
                 && target.path_is_file()
+                && symlink_metadata(source)
+                    .is_ok_and(|m1| symlink_metadata(target).is_ok_and(|m2| m1.size() == m2.size()))
                 && hash_file(source).is_ok_and(|h1| {
                     *source_hash = Some(h1);
                     hash_file(target).is_ok_and(|h2| {
