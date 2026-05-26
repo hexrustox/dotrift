@@ -108,7 +108,7 @@ CREATE TABLE managed_files (
 * `source_path`: Absolute path in `source-dir`. Used to read content for copies, or verify link targets for symlinks.
 * `hash`: Hex digest using `xxHash64` of target file content at last apply. NULL for symlinks. Used to detect external modifications to the target (managed check compares target-on-disk hash against DB hash).
 * `symlink_target`: The symlink destination stored at deploy time (i.e., `read_link(source_path)`). Present when deploy type is `copy` and source is a symlink. NULL otherwise. Decouples managed check from current source filesystem state.
-* `mtime`: Modification time of the target file at last apply, stored as nanoseconds since Unix epoch. NULL for symlinks. When the on-disk mtime matches this value, the file is considered managed without computing the hash.
+* `mtime`: Modification time of the target file at last apply, stored as milliseconds since Unix epoch. NULL for symlinks. When the on-disk mtime matches this value, the file is considered managed without computing the hash.
 
 ---
 
@@ -326,7 +326,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
    - `source_path`: absolute source path (from portal entry).
    - `hash`: hex digest of target file content if source is regular file (same hash compared during identical and managed checks), NULL if source is symlink or deploy type is `symlink`.
    - `symlink_target`: `read_link(source_path)` if source is a symlink and deploy type is `copy`, NULL otherwise.
-   - `mtime`: modification time of the target file after write, read via `symlink_metadata().modified()`, stored as nanoseconds since Unix epoch. NULL for symlinks.
+   - `mtime`: modification time of the target file after write, read via `symlink_metadata().modified()`, stored as milliseconds since Unix epoch. NULL for symlinks.
 
 ---
 
@@ -403,18 +403,18 @@ Otherwise (single file/symlink):
      # WARNING: <computed_target> is outside target directory <target_dir>
      "dest_rel" = "computed_target"
      ```
-   - **Target collision:** For each unique target path with collisions, assign a sequential ID. Place a `# CONFLICT <ID>` comment directly above every portal entry (including any newly auto-added entry) that resolves to that target:
+   - **Target collision:** For each unique target path with collisions, list the other colliding portal keys in a `# CONFLICT` comment placed directly above every portal entry (including any newly auto-added entry) that resolves to that target:
    ```toml
    [portal]
-   # CONFLICT 1
+   # CONFLICT b, c
    "a" = "a"
-   # CONFLICT 1
+   # CONFLICT a, c
    "b" = "a"
-   # CONFLICT 1
+   # CONFLICT a, b
    "c" = "a"
-   # CONFLICT 2
+   # CONFLICT y
    "x" = "b"
-   # CONFLICT 2
+   # CONFLICT x
    "y" = "b"
    ```
    Write the modified content to a **temporary file**. If no changes are needed (no missing key and no collision), skip this step — the editor opens on the real config directly.

@@ -42,7 +42,7 @@ on the right. Used when a directory on disk blocks file creation.
 
 **Content:**
 - **CWD line:** A single line above the listing showing the current directory path.
-- **Left pane (browser):** Directory listing with `..` entry for parent.
+- **Left pane (browser):** Directory listing.
   Entries sorted: directories first, files second, alphabetically within groups.
   - Directories shown as `name/`.
   - Symlinks shown as `name → /target`. Broken symlinks receive a distinct color.
