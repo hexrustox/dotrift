@@ -1,0 +1,12 @@
+[package]
+name = "templater"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+memmap2 = "0.9"
+miette = "7"
+thiserror = "2"
+
+[dev-dependencies]
+test-case.workspace = true

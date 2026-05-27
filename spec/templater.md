@@ -18,7 +18,7 @@ Modifiers apply to **all** delimiters (`{{ }}`, `{% %}`). Comments are not affec
 | `=` | `{{=` / `{%=` | Eat from previous `\n` (or SOF) to tag start |
 | `=` | `=}}` / `=%}` | Eat from tag end through next `\n` (or EOF) |
 
-Modifiers can be combined: `{{=-`, `-%}}`, `{%=-`, `=%}`.
+Modifiers are mutually exclusive on the same side — only one may appear at start and one at end. Left and right modifiers are independent.
 
 `=` eats the entire line the tag occupies — the tag produces no output; the expression/body it wraps produces output normally.
 
