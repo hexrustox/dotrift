@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::error::Error;
+use crate::error::{Error, ErrorKind};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum TagKind {
@@ -55,21 +55,32 @@ fn find_tags(source: &[u8]) -> Result<Vec<Tag>, Error> {
     let mut pos = 0;
 
     while pos < source.len() {
-        let open = match source[pos..]
+        let next = match source[pos..]
             .iter()
-            .position(|&b| b == b'{')
+            .position(|&b| b == b'{' || b == b'}' || b == b'%')
             .map(|p| pos + p)
         {
             Some(o) => o,
             None => break,
         };
 
-        let kind = match source.get(open + 1).copied() {
+        let b = source[next];
+        let b2 = source.get(next + 1).copied();
+
+        if b == b'}' && b2 == Some(b'}') || b == b'%' && b2 == Some(b'}') {
+            return Err(Error::new(ErrorKind::StrayDelimiter, next, 2, source));
+        }
+        if b != b'{' {
+            pos = next + 1;
+            continue;
+        }
+
+        let kind = match b2 {
             Some(b'{') => TagKind::Interp,
             Some(b'%') => TagKind::Stmt,
             Some(b'#') => TagKind::Comment,
             _ => {
-                pos = open + 1;
+                pos = next + 1;
                 continue;
             }
         };
@@ -80,10 +91,10 @@ fn find_tags(source: &[u8]) -> Result<Vec<Tag>, Error> {
             TagKind::Comment => b"#}",
         };
 
-        let interior_start = open + 2;
+        let interior_start = next + 2;
 
         let close = find_close(source, interior_start, close_delim)
-            .ok_or_else(|| Error::new("unclosed delimiter", open, 2))?;
+            .ok_or_else(|| Error::new(ErrorKind::UnclosedDelimiter, next, 2, source))?;
 
         let interior_end = close;
 
@@ -93,7 +104,7 @@ fn find_tags(source: &[u8]) -> Result<Vec<Tag>, Error> {
         let interior_content_end = interior_end - modifier_right.byte_len();
 
         tags.push(Tag {
-            start: open,
+            start: next,
             end: close + close_delim.len(),
             kind,
             interior_start: interior_content_start,
@@ -302,11 +313,6 @@ mod tests {
         find_tags(input.as_bytes()).unwrap()
     }
 
-    #[test]
-    fn unclosed_delimiter() {
-        assert!(find_tags(b"{{ unclosed").is_err());
-    }
-
     macro_rules! text {
         ($r:expr) => {
             RawToken::Text($r)
@@ -389,5 +395,14 @@ mod tests {
     ]; "trim_all_converging_at_newline_between_tags")]
     fn test_scan(input: &str) -> Vec<RawToken> {
         scan(input.as_bytes()).unwrap()
+    }
+
+    #[test_case("{{ unclosed" => (ErrorKind::UnclosedDelimiter, 0, 2); "unclosed_interpolation")]
+    #[test_case("{% unclosed" => (ErrorKind::UnclosedDelimiter, 0, 2); "unclosed_stmt")]
+    #[test_case("stray }}" => (ErrorKind::StrayDelimiter, 6, 2); "stray_interpolation")]
+    #[test_case("stray %}" => (ErrorKind::StrayDelimiter, 6, 2); "stray_stmt")]
+    fn test_error(input: &str) -> (ErrorKind, usize, usize) {
+        let e = find_tags(input.as_bytes()).unwrap_err();
+        e.destruct()
     }
 }

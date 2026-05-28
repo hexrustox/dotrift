@@ -1,73 +1,103 @@
-use std::fmt;
+use miette::{Diagnostic, SourceSpan};
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error, PartialEq)]
+pub enum ErrorKind {
+    #[error("unclosed delimiter")]
+    UnclosedDelimiter,
+
+    #[error("stray closing delimiter")]
+    StrayDelimiter,
+
+    #[error("unexpected tokens after expression")]
+    UnexpectedTokensAfterExpr,
+
+    #[error("empty statement")]
+    EmptyStatement,
+
+    #[error("stray {{% end %}} without matching opening block")]
+    StrayEnd,
+
+    #[error("stray {{% elif %}} without matching {{% if %}}")]
+    StrayElif,
+
+    #[error("stray {{% else %}} without matching {{% if %}}")]
+    StrayElse,
+
+    #[error("unexpected keyword in statement")]
+    UnexpectedKeyword,
+
+    #[error("unclosed block")]
+    UnclosedBlock,
+
+    #[error("expected {{% for var in expr %}}")]
+    ExpectedForSyntax,
+
+    #[error("expected variable name after 'for'")]
+    ExpectedForVar,
+
+    #[error("expected 'in' after for variable")]
+    ExpectedForIn,
+
+    #[error("unclosed {{% for %}} block")]
+    UnclosedFor,
+
+    #[error("expected field name after '.'")]
+    ExpectedFieldName,
+
+    #[error("unexpected end of expression")]
+    UnexpectedEndOfExpr,
+
+    #[error("expected ',' in list")]
+    ExpectedCommaInList,
+
+    #[error("expected ',' between arguments")]
+    ExpectedCommaBetweenArgs,
+
+    #[error("unexpected token")]
+    UnexpectedToken,
+
+    #[error("unclosed string literal")]
+    UnclosedString,
+
+    #[error("unclosed list")]
+    UnclosedList,
+
+    #[error("unclosed grouping")]
+    UnclosedGroup,
+}
+
+#[derive(Debug, Diagnostic, Error, PartialEq)]
+#[error("{kind}")]
 pub struct Error {
-    pub msg: String,
-    pub at: usize,
-    pub len: usize,
+    #[source_code]
+    src: String,
+    kind: ErrorKind,
+    #[label]
+    at: SourceSpan,
 }
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.msg)
-    }
-}
-
-impl std::error::Error for Error {}
 
 impl Error {
-    pub fn new(msg: impl Into<String>, at: usize, len: usize) -> Self {
-        Self {
-            msg: msg.into(),
-            at,
-            len,
+    pub fn new(kind: ErrorKind, at: usize, len: usize, source: &[u8]) -> Self {
+        let start = source[..at]
+            .iter()
+            .rposition(|b| *b == b'\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let end = source[at + len..]
+            .iter()
+            .position(|b| *b == b'\n')
+            .map(|i| i + at + len)
+            .unwrap_or(source.len());
+        Error {
+            kind,
+            at: (at - start, len).into(),
+            src: String::from_utf8_lossy(&source[start..end]).into_owned(),
         }
     }
 
-    pub fn span(&self) -> (usize, usize) {
-        (self.at, self.len)
-    }
-
-    pub fn line_col(&self, source: &[u8]) -> (usize, usize) {
-        let mut line = 1;
-        let mut col = 1;
-        for (i, &b) in source.iter().enumerate() {
-            if i >= self.at {
-                break;
-            }
-            if b == b'\n' {
-                line += 1;
-                col = 1;
-            } else {
-                col += 1;
-            }
-        }
-        (line, col)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_line_col_first_line() {
-        let source = b"hello";
-        let err = Error::new("test", 0, 1);
-        assert_eq!(err.line_col(source), (1, 1));
-    }
-
-    #[test]
-    fn test_line_col_second_line() {
-        let source = b"hello\nworld";
-        let err = Error::new("test", 7, 1);
-        assert_eq!(err.line_col(source), (2, 2));
-    }
-
-    #[test]
-    fn test_line_col_empty() {
-        let source = b"";
-        let err = Error::new("test", 0, 1);
-        assert_eq!(err.line_col(source), (1, 1));
+    #[cfg(test)]
+    pub fn destruct(self) -> (ErrorKind, usize, usize) {
+        (self.kind, self.at.offset(), self.at.len())
     }
 }

@@ -1,11 +1,11 @@
 use std::ops::Range;
 
 use crate::ast::{Expr, Node};
-use crate::error::Error;
+use crate::error::{Error, ErrorKind};
 use crate::scanner::RawToken;
 
 #[derive(Debug, Clone, PartialEq)]
-enum Token {
+enum TokenKind {
     Ident(String),
     Str(String),
     Int(i64),
@@ -25,6 +25,12 @@ enum Token {
     In,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct Token {
+    kind: TokenKind,
+    range: Range<usize>,
+}
+
 pub fn parse(tokens: &[RawToken], source: &[u8]) -> Result<Vec<Node>, Error> {
     let mut nodes = Vec::new();
     let mut i = 0;
@@ -36,31 +42,59 @@ pub fn parse(tokens: &[RawToken], source: &[u8]) -> Result<Vec<Node>, Error> {
                 i += 1;
             }
             RawToken::Interpolate(range) => {
-                let toks = tokenize(source, range.clone());
+                let toks = tokenize(source, range.clone())?;
                 let mut pos = 0;
-                let expr = parse_postfix(&toks, &mut pos, source, range.start)?;
+                let expr = parse_postfix(&toks, &mut pos, source, range.start, range.end)?;
                 if pos != toks.len() {
-                    return Err(Error::new("unexpected tokens after expression", 0, 0));
+                    return Err(Error::new(
+                        ErrorKind::UnexpectedTokensAfterExpr,
+                        toks[pos].range.start,
+                        1,
+                        source,
+                    ));
                 }
                 nodes.push(Node::Interpolate(expr));
                 i += 1;
             }
             RawToken::Statement(range) => {
-                let toks = tokenize(source, range.clone());
-                let kw = toks
-                    .first()
-                    .ok_or_else(|| Error::new("empty statement", 0, 0))?;
-                let (stmt_nodes, consumed) = match kw {
-                    Token::If => parse_if_block(tokens, source, i)?,
-                    Token::For => parse_for_block(tokens, source, i)?,
-                    Token::End => {
-                        return Err(Error::new("{% end %} without matching opening block", 0, 0));
+                let opening = range.clone();
+                let toks = tokenize(source, range.clone())?;
+                let kw = toks.first().ok_or_else(|| {
+                    Error::new(ErrorKind::EmptyStatement, opening.start - 2, opening.len() + 4, source)
+                })?;
+                let (stmt_nodes, consumed) = match &kw.kind {
+                    TokenKind::If => parse_if_block(tokens, source, i)?,
+                    TokenKind::For => parse_for_block(tokens, source, i)?,
+                    TokenKind::Elif => {
+                        return Err(Error::new(
+                            ErrorKind::StrayElif,
+                            opening.start - 2,
+                            opening.len() + 4,
+                            source,
+                        ));
+                    }
+                    TokenKind::Else => {
+                        return Err(Error::new(
+                            ErrorKind::StrayElse,
+                            opening.start - 2,
+                            opening.len() + 4,
+                            source,
+                        ));
+                    }
+                    TokenKind::End => {
+                        return Err(Error::new(
+                            ErrorKind::StrayEnd,
+                            opening.start - 2,
+                            opening.len() + 4,
+                            source,
+                        ));
                     }
                     _ => {
                         return Err(Error::new(
-                            format!("unexpected keyword in statement: {:?}", kw),
-                            0,
-                            0,
+                            ErrorKind::UnexpectedKeyword,
+                            kw.range.start,
+                            kw.range.len(),
+                            source,
                         ));
                     }
                 };
@@ -83,63 +117,97 @@ fn parse_if_block(
     let mut i = start;
     let mut consumed = 0;
 
+    let opening = match tokens.get(start) {
+        Some(RawToken::Statement(r)) => r.clone(),
+        _ => return Err(Error::new(ErrorKind::UnclosedBlock, 0, 1, source)),
+    };
+
     loop {
         let raw = match tokens.get(i) {
             Some(RawToken::Statement(range)) => range.clone(),
-            Some(RawToken::Text(_) | RawToken::Interpolate(_)) => {
-                i += 1;
-                consumed += 1;
-                continue;
-            }
             None => {
-                return Err(Error::new("unclosed {% if %} block", 0, 0));
+                return Err(Error::new(
+                    ErrorKind::UnclosedBlock,
+                    opening.start - 2,
+                    opening.len() + 4,
+                    source,
+                ));
+            }
+            _ => {
+                unreachable!()
             }
         };
 
-        let toks = tokenize(source, raw.clone());
+        let toks = tokenize(source, raw.clone())?;
         let first = toks.first().cloned();
 
         match first {
-            Some(Token::If) => {
+            Some(Token {
+                kind: TokenKind::If,
+                ..
+            }) => {
                 let mut pos = 1;
-                let cond = parse_postfix(&toks, &mut pos, source, raw.start)?;
+                let cond = parse_postfix(&toks, &mut pos, source, toks[0].range.end, raw.end)?;
                 if pos != toks.len() {
-                    return Err(Error::new("unexpected tokens after expression", 0, 0));
+                    return Err(Error::new(
+                        ErrorKind::UnexpectedTokensAfterExpr,
+                        toks[pos].range.start,
+                        1,
+                        source,
+                    ));
                 }
                 let (body, body_consumed) =
-                    collect_body_until(tokens, source, i + 1, &[Token::Elif, Token::Else])?;
+                    collect_body_until(tokens, source, i + 1, &[TokenKind::Elif, TokenKind::Else])?;
                 branches.push((cond, body));
                 i += body_consumed + 1;
                 consumed += body_consumed + 1;
             }
-            Some(Token::Elif) => {
+            Some(Token {
+                kind: TokenKind::Elif,
+                ..
+            }) => {
                 let mut pos = 1;
-                let cond = parse_postfix(&toks, &mut pos, source, raw.start)?;
+                let cond = parse_postfix(&toks, &mut pos, source, toks[0].range.end, raw.end)?;
                 if pos != toks.len() {
-                    return Err(Error::new("unexpected tokens after expression", 0, 0));
+                    return Err(Error::new(
+                        ErrorKind::UnexpectedTokensAfterExpr,
+                        toks[pos].range.start,
+                        1,
+                        source,
+                    ));
                 }
                 let (body, body_consumed) =
-                    collect_body_until(tokens, source, i + 1, &[Token::Elif, Token::Else])?;
+                    collect_body_until(tokens, source, i + 1, &[TokenKind::Elif, TokenKind::Else])?;
                 branches.push((cond, body));
                 i += body_consumed + 1;
                 consumed += body_consumed + 1;
             }
-            Some(Token::Else) => {
+            Some(Token {
+                kind: TokenKind::Else,
+                ..
+            }) => {
                 let (body, body_consumed) = collect_body_until(tokens, source, i + 1, &[])?;
                 else_branch = Some(body);
                 consumed += body_consumed + 2;
                 break;
             }
-            Some(Token::End) => {
+            Some(Token {
+                kind: TokenKind::End,
+                ..
+            }) => {
                 consumed += 1;
                 break;
             }
-            _ => {
+            Some(tok) => {
                 return Err(Error::new(
-                    "expected {% if %}, {% elif %}, {% else %}, or {% end %}",
-                    raw.start,
-                    raw.len(),
+                    ErrorKind::UnexpectedKeyword,
+                    tok.range.start,
+                    tok.range.len(),
+                    source,
                 ));
+            }
+            None => {
+                unreachable!()
             }
         }
     }
@@ -160,59 +228,64 @@ fn parse_for_block(
 ) -> Result<(Vec<Node>, usize), Error> {
     let range = match tokens.get(start) {
         Some(RawToken::Statement(r)) => r.clone(),
-        _ => return Err(Error::new("expected statement", 0, 0)),
+        _ => unreachable!(),
     };
 
-    let toks = tokenize(source, range.clone());
+    let toks = tokenize(source, range.clone())?;
 
     if toks.len() < 4 {
         return Err(Error::new(
-            "expected {% for var in expr %}",
-            range.start,
-            range.len(),
+            ErrorKind::ExpectedForSyntax,
+            toks[0].range.end,
+            1,
+            source,
         ));
     }
 
-    let var = match &toks[1] {
-        Token::Ident(name) => name.clone(),
+    let var = match &toks[1].kind {
+        TokenKind::Ident(name) => name.clone(),
         _ => {
             return Err(Error::new(
-                "expected variable name after for",
-                range.start,
-                range.len(),
+                ErrorKind::ExpectedForVar,
+                toks[1].range.start,
+                toks[1].range.len(),
+                source,
             ));
         }
     };
 
-    if toks[2] != Token::In {
+    if toks[2].kind != TokenKind::In {
         return Err(Error::new(
-            "expected 'in' after for variable",
-            range.start,
-            range.len(),
+            ErrorKind::ExpectedForIn,
+            toks[2].range.start,
+            toks[2].range.len(),
+            source,
         ));
     }
 
     let mut pos = 3;
-    let collection = parse_postfix(&toks, &mut pos, source, range.start)?;
+    let collection = parse_postfix(&toks, &mut pos, source, toks[0].range.end, range.end)?;
     if pos != toks.len() {
-        return Err(Error::new("unexpected tokens after expression", 0, 0));
+        return Err(Error::new(
+            ErrorKind::UnexpectedTokensAfterExpr,
+            toks[pos].range.start,
+            1,
+            source,
+        ));
     }
 
     let (body, body_consumed) = collect_body_until(tokens, source, start + 1, &[])?;
 
     let end_pos = start + body_consumed + 1;
     match tokens.get(end_pos) {
-        Some(RawToken::Statement(r)) => {
-            let end_toks = tokenize(source, r.clone());
-            if end_toks.first() != Some(&Token::End) {
-                return Err(Error::new("expected {% end %}", r.start, r.len()));
-            }
-        }
+        Some(RawToken::Statement(r))
+            if tokenize(source, r.clone())?.first().map(|t| &t.kind) == Some(&TokenKind::End) => {}
         _ => {
             return Err(Error::new(
-                "unclosed {% for %} block",
-                range.start,
-                range.len(),
+                ErrorKind::UnclosedFor,
+                range.start - 2,
+                range.len() + 4,
+                source,
             ));
         }
     }
@@ -231,7 +304,7 @@ fn collect_body_until(
     tokens: &[RawToken],
     source: &[u8],
     start: usize,
-    stop_at: &[Token],
+    stop_at: &[TokenKind],
 ) -> Result<(Vec<Node>, usize), Error> {
     let mut body = Vec::new();
     let mut i = start;
@@ -239,22 +312,31 @@ fn collect_body_until(
     while i < tokens.len() {
         match &tokens[i] {
             RawToken::Statement(range) => {
-                let toks = tokenize(source, range.clone());
+                let toks = tokenize(source, range.clone())?;
                 match toks.first() {
-                    Some(Token::If) => {
+                    Some(Token {
+                        kind: TokenKind::If,
+                        ..
+                    }) => {
                         let (nodes, consumed) = parse_if_block(tokens, source, i)?;
                         body.extend(nodes);
                         i += consumed - 1;
                     }
-                    Some(Token::For) => {
+                    Some(Token {
+                        kind: TokenKind::For,
+                        ..
+                    }) => {
                         let (nodes, consumed) = parse_for_block(tokens, source, i)?;
                         body.extend(nodes);
                         i += consumed - 1;
                     }
-                    Some(Token::End) => {
+                    Some(Token {
+                        kind: TokenKind::End,
+                        ..
+                    }) => {
                         return Ok((body, i - start));
                     }
-                    Some(t) if stop_at.contains(t) => {
+                    Some(tok) if stop_at.contains(&tok.kind) => {
                         return Ok((body, i - start));
                     }
                     _ => {
@@ -264,11 +346,16 @@ fn collect_body_until(
             }
             RawToken::Interpolate(range) => {
                 let base = range.start;
-                let toks = tokenize(source, range.clone());
+                let toks = tokenize(source, range.clone())?;
                 let mut pos = 0;
-                let expr = parse_postfix(&toks, &mut pos, source, base)?;
+                let expr = parse_postfix(&toks, &mut pos, source, base, range.end)?;
                 if pos != toks.len() {
-                    return Err(Error::new("unexpected tokens after expression", 0, 0));
+                    return Err(Error::new(
+                        ErrorKind::UnexpectedTokensAfterExpr,
+                        toks[pos].range.start,
+                        1,
+                        source,
+                    ));
                 }
                 body.push(Node::Interpolate(expr));
             }
@@ -282,7 +369,7 @@ fn collect_body_until(
     Ok((body, tokens.len() - start))
 }
 
-fn tokenize(source: &[u8], range: Range<usize>) -> Vec<Token> {
+fn tokenize(source: &[u8], range: Range<usize>) -> Result<Vec<Token>, Error> {
     let bytes = &source[range.clone()];
     let mut tokens = Vec::new();
     let mut pos = 0;
@@ -297,9 +384,22 @@ fn tokenize(source: &[u8], range: Range<usize>) -> Vec<Token> {
 
         match bytes[pos] {
             b'"' => {
+                let quote_start = range.start + pos;
                 pos += 1;
                 let mut s = String::new();
-                while pos < bytes.len() {
+                loop {
+                    if pos >= bytes.len() {
+                        let mut end = range.start + pos;
+                        while end > quote_start && source[end - 1].is_ascii_whitespace() {
+                            end -= 1;
+                        }
+                        return Err(Error::new(
+                            ErrorKind::UnclosedString,
+                            quote_start,
+                            end - quote_start,
+                            source,
+                        ));
+                    }
                     match bytes[pos] {
                         b'"' => {
                             pos += 1;
@@ -323,33 +423,55 @@ fn tokenize(source: &[u8], range: Range<usize>) -> Vec<Token> {
                         }
                     }
                 }
-                tokens.push(Token::Str(s));
+                tokens.push(Token {
+                    kind: TokenKind::Str(s),
+                    range: quote_start..range.start + pos,
+                });
             }
             b'(' => {
-                tokens.push(Token::LParen);
+                tokens.push(Token {
+                    kind: TokenKind::LParen,
+                    range: range.start + pos..range.start + pos + 1,
+                });
                 pos += 1;
             }
             b')' => {
-                tokens.push(Token::RParen);
+                tokens.push(Token {
+                    kind: TokenKind::RParen,
+                    range: range.start + pos..range.start + pos + 1,
+                });
                 pos += 1;
             }
             b',' => {
-                tokens.push(Token::Comma);
+                tokens.push(Token {
+                    kind: TokenKind::Comma,
+                    range: range.start + pos..range.start + pos + 1,
+                });
                 pos += 1;
             }
             b'.' => {
-                tokens.push(Token::Dot);
+                tokens.push(Token {
+                    kind: TokenKind::Dot,
+                    range: range.start + pos..range.start + pos + 1,
+                });
                 pos += 1;
             }
             b'[' => {
-                tokens.push(Token::LBracket);
+                tokens.push(Token {
+                    kind: TokenKind::LBracket,
+                    range: range.start + pos..range.start + pos + 1,
+                });
                 pos += 1;
             }
             b']' => {
-                tokens.push(Token::RBracket);
+                tokens.push(Token {
+                    kind: TokenKind::RBracket,
+                    range: range.start + pos..range.start + pos + 1,
+                });
                 pos += 1;
             }
             b'-' | b'0'..=b'9' => {
+                let start = range.start + pos;
                 let negative = bytes[pos] == b'-';
                 if negative {
                     pos += 1;
@@ -359,9 +481,13 @@ fn tokenize(source: &[u8], range: Range<usize>) -> Vec<Token> {
                     n = n * 10 + (bytes[pos] - b'0') as i64;
                     pos += 1;
                 }
-                tokens.push(Token::Int(if negative { -n } else { n }));
+                tokens.push(Token {
+                    kind: TokenKind::Int(if negative { -n } else { n }),
+                    range: start..range.start + pos,
+                });
             }
-            _ => {
+            _ if bytes[pos].is_ascii_alphanumeric() || bytes[pos] == b'_' => {
+                let ident_start = range.start + pos;
                 let start = pos;
                 while pos < bytes.len()
                     && (bytes[pos].is_ascii_alphanumeric() || bytes[pos] == b'_')
@@ -369,22 +495,34 @@ fn tokenize(source: &[u8], range: Range<usize>) -> Vec<Token> {
                     pos += 1;
                 }
                 let ident = &bytes[start..pos];
-                tokens.push(match ident {
-                    b"true" => Token::True,
-                    b"false" => Token::False,
-                    b"if" => Token::If,
-                    b"elif" => Token::Elif,
-                    b"else" => Token::Else,
-                    b"for" => Token::For,
-                    b"end" => Token::End,
-                    b"in" => Token::In,
-                    _ => Token::Ident(String::from_utf8_lossy(ident).into_owned()),
+                let kind = match ident {
+                    b"true" => TokenKind::True,
+                    b"false" => TokenKind::False,
+                    b"if" => TokenKind::If,
+                    b"elif" => TokenKind::Elif,
+                    b"else" => TokenKind::Else,
+                    b"for" => TokenKind::For,
+                    b"end" => TokenKind::End,
+                    b"in" => TokenKind::In,
+                    _ => TokenKind::Ident(String::from_utf8_lossy(ident).into_owned()),
+                };
+                tokens.push(Token {
+                    kind,
+                    range: ident_start..range.start + pos,
                 });
+            }
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedToken,
+                    range.start + pos,
+                    1,
+                    source,
+                ));
             }
         }
     }
 
-    tokens
+    Ok(tokens)
 }
 
 fn parse_postfix(
@@ -392,19 +530,24 @@ fn parse_postfix(
     pos: &mut usize,
     source: &[u8],
     base: usize,
+    end: usize,
 ) -> Result<Expr, Error> {
-    let mut left = parse_primary(tokens, pos, source, base)?;
+    let mut left = parse_primary(tokens, pos, source, base, end)?;
 
-    while *pos < tokens.len() && matches!(tokens[*pos], Token::Dot) {
+    while *pos < tokens.len() && tokens[*pos].kind == TokenKind::Dot {
         *pos += 1;
         let field = match tokens.get(*pos) {
-            Some(Token::Ident(name)) => name.clone(),
-            Some(Token::Int(n)) => n.to_string(),
-            Some(_) => {
-                return Err(Error::new("expected field name after '.'", base, 1));
-            }
-            None => {
-                return Err(Error::new("expected field name after '.'", base, 1));
+            Some(Token {
+                kind: TokenKind::Ident(name),
+                ..
+            }) => name.clone(),
+            Some(Token {
+                kind: TokenKind::Int(n),
+                ..
+            }) => n.to_string(),
+            tok => {
+                let at = tok.map_or(base, |t| t.range.start);
+                return Err(Error::new(ErrorKind::ExpectedFieldName, at, 1, source));
             }
         };
         *pos += 1;
@@ -422,91 +565,135 @@ fn parse_primary(
     pos: &mut usize,
     source: &[u8],
     base: usize,
+    end: usize,
 ) -> Result<Expr, Error> {
     if *pos >= tokens.len() {
-        return Err(Error::new("unexpected end of expression", base, 1));
+        return Err(Error::new(ErrorKind::UnexpectedEndOfExpr, base, 1, source));
     }
 
-    match &tokens[*pos] {
-        Token::Str(s) => {
+    match &tokens[*pos].kind {
+        TokenKind::Str(s) => {
             *pos += 1;
             Ok(Expr::Str(s.clone()))
         }
-        Token::Int(n) => {
+        TokenKind::Int(n) => {
             *pos += 1;
             Ok(Expr::Int(*n))
         }
-        Token::True => {
+        TokenKind::True => {
             *pos += 1;
             Ok(Expr::Bool(true))
         }
-        Token::False => {
+        TokenKind::False => {
             *pos += 1;
             Ok(Expr::Bool(false))
         }
-        Token::LBracket => {
+        TokenKind::LBracket => {
+            let lbracket_range = tokens[*pos].range.start;
             *pos += 1;
             let mut items = Vec::new();
-            while *pos < tokens.len() && tokens[*pos] != Token::RBracket {
-                if !items.is_empty() {
-                    if tokens[*pos] != Token::Comma {
-                        return Err(Error::new("expected ',' in list", base, 1));
-                    }
+            loop {
+                if *pos >= tokens.len() {
+                    let stop = tokens.last().map_or(lbracket_range + 1, |t| t.range.end);
+                    return Err(Error::new(
+                        ErrorKind::UnclosedList,
+                        lbracket_range,
+                        stop - lbracket_range,
+                        source,
+                    ));
+                }
+                if tokens[*pos].kind == TokenKind::RBracket {
                     *pos += 1;
+                    break;
                 }
-                let item = parse_postfix(tokens, pos, source, base)?;
+                let item = parse_postfix(tokens, pos, source, base, end)?;
                 items.push(item);
-                if *pos < tokens.len() && tokens[*pos] == Token::Comma {
-                    continue;
+                if *pos >= tokens.len() {
+                    let stop = tokens.last().map_or(lbracket_range + 1, |t| t.range.end);
+                    return Err(Error::new(
+                        ErrorKind::UnclosedList,
+                        lbracket_range,
+                        stop - lbracket_range,
+                        source,
+                    ));
                 }
-                break;
-            }
-            if *pos < tokens.len() && tokens[*pos] == Token::RBracket {
-                *pos += 1;
+                match tokens[*pos].kind {
+                    TokenKind::Comma => {
+                        *pos += 1;
+                    }
+                    TokenKind::RBracket => {
+                        *pos += 1;
+                        break;
+                    }
+                    _ => {
+                        return Err(Error::new(
+                            ErrorKind::ExpectedCommaInList,
+                            tokens[*pos].range.start,
+                            1,
+                            source,
+                        ));
+                    }
+                }
             }
             Ok(Expr::List(items))
         }
-        Token::LParen => {
-            *pos += 1;
-            let expr = parse_postfix(tokens, pos, source, base)?;
-            if *pos < tokens.len() && tokens[*pos] == Token::RParen {
-                *pos += 1;
-            }
-            Ok(expr)
-        }
-        Token::Ident(name) => {
+        TokenKind::Ident(name) => {
             let name = name.clone();
             *pos += 1;
-            if *pos < tokens.len() && tokens[*pos] == Token::LParen {
+            if *pos < tokens.len() && tokens[*pos].kind == TokenKind::LParen {
+                let lparen_range = tokens[*pos].range.start;
                 *pos += 1;
                 let mut args = Vec::new();
-                while *pos < tokens.len() && tokens[*pos] != Token::RParen {
-                    if !args.is_empty() {
-                        if tokens[*pos] != Token::Comma {
-                            return Err(Error::new("expected ',' between arguments", base, 1));
-                        }
+                loop {
+                    if *pos >= tokens.len() {
+                        return Err(Error::new(
+                            ErrorKind::UnclosedGroup,
+                            lparen_range,
+                            end.saturating_sub(lparen_range) + 1,
+                            source,
+                        ));
+                    }
+                    if tokens[*pos].kind == TokenKind::RParen {
                         *pos += 1;
+                        break;
                     }
-                    let arg = parse_postfix(tokens, pos, source, base)?;
+                    let arg = parse_postfix(tokens, pos, source, base, end)?;
                     args.push(arg);
-                    if *pos < tokens.len() && tokens[*pos] == Token::Comma {
-                        continue;
+                    if *pos >= tokens.len() {
+                        return Err(Error::new(
+                            ErrorKind::UnclosedGroup,
+                            lparen_range,
+                            end.saturating_sub(lparen_range) + 1,
+                            source,
+                        ));
                     }
-                    break;
-                }
-                if *pos < tokens.len() && tokens[*pos] == Token::RParen {
-                    *pos += 1;
+                    match tokens[*pos].kind {
+                        TokenKind::Comma => {
+                            *pos += 1;
+                        }
+                        TokenKind::RParen => {
+                            *pos += 1;
+                            break;
+                        }
+                        _ => {
+                            return Err(Error::new(
+                                ErrorKind::ExpectedCommaBetweenArgs,
+                                tokens[*pos].range.start,
+                                1,
+                                source,
+                            ));
+                        }
+                    }
                 }
                 Ok(Expr::FnCall { name, args })
             } else {
                 Ok(Expr::Var(name))
             }
         }
-        _ => Err(Error::new(
-            format!("unexpected token: {:?}", tokens[*pos]),
-            base,
-            1,
-        )),
+        _ => {
+            let at = tokens[*pos].range.start;
+            Err(Error::new(ErrorKind::UnexpectedToken, at, 1, source))
+        }
     }
 }
 
@@ -515,6 +702,7 @@ mod tests {
     use crate::scanner::scan;
 
     use super::*;
+    use rand::RngExt;
     use test_case::test_case;
 
     macro_rules! expr {
@@ -561,10 +749,9 @@ mod tests {
     #[test_case("{{ true }}" => vec![node!(interp bool true)])]
     #[test_case("{{ false }}" => vec![node!(interp bool false)])]
     #[test_case("{{ [] }}" => vec![node!(interp list [])])]
-    #[test_case("{{ [1, \"2\", [3]] }}" => vec![node!(interp list [expr!(int 1), expr!(str "2"), expr!(list [expr!(int 3)])])])]
+    #[test_case("{{ [1,  \"2\",[  3]  ] }}" => vec![node!(interp list [expr!(int 1), expr!(str "2"), expr!(list [expr!(int 3)])])])]
     #[test_case("{{ fn() }}" => vec![node!(interp call "fn", [])])]
-    #[test_case("{{ fn(a) }}" => vec![node!(interp call "fn", [expr!(var "a")])])]
-    #[test_case("{{ fn1(a, 2, fn2(\"\")) }}" => vec![node!(interp call "fn1", [expr!(var "a"), expr!(int 2), expr!(call "fn2", [expr!(str "")])])])]
+    #[test_case("{{ fn1(a, 2  ,fn2(  \"\"   )) }}" => vec![node!(interp call "fn1", [expr!(var "a"), expr!(int 2), expr!(call "fn2", [expr!(str "")])])])]
     #[test_case("{{ a.b }}" => vec![node!(interp dot expr!(var "a"), "b")])]
     #[test_case("{{ a.b.c }}" => vec![node!(interp dot expr!(dot expr!(var "a"), "b"), "c")])]
     #[test_case("{{ list.0 }}" => vec![node!(interp dot expr!(var "list"), "0")])]
@@ -615,5 +802,39 @@ mod tests {
     fn test_parse(input: &str) -> Vec<Node> {
         let input = input.as_bytes();
         parse(&scan(input).unwrap(), input).unwrap()
+    }
+
+    #[test_case("{{ }}" => (ErrorKind::UnexpectedEndOfExpr, 2, 1))]
+    #[test_case("{{ @ }}" => (ErrorKind::UnexpectedToken, 3, 1))]
+    #[test_case("{{ p% }}" => (ErrorKind::UnexpectedToken, 4, 1))]
+    #[test_case("{{ a b }}" => (ErrorKind::UnexpectedTokensAfterExpr, 5, 1))]
+    #[test_case("{{ () }}" => (ErrorKind::UnexpectedToken, 3, 1); "todo1")]
+    #[test_case("{{ a..b }}" => (ErrorKind::ExpectedFieldName, 5, 1))]
+    #[test_case("{{ list., }}" => (ErrorKind::ExpectedFieldName, 8, 1))]
+    #[test_case("{{ \"hello }}" => (ErrorKind::UnclosedString, 3, 6))]
+    #[test_case("{{ [1, 2 }}" => (ErrorKind::UnclosedList, 3, 5))]
+    #[test_case("{{ fn(a, b }}" => (ErrorKind::UnclosedGroup, 5, 7))]
+    #[test_case("{{ [1  2] }}" => (ErrorKind::ExpectedCommaInList, 7, 1))]
+    #[test_case("{{ fn(a b) }}" => (ErrorKind::ExpectedCommaBetweenArgs, 8, 1))]
+    #[test_case("{%%}" => (ErrorKind::EmptyStatement, 0, 4))]
+    #[test_case("{% foobar %}" => (ErrorKind::UnexpectedKeyword, 3, 6))]
+    #[test_case("{% if %}" => (ErrorKind::UnexpectedEndOfExpr, 5, 1))]
+    #[test_case("{% if true %}" => (ErrorKind::UnclosedBlock, 0, 13))]
+    #[test_case("{% elif true %}" => (ErrorKind::StrayElif, 0, 15))]
+    #[test_case("{% else true %}" => (ErrorKind::StrayElse, 0, 15))]
+    #[test_case("{% end %}" => (ErrorKind::StrayEnd, 0, 9))]
+    #[test_case("{% for %}" => (ErrorKind::ExpectedForSyntax, 6, 1))]
+    #[test_case("{% for 123 in items %}" => (ErrorKind::ExpectedForVar, 7, 3))]
+    #[test_case("{% for x of items %}" => (ErrorKind::ExpectedForIn, 9, 2))]
+    #[test_case("{% for x in items %}" => (ErrorKind::UnclosedFor, 0, 20))]
+    fn test_error(input: &str) -> (ErrorKind, usize, usize) {
+        let mut rng = rand::rng();
+        let prefix_len = rng.random::<u8>() as usize;
+        let aug_input = String::from(" ").repeat(prefix_len) + input;
+        let input = aug_input.as_bytes();
+        let e = parse(&scan(input).unwrap(), input).unwrap_err();
+        let mut e = e.destruct();
+        e.1 = e.1.saturating_sub(prefix_len);
+        e
     }
 }
