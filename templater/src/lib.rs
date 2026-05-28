@@ -7,18 +7,16 @@ mod scanner;
 pub mod value;
 
 use std::collections::HashMap;
-use std::fs::File;
 use std::io;
-use std::path::Path;
 
-use anyhow::Context;
 use memmap2::Mmap;
 
-use crate::ast::Node;
-pub use crate::error::EvalError;
-pub use crate::eval::EvalContext;
-pub use crate::eval::eval_nodes;
-pub use crate::value::Value;
+use crate::{ast::Node, function::FunctionRegistry};
+pub use crate::{
+    error::{FuncError, RenderError},
+    eval::{EvalContext, eval_nodes},
+    value::Value,
+};
 
 enum Source {
     Mapped(Mmap),
@@ -40,11 +38,7 @@ pub struct Template {
 }
 
 impl Template {
-    pub fn from_path(path: &Path) -> anyhow::Result<Self> {
-        let file =
-            File::open(path).with_context(|| format!("failed to open `{}`", path.display()))?;
-        let mmap = unsafe { Mmap::map(&file) }
-            .with_context(|| format!("failed to mmap `{}`", path.display()))?;
+    pub fn from_mmap(mmap: Mmap) -> miette::Result<Self> {
         let tokens = scanner::scan(&mmap)?;
         let nodes = parser::parse(&tokens, &mmap)?;
         Ok(Self {
@@ -53,7 +47,7 @@ impl Template {
         })
     }
 
-    pub fn from_bytes(source: Vec<u8>) -> anyhow::Result<Self> {
+    pub fn from_bytes(source: Vec<u8>) -> miette::Result<Self> {
         let tokens = scanner::scan(&source)?;
         let nodes = parser::parse(&tokens, &source)?;
         Ok(Self {
@@ -62,22 +56,14 @@ impl Template {
         })
     }
 
-    pub fn nodes(&self) -> &[Node] {
-        &self.nodes
-    }
-
-    pub fn source(&self) -> &[u8] {
-        self.source.as_bytes()
-    }
-
     pub fn render<W: io::Write>(
         &self,
         writer: W,
         variables: HashMap<String, Value>,
-        functions: &dyn function::FunctionRegistry,
-    ) -> Result<(), EvalError> {
+        functions: &dyn FunctionRegistry,
+    ) -> Result<(), RenderError> {
         let mut ctx = EvalContext::new(variables, functions);
         let mut writer = io::BufWriter::new(writer);
-        eval_nodes(&self.nodes, self.source(), &mut writer, &mut ctx)
+        eval_nodes(&self.nodes, self.source.as_bytes(), &mut writer, &mut ctx)
     }
 }

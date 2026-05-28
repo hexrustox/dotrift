@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::error::{Error, ErrorKind};
+use crate::error::{ParseError, ParseErrorKind};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum TagKind {
@@ -44,13 +44,13 @@ pub enum RawToken {
     Statement(Range<usize>),
 }
 
-pub fn scan(source: &[u8]) -> Result<Vec<RawToken>, Error> {
+pub fn scan(source: &[u8]) -> Result<Vec<RawToken>, ParseError> {
     let tags = find_tags(source)?;
     let tokens = build_tokens(source, &tags);
     Ok(tokens)
 }
 
-fn find_tags(source: &[u8]) -> Result<Vec<Tag>, Error> {
+fn find_tags(source: &[u8]) -> Result<Vec<Tag>, ParseError> {
     let mut tags = Vec::new();
     let mut pos = 0;
 
@@ -68,7 +68,12 @@ fn find_tags(source: &[u8]) -> Result<Vec<Tag>, Error> {
         let b2 = source.get(next + 1).copied();
 
         if b == b'}' && b2 == Some(b'}') || b == b'%' && b2 == Some(b'}') {
-            return Err(Error::new(ErrorKind::StrayDelimiter, next, 2, source));
+            return Err(ParseError::new(
+                ParseErrorKind::StrayDelimiter,
+                next,
+                2,
+                source,
+            ));
         }
         if b != b'{' {
             pos = next + 1;
@@ -94,7 +99,7 @@ fn find_tags(source: &[u8]) -> Result<Vec<Tag>, Error> {
         let interior_start = next + 2;
 
         let close = find_close(source, interior_start, close_delim)
-            .ok_or_else(|| Error::new(ErrorKind::UnclosedDelimiter, next, 2, source))?;
+            .ok_or_else(|| ParseError::new(ParseErrorKind::UnclosedDelimiter, next, 2, source))?;
 
         let interior_end = close;
 
@@ -397,11 +402,11 @@ mod tests {
         scan(input.as_bytes()).unwrap()
     }
 
-    #[test_case("{{ unclosed" => (ErrorKind::UnclosedDelimiter, 0, 2); "unclosed_interpolation")]
-    #[test_case("{% unclosed" => (ErrorKind::UnclosedDelimiter, 0, 2); "unclosed_stmt")]
-    #[test_case("stray }}" => (ErrorKind::StrayDelimiter, 6, 2); "stray_interpolation")]
-    #[test_case("stray %}" => (ErrorKind::StrayDelimiter, 6, 2); "stray_stmt")]
-    fn test_error(input: &str) -> (ErrorKind, usize, usize) {
+    #[test_case("{{ unclosed" => (ParseErrorKind::UnclosedDelimiter, 0, 2); "unclosed_interpolation")]
+    #[test_case("{% unclosed" => (ParseErrorKind::UnclosedDelimiter, 0, 2); "unclosed_stmt")]
+    #[test_case("stray }}" => (ParseErrorKind::StrayDelimiter, 6, 2); "stray_interpolation")]
+    #[test_case("stray %}" => (ParseErrorKind::StrayDelimiter, 6, 2); "stray_stmt")]
+    fn test_error(input: &str) -> (ParseErrorKind, usize, usize) {
         let e = find_tags(input.as_bytes()).unwrap_err();
         e.destruct()
     }

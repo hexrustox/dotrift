@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::io;
+use std::ops::Range;
 
-use crate::ast::{Expr, Node};
-use crate::error::EvalError;
+use crate::ast::{Expr, ExprKind, Node};
+use crate::error::{EvalError, EvalErrorKind, FuncError, RenderError};
 use crate::function::FunctionRegistry;
 use crate::value::Value;
 
@@ -48,7 +49,7 @@ pub fn eval_nodes<W: io::Write>(
     source: &[u8],
     writer: &mut W,
     ctx: &mut EvalContext<'_>,
-) -> Result<(), EvalError> {
+) -> Result<(), RenderError> {
     for node in nodes {
         eval_node(node, source, writer, ctx)?;
     }
@@ -60,7 +61,7 @@ fn eval_node<W: io::Write>(
     source: &[u8],
     writer: &mut W,
     ctx: &mut EvalContext<'_>,
-) -> Result<(), EvalError> {
+) -> Result<(), RenderError> {
     match node {
         Node::Text(range) => {
             writer.write_all(&source[range.clone()])?;
@@ -84,10 +85,14 @@ fn eval_node<W: io::Write>(
                     }
                     Value::Bool(false) => continue,
                     other => {
-                        return Err(EvalError::TypeMismatch {
-                            expected: "Bool",
-                            got: other.type_name(),
-                        });
+                        return Err(EvalError::new(
+                            EvalErrorKind::Function(FuncError::TypeMismatch {
+                                expected: "Bool",
+                                got: other.type_name(),
+                            }),
+                            cond.range.clone(),
+                        )
+                        .into());
                     }
                 }
             }
@@ -112,61 +117,199 @@ fn eval_node<W: io::Write>(
                     }
                     Ok(())
                 }
-                other => Err(EvalError::TypeMismatch {
-                    expected: "List",
-                    got: other.type_name(),
-                }),
+                other => Err(EvalError::new(
+                    EvalErrorKind::Function(FuncError::TypeMismatch {
+                        expected: "List",
+                        got: other.type_name(),
+                    }),
+                    collection.range.clone(),
+                )
+                .into()),
             }
         }
     }
 }
 
 fn eval_expr(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value, EvalError> {
-    match expr {
-        Expr::Str(s) => Ok(Value::Str(s.clone())),
-        Expr::Int(n) => Ok(Value::Int(*n)),
-        Expr::Bool(b) => Ok(Value::Bool(*b)),
-        Expr::Var(name) => ctx
-            .get(name)
-            .cloned()
-            .ok_or_else(|| EvalError::UndefinedVariable(name.clone())),
-        Expr::List(items) => {
+    match &expr.kind {
+        ExprKind::Str(s) => Ok(Value::Str(s.clone())),
+        ExprKind::Int(n) => Ok(Value::Int(*n)),
+        ExprKind::Bool(b) => Ok(Value::Bool(*b)),
+        ExprKind::Var(name) => ctx.get(name).cloned().ok_or(EvalError::new(
+            EvalErrorKind::UndefinedVariable(name.clone()),
+            expr.range.clone(),
+        )),
+        ExprKind::List(items) => {
             let vals: Result<Vec<_>, _> = items.iter().map(|e| eval_expr(e, ctx)).collect();
             Ok(Value::List(vals?))
         }
-        Expr::FnCall { name, args } => {
+        ExprKind::FnCall { name, args } => {
             let arg_vals: Result<Vec<_>, _> = args.iter().map(|e| eval_expr(e, ctx)).collect();
-            ctx.functions.call(name, &arg_vals?)
+            ctx.functions
+                .call(name, &arg_vals?)
+                .map_err(|fe| EvalError::new(EvalErrorKind::Function(fe), expr.range.clone()))
         }
-        Expr::Dot { left, field } => {
+        ExprKind::Dot { left, field } => {
             let val = eval_expr(left, ctx)?;
-            dot_access(val, field)
+            let start = left.range.end + 1;
+            dot_access(val, field, start..start + field.len())
         }
     }
 }
 
-fn dot_access(val: Value, field: &str) -> Result<Value, EvalError> {
+fn dot_access(val: Value, field: &str, range: Range<usize>) -> Result<Value, EvalError> {
     match val {
-        Value::Map(mut map) => map
-            .remove(field)
-            .ok_or_else(|| EvalError::MapKeyNotFound(field.to_string())),
+        Value::Map(mut map) => map.remove(field).ok_or(EvalError::new(
+            EvalErrorKind::MapKeyNotFound(field.to_string()),
+            range,
+        )),
         Value::List(items) => {
-            let index: usize = field.parse().map_err(|_| EvalError::InvalidFieldAccess {
-                ty: "List",
-                field: field.to_string(),
+            let index: usize = field.parse().map_err(|_| {
+                EvalError::new(
+                    EvalErrorKind::InvalidFieldAccess {
+                        ty: "List",
+                        field: field.to_string(),
+                    },
+                    range.clone(),
+                )
             })?;
-            items
-                .get(index)
-                .cloned()
-                .ok_or(EvalError::IndexOutOfBounds {
+            items.get(index).cloned().ok_or(EvalError::new(
+                EvalErrorKind::IndexOutOfBounds {
                     index,
                     len: items.len(),
-                })
+                },
+                range,
+            ))
         }
-        Value::Str(_) => Err(EvalError::StringIndexAccess),
-        other => Err(EvalError::InvalidFieldAccess {
-            ty: other.type_name(),
-            field: field.to_string(),
-        }),
+        other => Err(EvalError::new(
+            EvalErrorKind::InvalidFieldAccess {
+                ty: other.type_name(),
+                field: field.to_string(),
+            },
+            range,
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, ops::Range};
+
+    use test_case::test_case;
+
+    use crate::{
+        FuncError, RenderError, Template, Value, error::EvalErrorKind, function::FunctionRegistry,
+    };
+
+    struct Functions;
+
+    impl FunctionRegistry for Functions {
+        fn call(&self, name: &str, args: &[Value]) -> Result<Value, FuncError> {
+            match name {
+                "add" => {
+                    let mut total = 0i64;
+                    for v in args {
+                        match v {
+                            Value::Int(n) => total += n,
+                            other => {
+                                return Err(FuncError::TypeMismatch {
+                                    expected: "Int",
+                                    got: other.type_name(),
+                                });
+                            }
+                        }
+                    }
+                    Ok(Value::Int(total))
+                }
+                "wrong_count" => Err(FuncError::WrongArgCount {
+                    name: name.to_string(),
+                    expected: "0".to_string(),
+                    got: args.len(),
+                }),
+                other => Err(FuncError::Undefined(other.to_string())),
+            }
+        }
+    }
+
+    fn vars() -> HashMap<String, Value> {
+        HashMap::from([
+            ("name".to_string(), Value::Str("world".to_string())),
+            ("count".to_string(), Value::Int(42)),
+            ("neg".to_string(), Value::Int(-5)),
+            ("flag".to_string(), Value::Bool(true)),
+            ("off".to_string(), Value::Bool(false)),
+            (
+                "items".to_string(),
+                Value::List(vec![
+                    Value::Str("a".to_string()),
+                    Value::Str("b".to_string()),
+                ]),
+            ),
+            ("empty".to_string(), Value::List(vec![])),
+            (
+                "obj".to_string(),
+                Value::Map(HashMap::from([(
+                    "key".to_string(),
+                    Value::Str("val".to_string()),
+                )])),
+            ),
+        ])
+    }
+
+    #[test_case("hello" => "hello"; "plain_text")]
+    #[test_case("" => ""; "empty")]
+    #[test_case("{{ name }}" => "world"; "interpolate_var")]
+    #[test_case("{{ count }}" => "42"; "interpolate_int")]
+    #[test_case("{{ flag }}" => "true"; "interpolate_true")]
+    #[test_case("{{ false }}" => "false"; "interpolate_false_literal")]
+    #[test_case("{{ off }}" => "false"; "interpolate_false_var")]
+    #[test_case("{{ -1 }}" => "-1"; "interpolate_negative_int")]
+    #[test_case("{{ neg }}" => "-5"; "interpolate_neg_var")]
+    #[test_case("{{ items }}" => "[a, b]"; "interpolate_list")]
+    #[test_case("hello {{ name }}" => "hello world"; "mixed_text_and_interpolation")]
+    #[test_case("{% if flag %}YES{% end %}" => "YES"; "if_true")]
+    #[test_case("{% if off %}YES{% end %}" => ""; "if_false")]
+    #[test_case("{% if off %}A{% else %}B{% end %}" => "B"; "if_else")]
+    #[test_case("{% if off %}A{% elif flag %}B{% end %}" => "B"; "if_elif")]
+    #[test_case("{% if off %}0{% elif off %}1{% elif flag %}2{% elif flag %}3{% end %}" => "2"; "if_multi_elif")]
+    #[test_case("{% for x in items %}{{ x }}{% end %}" => "ab"; "for_list")]
+    #[test_case("{% for x in empty %}{{ x }}{% end %}" => ""; "for_empty")]
+    #[test_case("{% for x in [1, 2, 3] %}{{ x }}{% end %}" => "123"; "for_list_literal")]
+    #[test_case("{% for name in items %}{{ name }}{% end %}" => "ab"; "for_shadow_outer")]
+    #[test_case("{% for x in items %}{% for y in items %}{{ x }}{{ y }}{% end %}{% end %}" => "aaabbabb"; "nested_for")]
+    #[test_case("{% if flag %}{% for x in items %}{{ x }}{% end %}{% end %}" => "ab"; "nested_if_for")]
+    #[test_case("{{ items.0 }}" => "a"; "dot_list_index_0")]
+    #[test_case("{{ items.1 }}" => "b"; "dot_list_index_1")]
+    #[test_case("{{ obj.key }}" => "val"; "dot_map_key")]
+    #[test_case("{{ add(1, 2) }}" => "3"; "fn_call_two_args")]
+    #[test_case("{{ add(count, 8) }}" => "50"; "fn_call_with_var")]
+    #[test_case("{{ add(add(1, 2), 3) }}" => "6"; "fn_call_nested")]
+    fn test_render(template: &str) -> String {
+        let tmpl = Template::from_bytes(template.to_owned().into_bytes()).unwrap();
+        let mut buf = Vec::new();
+        tmpl.render(&mut buf, vars(), &Functions).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test_case("{{ nothing }}" => (EvalErrorKind::UndefinedVariable("nothing".to_string()), 3..10); "undefined_variable")]
+    #[test_case("{{ items.99 }}" => (EvalErrorKind::IndexOutOfBounds { index: 99, len: 2 }, 9..11); "index_out_of_bounds")]
+    #[test_case("{{ name.0 }}" => (EvalErrorKind::InvalidFieldAccess { ty: "String", field: "0".to_string() }, 8..9); "string_index_access")]
+    #[test_case("{{ obj.missing }}" => (EvalErrorKind::MapKeyNotFound("missing".to_string()), 7..14); "map_key_not_found")]
+    #[test_case("{{ obj.key.missing }}" => (EvalErrorKind::InvalidFieldAccess { ty: "String", field: "missing".to_string() }, 11..18); "string_key_access")]
+    #[test_case("{{ items.x }}" => (EvalErrorKind::InvalidFieldAccess { ty: "List", field: "x".to_string() }, 9..10); "invalid_field_access_list")]
+    #[test_case("{{ count.field }}" => (EvalErrorKind::InvalidFieldAccess { ty: "Int", field: "field".to_string() }, 9..14); "invalid_field_access_int")]
+    #[test_case("{{ nofunc() }}" => (EvalErrorKind::Function(FuncError::Undefined("nofunc".to_string())), 3..11); "function_undefined")]
+    #[test_case("{{ wrong_count(1) }}" => (EvalErrorKind::Function(FuncError::WrongArgCount { name: "wrong_count".to_string(), expected: "0".to_string(), got: 1 }), 3..17); "function_wrong_arg_count")]
+    #[test_case("{{ add(true) }}" => (EvalErrorKind::Function(FuncError::TypeMismatch { expected: "Int", got: "Bool" }), 3..12); "function_type_mismatch")]
+    #[test_case("{% if \"\" %}{% end %}" => (EvalErrorKind::Function(FuncError::TypeMismatch { expected: "Bool", got: "String" }), 6..8); "if_type_mismatch")]
+    #[test_case("{% for x in \"\" %}{% end %}" => (EvalErrorKind::Function(FuncError::TypeMismatch { expected: "List", got: "String" }), 12..14); "for_type_mismatch")]
+    fn test_error(template: &str) -> (EvalErrorKind, Range<usize>) {
+        let tmpl = Template::from_bytes(template.to_owned().into_bytes()).unwrap();
+        let mut buf = Vec::new();
+        let e = tmpl.render(&mut buf, vars(), &Functions).unwrap_err();
+        match e {
+            RenderError::Eval(e) => e.destruct(),
+            _ => unreachable!(),
+        }
     }
 }

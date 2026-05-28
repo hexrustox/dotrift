@@ -1437,7 +1437,6 @@ dependencies = [
 name = "templater"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "memmap2",
  "miette",
  "rand 0.10.1",
