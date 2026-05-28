@@ -31,6 +31,10 @@ struct Token {
     range: Range<usize>,
 }
 
+fn tag_error(kind: ErrorKind, range: &Range<usize>, source: &[u8]) -> Error {
+    Error::new(kind, range.start.saturating_sub(2), range.len() + 4, source)
+}
+
 pub fn parse(tokens: &[RawToken], source: &[u8]) -> Result<Vec<Node>, Error> {
     let mut nodes = Vec::new();
     let mut i = 0;
@@ -42,52 +46,27 @@ pub fn parse(tokens: &[RawToken], source: &[u8]) -> Result<Vec<Node>, Error> {
                 i += 1;
             }
             RawToken::Interpolate(range) => {
-                let toks = tokenize(source, range.clone())?;
-                let mut pos = 0;
-                let expr = parse_postfix(&toks, &mut pos, source, range.start, range.end)?;
-                if pos != toks.len() {
-                    return Err(Error::new(
-                        ErrorKind::UnexpectedTokensAfterExpr,
-                        toks[pos].range.start,
-                        1,
-                        source,
-                    ));
-                }
+                let expr = parse_interpolate(source, range)?;
                 nodes.push(Node::Interpolate(expr));
                 i += 1;
             }
             RawToken::Statement(range) => {
                 let opening = range.clone();
                 let toks = tokenize(source, range.clone())?;
-                let kw = toks.first().ok_or_else(|| {
-                    Error::new(ErrorKind::EmptyStatement, opening.start - 2, opening.len() + 4, source)
-                })?;
+                let kw = toks
+                    .first()
+                    .ok_or_else(|| tag_error(ErrorKind::EmptyStatement, &opening, source))?;
                 let (stmt_nodes, consumed) = match &kw.kind {
                     TokenKind::If => parse_if_block(tokens, source, i)?,
                     TokenKind::For => parse_for_block(tokens, source, i)?,
                     TokenKind::Elif => {
-                        return Err(Error::new(
-                            ErrorKind::StrayElif,
-                            opening.start - 2,
-                            opening.len() + 4,
-                            source,
-                        ));
+                        return Err(tag_error(ErrorKind::StrayElif, &opening, source));
                     }
                     TokenKind::Else => {
-                        return Err(Error::new(
-                            ErrorKind::StrayElse,
-                            opening.start - 2,
-                            opening.len() + 4,
-                            source,
-                        ));
+                        return Err(tag_error(ErrorKind::StrayElse, &opening, source));
                     }
                     TokenKind::End => {
-                        return Err(Error::new(
-                            ErrorKind::StrayEnd,
-                            opening.start - 2,
-                            opening.len() + 4,
-                            source,
-                        ));
+                        return Err(tag_error(ErrorKind::StrayEnd, &opening, source));
                     }
                     _ => {
                         return Err(Error::new(
@@ -105,6 +84,41 @@ pub fn parse(tokens: &[RawToken], source: &[u8]) -> Result<Vec<Node>, Error> {
     }
 
     Ok(nodes)
+}
+
+fn parse_interpolate(source: &[u8], range: &Range<usize>) -> Result<Expr, Error> {
+    let toks = tokenize(source, range.clone())?;
+    let mut pos = 0;
+    let expr = parse_postfix(&toks, &mut pos, source, range.start, range.end)?;
+    if pos != toks.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedTokensAfterExpr,
+            toks[pos].range.start,
+            1,
+            source,
+        ));
+    }
+    Ok(expr)
+}
+
+fn parse_trailing_expr(
+    toks: &[Token],
+    start_pos: usize,
+    source: &[u8],
+    base: usize,
+    end: usize,
+) -> Result<Expr, Error> {
+    let mut pos = start_pos;
+    let expr = parse_postfix(toks, &mut pos, source, base, end)?;
+    if pos != toks.len() {
+        return Err(Error::new(
+            ErrorKind::UnexpectedTokensAfterExpr,
+            toks[pos].range.start,
+            1,
+            source,
+        ));
+    }
+    Ok(expr)
 }
 
 fn parse_if_block(
@@ -126,12 +140,7 @@ fn parse_if_block(
         let raw = match tokens.get(i) {
             Some(RawToken::Statement(range)) => range.clone(),
             None => {
-                return Err(Error::new(
-                    ErrorKind::UnclosedBlock,
-                    opening.start - 2,
-                    opening.len() + 4,
-                    source,
-                ));
+                return Err(tag_error(ErrorKind::UnclosedBlock, &opening, source));
             }
             _ => {
                 unreachable!()
@@ -145,37 +154,12 @@ fn parse_if_block(
             Some(Token {
                 kind: TokenKind::If,
                 ..
-            }) => {
-                let mut pos = 1;
-                let cond = parse_postfix(&toks, &mut pos, source, toks[0].range.end, raw.end)?;
-                if pos != toks.len() {
-                    return Err(Error::new(
-                        ErrorKind::UnexpectedTokensAfterExpr,
-                        toks[pos].range.start,
-                        1,
-                        source,
-                    ));
-                }
-                let (body, body_consumed) =
-                    collect_body_until(tokens, source, i + 1, &[TokenKind::Elif, TokenKind::Else])?;
-                branches.push((cond, body));
-                i += body_consumed + 1;
-                consumed += body_consumed + 1;
-            }
-            Some(Token {
+            })
+            | Some(Token {
                 kind: TokenKind::Elif,
                 ..
             }) => {
-                let mut pos = 1;
-                let cond = parse_postfix(&toks, &mut pos, source, toks[0].range.end, raw.end)?;
-                if pos != toks.len() {
-                    return Err(Error::new(
-                        ErrorKind::UnexpectedTokensAfterExpr,
-                        toks[pos].range.start,
-                        1,
-                        source,
-                    ));
-                }
+                let cond = parse_trailing_expr(&toks, 1, source, toks[0].range.end, raw.end)?;
                 let (body, body_consumed) =
                     collect_body_until(tokens, source, i + 1, &[TokenKind::Elif, TokenKind::Else])?;
                 branches.push((cond, body));
@@ -263,16 +247,7 @@ fn parse_for_block(
         ));
     }
 
-    let mut pos = 3;
-    let collection = parse_postfix(&toks, &mut pos, source, toks[0].range.end, range.end)?;
-    if pos != toks.len() {
-        return Err(Error::new(
-            ErrorKind::UnexpectedTokensAfterExpr,
-            toks[pos].range.start,
-            1,
-            source,
-        ));
-    }
+    let collection = parse_trailing_expr(&toks, 3, source, toks[0].range.end, range.end)?;
 
     let (body, body_consumed) = collect_body_until(tokens, source, start + 1, &[])?;
 
@@ -281,12 +256,7 @@ fn parse_for_block(
         Some(RawToken::Statement(r))
             if tokenize(source, r.clone())?.first().map(|t| &t.kind) == Some(&TokenKind::End) => {}
         _ => {
-            return Err(Error::new(
-                ErrorKind::UnclosedFor,
-                range.start - 2,
-                range.len() + 4,
-                source,
-            ));
+            return Err(tag_error(ErrorKind::UnclosedFor, &range, source));
         }
     }
 
@@ -313,30 +283,21 @@ fn collect_body_until(
         match &tokens[i] {
             RawToken::Statement(range) => {
                 let toks = tokenize(source, range.clone())?;
-                match toks.first() {
-                    Some(Token {
-                        kind: TokenKind::If,
-                        ..
-                    }) => {
+                match toks.first().map(|t| &t.kind) {
+                    Some(TokenKind::If) => {
                         let (nodes, consumed) = parse_if_block(tokens, source, i)?;
                         body.extend(nodes);
                         i += consumed - 1;
                     }
-                    Some(Token {
-                        kind: TokenKind::For,
-                        ..
-                    }) => {
+                    Some(TokenKind::For) => {
                         let (nodes, consumed) = parse_for_block(tokens, source, i)?;
                         body.extend(nodes);
                         i += consumed - 1;
                     }
-                    Some(Token {
-                        kind: TokenKind::End,
-                        ..
-                    }) => {
+                    Some(TokenKind::End) => {
                         return Ok((body, i - start));
                     }
-                    Some(tok) if stop_at.contains(&tok.kind) => {
+                    Some(tok) if stop_at.contains(tok) => {
                         return Ok((body, i - start));
                     }
                     _ => {
@@ -345,18 +306,7 @@ fn collect_body_until(
                 }
             }
             RawToken::Interpolate(range) => {
-                let base = range.start;
-                let toks = tokenize(source, range.clone())?;
-                let mut pos = 0;
-                let expr = parse_postfix(&toks, &mut pos, source, base, range.end)?;
-                if pos != toks.len() {
-                    return Err(Error::new(
-                        ErrorKind::UnexpectedTokensAfterExpr,
-                        toks[pos].range.start,
-                        1,
-                        source,
-                    ));
-                }
+                let expr = parse_interpolate(source, range)?;
                 body.push(Node::Interpolate(expr));
             }
             RawToken::Text(range) => {
@@ -370,9 +320,20 @@ fn collect_body_until(
 }
 
 fn tokenize(source: &[u8], range: Range<usize>) -> Result<Vec<Token>, Error> {
+    macro_rules! push_token {
+        ($kind:expr, $r:expr, $p:expr, $tokens:expr) => {{
+            $tokens.push(Token {
+                kind: $kind,
+                range: $r.start + $p..$r.start + $p + 1,
+            });
+            $p += 1;
+        }};
+    }
+
     let bytes = &source[range.clone()];
     let mut tokens = Vec::new();
     let mut pos = 0;
+    let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
 
     while pos < bytes.len() {
         while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
@@ -429,46 +390,22 @@ fn tokenize(source: &[u8], range: Range<usize>) -> Result<Vec<Token>, Error> {
                 });
             }
             b'(' => {
-                tokens.push(Token {
-                    kind: TokenKind::LParen,
-                    range: range.start + pos..range.start + pos + 1,
-                });
-                pos += 1;
+                push_token!(TokenKind::LParen, range, pos, tokens);
             }
             b')' => {
-                tokens.push(Token {
-                    kind: TokenKind::RParen,
-                    range: range.start + pos..range.start + pos + 1,
-                });
-                pos += 1;
+                push_token!(TokenKind::RParen, range, pos, tokens);
             }
             b',' => {
-                tokens.push(Token {
-                    kind: TokenKind::Comma,
-                    range: range.start + pos..range.start + pos + 1,
-                });
-                pos += 1;
+                push_token!(TokenKind::Comma, range, pos, tokens);
             }
             b'.' => {
-                tokens.push(Token {
-                    kind: TokenKind::Dot,
-                    range: range.start + pos..range.start + pos + 1,
-                });
-                pos += 1;
+                push_token!(TokenKind::Dot, range, pos, tokens);
             }
             b'[' => {
-                tokens.push(Token {
-                    kind: TokenKind::LBracket,
-                    range: range.start + pos..range.start + pos + 1,
-                });
-                pos += 1;
+                push_token!(TokenKind::LBracket, range, pos, tokens);
             }
             b']' => {
-                tokens.push(Token {
-                    kind: TokenKind::RBracket,
-                    range: range.start + pos..range.start + pos + 1,
-                });
-                pos += 1;
+                push_token!(TokenKind::RBracket, range, pos, tokens);
             }
             b'-' | b'0'..=b'9' => {
                 let start = range.start + pos;
@@ -486,12 +423,11 @@ fn tokenize(source: &[u8], range: Range<usize>) -> Result<Vec<Token>, Error> {
                     range: start..range.start + pos,
                 });
             }
-            _ if bytes[pos].is_ascii_alphanumeric() || bytes[pos] == b'_' => {
+            _ if is_ident(bytes[pos]) => {
                 let ident_start = range.start + pos;
                 let start = pos;
-                while pos < bytes.len()
-                    && (bytes[pos].is_ascii_alphanumeric() || bytes[pos] == b'_')
-                {
+                pos += 1;
+                while pos < bytes.len() && is_ident(bytes[pos]) {
                     pos += 1;
                 }
                 let ident = &bytes[start..pos];
@@ -567,6 +503,88 @@ fn parse_primary(
     base: usize,
     end: usize,
 ) -> Result<Expr, Error> {
+    struct DelimConfig {
+        close_kind: TokenKind,
+        unclosed_kind: ErrorKind,
+        comma_kind: ErrorKind,
+        open_at: usize,
+        unclosed_span_len: usize,
+    }
+
+    impl DelimConfig {
+        fn list(open_at: usize, span_len: usize) -> Self {
+            Self {
+                close_kind: TokenKind::RBracket,
+                unclosed_kind: ErrorKind::UnclosedList,
+                comma_kind: ErrorKind::ExpectedCommaInList,
+                open_at,
+                unclosed_span_len: span_len,
+            }
+        }
+        fn group(open_at: usize, span_len: usize) -> Self {
+            Self {
+                close_kind: TokenKind::RParen,
+                unclosed_kind: ErrorKind::UnclosedGroup,
+                comma_kind: ErrorKind::ExpectedCommaBetweenArgs,
+                open_at,
+                unclosed_span_len: span_len,
+            }
+        }
+    }
+
+    fn parse_delimited_items(
+        tokens: &[Token],
+        pos: &mut usize,
+        source: &[u8],
+        base: usize,
+        end: usize,
+        dc: &DelimConfig,
+    ) -> Result<Vec<Expr>, Error> {
+        let mut items = Vec::new();
+        loop {
+            if *pos >= tokens.len() {
+                return Err(Error::new(
+                    dc.unclosed_kind.clone(),
+                    dc.open_at,
+                    dc.unclosed_span_len,
+                    source,
+                ));
+            }
+            if tokens[*pos].kind == dc.close_kind {
+                *pos += 1;
+                break;
+            }
+            let item = parse_postfix(tokens, pos, source, base, end)?;
+            items.push(item);
+            if *pos >= tokens.len() {
+                return Err(Error::new(
+                    dc.unclosed_kind.clone(),
+                    dc.open_at,
+                    dc.unclosed_span_len,
+                    source,
+                ));
+            }
+            match &tokens[*pos].kind {
+                TokenKind::Comma => {
+                    *pos += 1;
+                }
+                k if *k == dc.close_kind => {
+                    *pos += 1;
+                    break;
+                }
+                _ => {
+                    return Err(Error::new(
+                        dc.comma_kind.clone(),
+                        tokens[*pos].range.start,
+                        1,
+                        source,
+                    ));
+                }
+            }
+        }
+        Ok(items)
+    }
+
     if *pos >= tokens.len() {
         return Err(Error::new(ErrorKind::UnexpectedEndOfExpr, base, 1, source));
     }
@@ -591,50 +609,15 @@ fn parse_primary(
         TokenKind::LBracket => {
             let lbracket_range = tokens[*pos].range.start;
             *pos += 1;
-            let mut items = Vec::new();
-            loop {
-                if *pos >= tokens.len() {
-                    let stop = tokens.last().map_or(lbracket_range + 1, |t| t.range.end);
-                    return Err(Error::new(
-                        ErrorKind::UnclosedList,
-                        lbracket_range,
-                        stop - lbracket_range,
-                        source,
-                    ));
-                }
-                if tokens[*pos].kind == TokenKind::RBracket {
-                    *pos += 1;
-                    break;
-                }
-                let item = parse_postfix(tokens, pos, source, base, end)?;
-                items.push(item);
-                if *pos >= tokens.len() {
-                    let stop = tokens.last().map_or(lbracket_range + 1, |t| t.range.end);
-                    return Err(Error::new(
-                        ErrorKind::UnclosedList,
-                        lbracket_range,
-                        stop - lbracket_range,
-                        source,
-                    ));
-                }
-                match tokens[*pos].kind {
-                    TokenKind::Comma => {
-                        *pos += 1;
-                    }
-                    TokenKind::RBracket => {
-                        *pos += 1;
-                        break;
-                    }
-                    _ => {
-                        return Err(Error::new(
-                            ErrorKind::ExpectedCommaInList,
-                            tokens[*pos].range.start,
-                            1,
-                            source,
-                        ));
-                    }
-                }
-            }
+            let stop = tokens.last().map_or(lbracket_range + 1, |t| t.range.end);
+            let items = parse_delimited_items(
+                tokens,
+                pos,
+                source,
+                base,
+                end,
+                &DelimConfig::list(lbracket_range, stop - lbracket_range),
+            )?;
             Ok(Expr::List(items))
         }
         TokenKind::Ident(name) => {
@@ -643,48 +626,14 @@ fn parse_primary(
             if *pos < tokens.len() && tokens[*pos].kind == TokenKind::LParen {
                 let lparen_range = tokens[*pos].range.start;
                 *pos += 1;
-                let mut args = Vec::new();
-                loop {
-                    if *pos >= tokens.len() {
-                        return Err(Error::new(
-                            ErrorKind::UnclosedGroup,
-                            lparen_range,
-                            end.saturating_sub(lparen_range) + 1,
-                            source,
-                        ));
-                    }
-                    if tokens[*pos].kind == TokenKind::RParen {
-                        *pos += 1;
-                        break;
-                    }
-                    let arg = parse_postfix(tokens, pos, source, base, end)?;
-                    args.push(arg);
-                    if *pos >= tokens.len() {
-                        return Err(Error::new(
-                            ErrorKind::UnclosedGroup,
-                            lparen_range,
-                            end.saturating_sub(lparen_range) + 1,
-                            source,
-                        ));
-                    }
-                    match tokens[*pos].kind {
-                        TokenKind::Comma => {
-                            *pos += 1;
-                        }
-                        TokenKind::RParen => {
-                            *pos += 1;
-                            break;
-                        }
-                        _ => {
-                            return Err(Error::new(
-                                ErrorKind::ExpectedCommaBetweenArgs,
-                                tokens[*pos].range.start,
-                                1,
-                                source,
-                            ));
-                        }
-                    }
-                }
+                let args = parse_delimited_items(
+                    tokens,
+                    pos,
+                    source,
+                    base,
+                    end,
+                    &DelimConfig::group(lparen_range, end.saturating_sub(lparen_range) + 1),
+                )?;
                 Ok(Expr::FnCall { name, args })
             } else {
                 Ok(Expr::Var(name))
@@ -740,43 +689,43 @@ mod tests {
         };
     }
 
-    #[test_case("" => Vec::<Node>::new())]
-    #[test_case("hello" => vec![node!(text 0..5)])]
-    #[test_case("{{ a }}" => vec![node!(interp var "a")])]
-    #[test_case("{{ \"str\" }}" => vec![node!(interp str "str")])]
-    #[test_case("{{ 42 }}" => vec![node!(interp int 42)])]
-    #[test_case("{{ -1 }}" => vec![node!(interp int -1)])]
-    #[test_case("{{ true }}" => vec![node!(interp bool true)])]
-    #[test_case("{{ false }}" => vec![node!(interp bool false)])]
-    #[test_case("{{ [] }}" => vec![node!(interp list [])])]
-    #[test_case("{{ [1,  \"2\",[  3]  ] }}" => vec![node!(interp list [expr!(int 1), expr!(str "2"), expr!(list [expr!(int 3)])])])]
-    #[test_case("{{ fn() }}" => vec![node!(interp call "fn", [])])]
-    #[test_case("{{ fn1(a, 2  ,fn2(  \"\"   )) }}" => vec![node!(interp call "fn1", [expr!(var "a"), expr!(int 2), expr!(call "fn2", [expr!(str "")])])])]
-    #[test_case("{{ a.b }}" => vec![node!(interp dot expr!(var "a"), "b")])]
-    #[test_case("{{ a.b.c }}" => vec![node!(interp dot expr!(dot expr!(var "a"), "b"), "c")])]
-    #[test_case("{{ list.0 }}" => vec![node!(interp dot expr!(var "list"), "0")])]
-    #[test_case(r#"{{ "hello \"world\" \\ " }}"# => vec![node!(interp str r#"hello "world" \ "#)])]
+    #[test_case("" => Vec::<Node>::new(); "empty_input")]
+    #[test_case("hello" => vec![node!(text 0..5)]; "plain_text")]
+    #[test_case("{{ a }}" => vec![node!(interp var "a")]; "interpolate_var")]
+    #[test_case("{{ \"str\" }}" => vec![node!(interp str "str")]; "interpolate_string")]
+    #[test_case("{{ 42 }}" => vec![node!(interp int 42)]; "interpolate_int")]
+    #[test_case("{{ -1 }}" => vec![node!(interp int -1)]; "interpolate_negative_int")]
+    #[test_case("{{ true }}" => vec![node!(interp bool true)]; "interpolate_true")]
+    #[test_case("{{ false }}" => vec![node!(interp bool false)]; "interpolate_false")]
+    #[test_case("{{ [] }}" => vec![node!(interp list [])]; "interpolate_empty_list")]
+    #[test_case("{{ [1,  \"2\",[  3]  ] }}" => vec![node!(interp list [expr!(int 1), expr!(str "2"), expr!(list [expr!(int 3)])])]; "interpolate_nested_list")]
+    #[test_case("{{ fn() }}" => vec![node!(interp call "fn", [])]; "interpolate_fn_call_no_args")]
+    #[test_case("{{ fn1(a, 2  ,fn2(  \"\"   )) }}" => vec![node!(interp call "fn1", [expr!(var "a"), expr!(int 2), expr!(call "fn2", [expr!(str "")])])]; "interpolate_nested_fn_call")]
+    #[test_case("{{ a.b }}" => vec![node!(interp dot expr!(var "a"), "b")]; "interpolate_dot_field")]
+    #[test_case("{{ a.b.c }}" => vec![node!(interp dot expr!(dot expr!(var "a"), "b"), "c")]; "interpolate_dot_chain")]
+    #[test_case("{{ list.0 }}" => vec![node!(interp dot expr!(var "list"), "0")]; "interpolate_dot_int_index")]
+    #[test_case(r#"{{ "hello \"world\" \\ " }}"# => vec![node!(interp str r#"hello "world" \ "#)]; "interpolate_string_escapes")]
     #[test_case("a {{ x }} b" => vec![
         node!(text 0..2),
         node!(interp var "x"),
         node!(text 9..11),
-    ])]
-    #[test_case("{% if true %}{% end %}" => vec![node!(if [[expr!(bool true) => []]])])]
+    ]; "mixed_text_and_interpolate")]
+    #[test_case("{% if true %}{% end %}" => vec![node!(if [[expr!(bool true) => []]])]; "if_empty_body")]
     #[test_case("{% if a %}{% else %}{% end %}" => vec![node!(
         if [[expr!(var "a") => []]]
         else [],
-    )])]
+    )]; "if_else_empty")]
     #[test_case("{% if a %}{% elif b %}{% else %}{% end %}" => vec![node!(
         if [
             [expr!(var "a") => []],
             [expr!(var "b") => []],
         ]
         else [],
-    )])]
-    #[test_case("{% for x in items %}{% end %}" => vec![node!(for "x" in expr!(var "items") => [])])]
-    #[test_case("{% for x in [1, 2] %}{% end %}" => vec![node!(for "x" in expr!(list [expr!(int 1), expr!(int 2)]) => [])])]
-    #[test_case("{% if a %}A{% end %}" => vec![node!(if [[expr!(var "a") => [node!(text 10..11)]]])])]
-    #[test_case("{% for x in items %}X{% end %}" => vec![node!(for "x" in expr!(var "items") => [node!(text 20..21)])])]
+    )]; "if_elif_else_empty")]
+    #[test_case("{% for x in items %}{% end %}" => vec![node!(for "x" in expr!(var "items") => [])]; "for_empty_body")]
+    #[test_case("{% for x in [1, 2] %}{% end %}" => vec![node!(for "x" in expr!(list [expr!(int 1), expr!(int 2)]) => [])]; "for_in_list_empty_body")]
+    #[test_case("{% if a %}A{% end %}" => vec![node!(if [[expr!(var "a") => [node!(text 10..11)]]])]; "if_with_text_body")]
+    #[test_case("{% for x in items %}X{% end %}" => vec![node!(for "x" in expr!(var "items") => [node!(text 20..21)])]; "for_with_text_body")]
     #[test_case("{% if l1 %}{% if l2 %}{% elif l2 %}{% else %}{% end %}{% elif l1 %}{% for x in items %}{% if l2 %}{% end %}{% end %}{% else %}{% end %}" =>
         vec![
             node!(if [
@@ -797,36 +746,35 @@ mod tests {
                 ]],
             ]
             else [],
-        )]
-    )]
+        )]; "nested_blocks")]
     fn test_parse(input: &str) -> Vec<Node> {
         let input = input.as_bytes();
         parse(&scan(input).unwrap(), input).unwrap()
     }
 
-    #[test_case("{{ }}" => (ErrorKind::UnexpectedEndOfExpr, 2, 1))]
-    #[test_case("{{ @ }}" => (ErrorKind::UnexpectedToken, 3, 1))]
-    #[test_case("{{ p% }}" => (ErrorKind::UnexpectedToken, 4, 1))]
-    #[test_case("{{ a b }}" => (ErrorKind::UnexpectedTokensAfterExpr, 5, 1))]
-    #[test_case("{{ () }}" => (ErrorKind::UnexpectedToken, 3, 1); "todo1")]
-    #[test_case("{{ a..b }}" => (ErrorKind::ExpectedFieldName, 5, 1))]
-    #[test_case("{{ list., }}" => (ErrorKind::ExpectedFieldName, 8, 1))]
-    #[test_case("{{ \"hello }}" => (ErrorKind::UnclosedString, 3, 6))]
-    #[test_case("{{ [1, 2 }}" => (ErrorKind::UnclosedList, 3, 5))]
-    #[test_case("{{ fn(a, b }}" => (ErrorKind::UnclosedGroup, 5, 7))]
-    #[test_case("{{ [1  2] }}" => (ErrorKind::ExpectedCommaInList, 7, 1))]
-    #[test_case("{{ fn(a b) }}" => (ErrorKind::ExpectedCommaBetweenArgs, 8, 1))]
-    #[test_case("{%%}" => (ErrorKind::EmptyStatement, 0, 4))]
-    #[test_case("{% foobar %}" => (ErrorKind::UnexpectedKeyword, 3, 6))]
-    #[test_case("{% if %}" => (ErrorKind::UnexpectedEndOfExpr, 5, 1))]
-    #[test_case("{% if true %}" => (ErrorKind::UnclosedBlock, 0, 13))]
-    #[test_case("{% elif true %}" => (ErrorKind::StrayElif, 0, 15))]
-    #[test_case("{% else true %}" => (ErrorKind::StrayElse, 0, 15))]
-    #[test_case("{% end %}" => (ErrorKind::StrayEnd, 0, 9))]
-    #[test_case("{% for %}" => (ErrorKind::ExpectedForSyntax, 6, 1))]
-    #[test_case("{% for 123 in items %}" => (ErrorKind::ExpectedForVar, 7, 3))]
-    #[test_case("{% for x of items %}" => (ErrorKind::ExpectedForIn, 9, 2))]
-    #[test_case("{% for x in items %}" => (ErrorKind::UnclosedFor, 0, 20))]
+    #[test_case("{{ }}" => (ErrorKind::UnexpectedEndOfExpr, 2, 1); "unexpected_end_of_expr")]
+    #[test_case("{{ @ }}" => (ErrorKind::UnexpectedToken, 3, 1); "unexpected_token_at_sign")]
+    #[test_case("{{ p% }}" => (ErrorKind::UnexpectedToken, 4, 1); "unexpected_token_percent")]
+    #[test_case("{{ a b }}" => (ErrorKind::UnexpectedTokensAfterExpr, 5, 1); "unexpected_tokens_after_expr")]
+    #[test_case("{{ () }}" => (ErrorKind::UnexpectedToken, 3, 1); "unexpected_token_empty_paren")]
+    #[test_case("{{ a..b }}" => (ErrorKind::ExpectedFieldName, 5, 1); "expected_field_name_after_dot")]
+    #[test_case("{{ list., }}" => (ErrorKind::ExpectedFieldName, 8, 1); "expected_field_name_trailing_dot")]
+    #[test_case("{{ \"hello }}" => (ErrorKind::UnclosedString, 3, 6); "unclosed_string")]
+    #[test_case("{{ [1, 2 }}" => (ErrorKind::UnclosedList, 3, 5); "unclosed_list")]
+    #[test_case("{{ fn(a, b }}" => (ErrorKind::UnclosedGroup, 5, 7); "unclosed_group")]
+    #[test_case("{{ [1  2] }}" => (ErrorKind::ExpectedCommaInList, 7, 1); "expected_comma_in_list")]
+    #[test_case("{{ fn(a b) }}" => (ErrorKind::ExpectedCommaBetweenArgs, 8, 1); "expected_comma_between_args")]
+    #[test_case("{%%}" => (ErrorKind::EmptyStatement, 0, 4); "empty_statement")]
+    #[test_case("{% foobar %}" => (ErrorKind::UnexpectedKeyword, 3, 6); "unexpected_keyword")]
+    #[test_case("{% if %}" => (ErrorKind::UnexpectedEndOfExpr, 5, 1); "if_no_condition")]
+    #[test_case("{% if true %}" => (ErrorKind::UnclosedBlock, 0, 13); "unclosed_if_block")]
+    #[test_case("{% elif true %}" => (ErrorKind::StrayElif, 0, 15); "stray_elif")]
+    #[test_case("{% else true %}" => (ErrorKind::StrayElse, 0, 15); "stray_else")]
+    #[test_case("{% end %}" => (ErrorKind::StrayEnd, 0, 9); "stray_end")]
+    #[test_case("{% for %}" => (ErrorKind::ExpectedForSyntax, 6, 1); "for_no_var")]
+    #[test_case("{% for 123 in items %}" => (ErrorKind::ExpectedForVar, 7, 3); "for_non_ident_var")]
+    #[test_case("{% for x of items %}" => (ErrorKind::ExpectedForIn, 9, 2); "for_missing_in")]
+    #[test_case("{% for x in items %}" => (ErrorKind::UnclosedFor, 0, 20); "unclosed_for")]
     fn test_error(input: &str) -> (ErrorKind, usize, usize) {
         let mut rng = rand::rng();
         let prefix_len = rng.random::<u8>() as usize;
