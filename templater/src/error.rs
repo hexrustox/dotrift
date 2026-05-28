@@ -67,6 +67,43 @@ pub enum ErrorKind {
     UnclosedGroup,
 }
 
+#[derive(Debug, Error)]
+pub enum EvalError {
+    #[error("undefined variable `{0}`")]
+    UndefinedVariable(String),
+
+    #[error("undefined function `{0}`")]
+    UndefinedFunction(String),
+
+    #[error("type mismatch: expected {expected}, got {got}")]
+    TypeMismatch {
+        expected: &'static str,
+        got: &'static str,
+    },
+
+    #[error("wrong argument count for `{name}`: expected {expected}, got {got}")]
+    WrongArgCount {
+        name: String,
+        expected: String,
+        got: usize,
+    },
+
+    #[error("list index out of bounds: index {index} with length {len}")]
+    IndexOutOfBounds { index: usize, len: usize },
+
+    #[error("string values do not support index access")]
+    StringIndexAccess,
+
+    #[error("map key not found `{0}`")]
+    MapKeyNotFound(String),
+
+    #[error("invalid field access on {ty}: `{field}`")]
+    InvalidFieldAccess { ty: &'static str, field: String },
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
 #[derive(Debug, Diagnostic, Error, PartialEq)]
 #[error("{kind}")]
 pub struct Error {
