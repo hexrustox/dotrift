@@ -35,6 +35,13 @@ struct Tag {
     interior_end: usize,
     modifier_left: Modifier,
     modifier_right: Modifier,
+    backslash_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct EscapeSite {
+    pos: usize,
+    n: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -45,19 +52,28 @@ pub enum RawToken {
 }
 
 pub fn scan(source: &[u8]) -> Result<Vec<RawToken>, Error> {
-    let tags = find_tags(source)?;
-    let tokens = build_tokens(source, &tags);
+    let (tags, escapes) = find_tags(source)?;
+    let tokens = build_tokens(source, &tags, &escapes);
     Ok(tokens)
 }
 
-fn find_tags(source: &[u8]) -> Result<Vec<Tag>, Error> {
+fn count_backslashes(source: &[u8], pos: usize) -> usize {
+    let mut n = 0;
+    while n < pos && source[pos - 1 - n] == b'\\' {
+        n += 1;
+    }
+    n
+}
+
+fn find_tags(source: &[u8]) -> Result<(Vec<Tag>, Vec<EscapeSite>), Error> {
     let mut tags = Vec::new();
+    let mut escapes = Vec::new();
     let mut pos = 0;
 
     while pos < source.len() {
         let next = match source[pos..]
             .iter()
-            .position(|&b| b == b'{' || b == b'}' || b == b'%')
+            .position(|&b| b == b'{' || b == b'}' || b == b'%' || b == b'#')
             .map(|p| pos + p)
         {
             Some(o) => o,
@@ -67,7 +83,16 @@ fn find_tags(source: &[u8]) -> Result<Vec<Tag>, Error> {
         let b = source[next];
         let b2 = source.get(next + 1).copied();
 
-        if b == b'}' && b2 == Some(b'}') || b == b'%' && b2 == Some(b'}') {
+        if (b == b'}' && b2 == Some(b'}'))
+            || (b == b'%' && b2 == Some(b'}'))
+            || (b == b'#' && b2 == Some(b'}'))
+        {
+            let n = count_backslashes(source, next);
+            if n % 2 == 1 {
+                escapes.push(EscapeSite { pos: next, n });
+                pos = next + 2;
+                continue;
+            }
             return Err(Error::new(ErrorKind::StrayDelimiter, next, 2));
         }
         if b != b'{' {
@@ -84,6 +109,13 @@ fn find_tags(source: &[u8]) -> Result<Vec<Tag>, Error> {
                 continue;
             }
         };
+
+        let n = count_backslashes(source, next);
+        if n % 2 == 1 {
+            escapes.push(EscapeSite { pos: next, n });
+            pos = next + 2;
+            continue;
+        }
 
         let close_delim = match kind {
             TagKind::Interp => b"}}",
@@ -111,17 +143,38 @@ fn find_tags(source: &[u8]) -> Result<Vec<Tag>, Error> {
             interior_end: interior_content_end,
             modifier_left,
             modifier_right,
+            backslash_count: n,
         });
 
         pos = close + close_delim.len();
     }
 
-    Ok(tags)
+    Ok((tags, escapes))
 }
 
 fn find_close(source: &[u8], start: usize, delim: &[u8]) -> Option<usize> {
     let mut i = start;
     while i + delim.len() <= source.len() {
+        if source[i] == b'"' {
+            let mut j = i + 1;
+            let closed = loop {
+                if j >= source.len() {
+                    break false;
+                }
+                if source[j] == b'\\' && j + 1 < source.len() {
+                    j += 2;
+                    continue;
+                }
+                if source[j] == b'"' {
+                    break true;
+                }
+                j += 1;
+            };
+            if closed {
+                i = j + 1;
+                continue;
+            }
+        }
         if &source[i..i + delim.len()] == delim {
             return Some(i);
         }
@@ -156,7 +209,48 @@ fn parse_modifiers(
     (left, right)
 }
 
-fn build_tokens(source: &[u8], tags: &[Tag]) -> Vec<RawToken> {
+fn push_text_with_escapes(
+    start: usize,
+    end: usize,
+    escapes: &[EscapeSite],
+    tokens: &mut Vec<RawToken>,
+) {
+    if start >= end {
+        return;
+    }
+
+    let mut pos = start;
+
+    for esc in escapes {
+        if esc.pos < start {
+            continue;
+        }
+        if esc.pos + 2 > end {
+            break;
+        }
+
+        let before_end = esc.pos - esc.n;
+        if before_end > pos {
+            tokens.push(RawToken::Text(pos..before_end));
+        }
+
+        let kept_start = esc.pos - esc.n;
+        let kept_end = esc.pos - esc.n.div_ceil(2);
+        if kept_start < kept_end {
+            tokens.push(RawToken::Text(kept_start..kept_end));
+        }
+
+        tokens.push(RawToken::Text(esc.pos..esc.pos + 2));
+
+        pos = esc.pos + 2;
+    }
+
+    if pos < end {
+        tokens.push(RawToken::Text(pos..end));
+    }
+}
+
+fn build_tokens(source: &[u8], tags: &[Tag], escapes: &[EscapeSite]) -> Vec<RawToken> {
     let mut tokens = Vec::new();
     let mut prev_end = 0usize;
 
@@ -170,9 +264,13 @@ fn build_tokens(source: &[u8], tags: &[Tag]) -> Vec<RawToken> {
         }
         apply_left_modifier(source, &mut text_end, tag, prev_end);
 
-        if text_start < text_end {
-            tokens.push(RawToken::Text(text_start..text_end));
+        if text_end > tag.backslash_count / 2 {
+            text_end -= tag.backslash_count / 2;
+        } else {
+            text_end = 0;
         }
+
+        push_text_with_escapes(text_start, text_end, escapes, &mut tokens);
 
         match tag.kind {
             TagKind::Interp => {
@@ -190,9 +288,7 @@ fn build_tokens(source: &[u8], tags: &[Tag]) -> Vec<RawToken> {
     if let Some(last) = tags.last() {
         apply_right_modifier(source, &mut prev_end, last, source.len());
     }
-    if prev_end < source.len() {
-        tokens.push(RawToken::Text(prev_end..source.len()));
-    }
+    push_text_with_escapes(prev_end, source.len(), escapes, &mut tokens);
 
     tokens
 }
@@ -266,6 +362,7 @@ mod tests {
                 interior_end: $iend,
                 modifier_left: Modifier::None,
                 modifier_right: Modifier::None,
+                backslash_count: 0,
             }
         };
         ($kind:ident, $start:expr, $end:expr, $istart:expr, $iend:expr, $ml:ident, $mr:ident) => {
@@ -277,7 +374,14 @@ mod tests {
                 interior_end: $iend,
                 modifier_left: Modifier::$ml,
                 modifier_right: Modifier::$mr,
+                backslash_count: 0,
             }
+        };
+    }
+
+    macro_rules! esc {
+        ($pos:expr, $n:expr) => {
+            EscapeSite { pos: $pos, n: $n }
         };
     }
 
@@ -299,9 +403,18 @@ mod tests {
         tag!(Stmt, 0, 8, 2, 6),
         tag!(Stmt, 8, 17, 10, 15),
     ]; "multiple_tags")]
-    #[test_case("{{" => panics ""; "error")]
     fn test_find_tags(input: &str) -> Vec<Tag> {
-        find_tags(input.as_bytes()).unwrap()
+        find_tags(input.as_bytes()).unwrap().0
+    }
+
+    #[test_case("" => Vec::<EscapeSite>::new(); "empty_no_escapes")]
+    #[test_case("hello" => Vec::<EscapeSite>::new(); "plain_text_no_escapes")]
+    #[test_case("{{ var }}" => Vec::<EscapeSite>::new(); "normal_tag_no_escapes")]
+    #[test_case(r#"\{{ name \}}"# => vec![esc!(1, 1), esc!(10, 1)]; "escaped_delimiters")]
+    #[test_case(r#"\\\{{ name \}}"# => vec![esc!(3, 3), esc!(12, 1)]; "three_backslashes_escaped")]
+    #[test_case(r#"\{% stmt \%}"# => vec![esc!(1, 1), esc!(10, 1)]; "escaped_stmt")]
+    fn test_find_escapes(input: &str) -> Vec<EscapeSite> {
+        find_tags(input.as_bytes()).unwrap().1
     }
 
     macro_rules! text {
@@ -384,14 +497,59 @@ mod tests {
         interp!(2..5),
         interp!(20..23),
     ]; "trim_all_converging_at_newline_between_tags")]
+    #[test_case(r#"\{{ literal \}}"# => vec![
+        text!(1..3),
+        text!(3..12),
+        text!(13..15),
+    ]; "escaped_interpolation_output")]
+    #[test_case(r#"before \{{ literal \}} after"# => vec![
+        text!(0..7),
+        text!(8..10),
+        text!(10..19),
+        text!(20..22),
+        text!(22..28),
+    ]; "escaped_interpolation_between_text")]
+    #[test_case(r#"\\{{ name }}"# => vec![
+        text!(0..1),
+        interp!(4..10),
+    ]; "even_backslashes_text_and_tag")]
+    #[test_case(r#"\\\\{{ name }}"# => vec![
+        text!(0..2),
+        interp!(6..12),
+    ]; "four_backslashes_text_and_tag")]
+    #[test_case(r#"\\\{{ literal \}}"# => vec![
+        text!(0..1),
+        text!(3..5),
+        text!(5..14),
+        text!(15..17),
+    ]; "three_backslashes_escaped")]
+    #[test_case(r#"\{% stmt \%}"# => vec![
+        text!(1..3),
+        text!(3..9),
+        text!(10..12),
+    ]; "escaped_statement_output")]
+    #[test_case(r#"\{# comment \#}"# => vec![
+        text!(1..3),
+        text!(3..12),
+        text!(13..15),
+    ]; "escaped_comment_output")]
+    #[test_case(r#"{{ "}}" }}"# => vec![
+        interp!(2..8),
+    ]; "string_contains_closing_delim")]
+    #[test_case(r#"{% "%}" %}"# => vec![
+        stmt!(2..8),
+    ]; "stmt_contains_closing_delim")]
+    #[test_case(r##"{# "#}" #}"## => Vec::<RawToken>::new(); "comment_contains_closing_delim")]
     fn test_scan(input: &str) -> Vec<RawToken> {
         scan(input.as_bytes()).unwrap()
     }
 
     #[test_case("{{ unclosed" => (ErrorKind::UnclosedDelimiter, 0, 2); "unclosed_interpolation")]
     #[test_case("{% unclosed" => (ErrorKind::UnclosedDelimiter, 0, 2); "unclosed_stmt")]
+    #[test_case("{# unclosed" => (ErrorKind::UnclosedDelimiter, 0, 2); "unclosed_comment")]
     #[test_case("stray }}" => (ErrorKind::StrayDelimiter, 6, 2); "stray_interpolation")]
     #[test_case("stray %}" => (ErrorKind::StrayDelimiter, 6, 2); "stray_stmt")]
+    #[test_case("stray #}" => (ErrorKind::StrayDelimiter, 6, 2); "stray_comment")]
     fn test_error(input: &str) -> (ErrorKind, usize, usize) {
         let e = find_tags(input.as_bytes()).unwrap_err();
         e.destruct()

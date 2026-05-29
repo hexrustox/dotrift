@@ -142,6 +142,28 @@ Expression can be a variable, function call, member access, or list literal:
 
 Stripped by the lexer. No output. No interaction with whitespace modifiers.
 
+## Escaping
+
+A delimiter pair (`` {{ ``, `` {% ``, `` {# ``, `` }} ``, `` %} ``, `` #} ``) can be escaped by preceding it with an odd number of backslashes. Let `n` be the number of consecutive `\` chars immediately before the delimiter:
+
+- **`n` even** (including 0): the delimiter is **not escaped**. The `n` `\` chars render as `n/2` literal `\` chars, and the delimiter is processed normally.
+- **`n` odd**: the delimiter **is escaped**. The `n` `\` chars render as `(n-1)/2` literal `\` chars, and the delimiter chars are rendered as literal text.
+
+| Source | n | Literal `\` output | Delimiter behavior |
+|---|---|---|---|
+| `{{` | 0 (even) | 0 | Tag |
+| `\{{` | 1 (odd) | 0 | Literal `{{` |
+| `\\{{` | 2 (even) | 1 | Tag |
+| `\\\{{` | 3 (odd) | 1 | Literal `{{` |
+| `\\\\{{` | 4 (even) | 2 | Tag |
+
+An escaped opening delimiter means the tag is never created, so its closing delimiter — if unescaped — will be a stray delimiter error:
+
+```
+"\{{}}"       → error: stray closing delimiter
+"\{{\}}"      → outputs literal "{{}}"
+```
+
 ## Scoping
 
 ```
