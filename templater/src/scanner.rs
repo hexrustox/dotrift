@@ -68,12 +68,7 @@ fn find_tags(source: &[u8]) -> Result<Vec<Tag>, ParseError> {
         let b2 = source.get(next + 1).copied();
 
         if b == b'}' && b2 == Some(b'}') || b == b'%' && b2 == Some(b'}') {
-            return Err(ParseError::new(
-                ParseErrorKind::StrayDelimiter,
-                next,
-                2,
-                source,
-            ));
+            return Err(ParseError::new(ParseErrorKind::StrayDelimiter, next, 2));
         }
         if b != b'{' {
             pos = next + 1;
@@ -99,7 +94,7 @@ fn find_tags(source: &[u8]) -> Result<Vec<Tag>, ParseError> {
         let interior_start = next + 2;
 
         let close = find_close(source, interior_start, close_delim)
-            .ok_or_else(|| ParseError::new(ParseErrorKind::UnclosedDelimiter, next, 2, source))?;
+            .ok_or_else(|| ParseError::new(ParseErrorKind::UnclosedDelimiter, next, 2))?;
 
         let interior_end = close;
 

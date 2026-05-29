@@ -151,8 +151,8 @@ fn eval_expr(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value, EvalError> {
         }
         ExprKind::Dot { left, field } => {
             let val = eval_expr(left, ctx)?;
-            let start = left.range.end + 1;
-            dot_access(val, field, start..start + field.len())
+            let start = left.range.end;
+            dot_access(val, field, start..start + field.len() + 1)
         }
     }
 }
@@ -193,12 +193,13 @@ fn dot_access(val: Value, field: &str, range: Range<usize>) -> Result<Value, Eva
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, ops::Range};
+    use std::collections::HashMap;
 
     use test_case::test_case;
 
     use crate::{
-        FuncError, RenderError, Template, Value, error::EvalErrorKind, function::FunctionRegistry,
+        EvalContext, FuncError, RenderError, Template, Value, error::EvalErrorKind, eval_nodes,
+        function::FunctionRegistry, parser::parse, scanner::scan,
     };
 
     struct Functions;
@@ -291,22 +292,28 @@ mod tests {
         String::from_utf8(buf).unwrap()
     }
 
-    #[test_case("{{ nothing }}" => (EvalErrorKind::UndefinedVariable("nothing".to_string()), 3..10); "undefined_variable")]
-    #[test_case("{{ items.99 }}" => (EvalErrorKind::IndexOutOfBounds { index: 99, len: 2 }, 9..11); "index_out_of_bounds")]
-    #[test_case("{{ name.0 }}" => (EvalErrorKind::InvalidFieldAccess { ty: "String", field: "0".to_string() }, 8..9); "string_index_access")]
-    #[test_case("{{ obj.missing }}" => (EvalErrorKind::MapKeyNotFound("missing".to_string()), 7..14); "map_key_not_found")]
-    #[test_case("{{ obj.key.missing }}" => (EvalErrorKind::InvalidFieldAccess { ty: "String", field: "missing".to_string() }, 11..18); "string_key_access")]
-    #[test_case("{{ items.x }}" => (EvalErrorKind::InvalidFieldAccess { ty: "List", field: "x".to_string() }, 9..10); "invalid_field_access_list")]
-    #[test_case("{{ count.field }}" => (EvalErrorKind::InvalidFieldAccess { ty: "Int", field: "field".to_string() }, 9..14); "invalid_field_access_int")]
-    #[test_case("{{ nofunc() }}" => (EvalErrorKind::Function(FuncError::Undefined("nofunc".to_string())), 3..11); "function_undefined")]
-    #[test_case("{{ wrong_count(1) }}" => (EvalErrorKind::Function(FuncError::WrongArgCount { name: "wrong_count".to_string(), expected: "0".to_string(), got: 1 }), 3..17); "function_wrong_arg_count")]
-    #[test_case("{{ add(true) }}" => (EvalErrorKind::Function(FuncError::TypeMismatch { expected: "Int", got: "Bool" }), 3..12); "function_type_mismatch")]
-    #[test_case("{% if \"\" %}{% end %}" => (EvalErrorKind::Function(FuncError::TypeMismatch { expected: "Bool", got: "String" }), 6..8); "if_type_mismatch")]
-    #[test_case("{% for x in \"\" %}{% end %}" => (EvalErrorKind::Function(FuncError::TypeMismatch { expected: "List", got: "String" }), 12..14); "for_type_mismatch")]
-    fn test_error(template: &str) -> (EvalErrorKind, Range<usize>) {
-        let tmpl = Template::from_bytes(template.to_owned().into_bytes()).unwrap();
+    #[test_case("{{ nothing }}" => (EvalErrorKind::UndefinedVariable("nothing".to_string()), 3, 7); "undefined_variable")]
+    #[test_case("{{ items.99 }}" => (EvalErrorKind::IndexOutOfBounds { index: 99, len: 2 }, 8, 3); "index_out_of_bounds")]
+    #[test_case("{{ name.0 }}" => (EvalErrorKind::InvalidFieldAccess { ty: "String", field: "0".to_string() }, 7, 2); "string_index_access")]
+    #[test_case("{{ obj.missing }}" => (EvalErrorKind::MapKeyNotFound("missing".to_string()), 6, 8); "map_key_not_found")]
+    #[test_case("{{ obj.key.missing }}" => (EvalErrorKind::InvalidFieldAccess { ty: "String", field: "missing".to_string() }, 10, 8); "string_key_access")]
+    #[test_case("{{ items.x }}" => (EvalErrorKind::InvalidFieldAccess { ty: "List", field: "x".to_string() }, 8, 2); "invalid_field_access_list")]
+    #[test_case("{{ count.field }}" => (EvalErrorKind::InvalidFieldAccess { ty: "Int", field: "field".to_string() }, 8, 6); "invalid_field_access_int")]
+    #[test_case("{{ nofunc() }}" => (EvalErrorKind::Function(FuncError::Undefined("nofunc".to_string())), 3, 8); "function_undefined")]
+    #[test_case("{{ wrong_count(1) }}" => (EvalErrorKind::Function(FuncError::WrongArgCount { name: "wrong_count".to_string(), expected: "0".to_string(), got: 1 }), 3, 14); "function_wrong_arg_count")]
+    #[test_case("{{ add(true) }}" => (EvalErrorKind::Function(FuncError::TypeMismatch { expected: "Int", got: "Bool" }), 3, 9); "function_type_mismatch")]
+    #[test_case("{% if \"\" %}{% end %}" => (EvalErrorKind::Function(FuncError::TypeMismatch { expected: "Bool", got: "String" }), 6, 2); "if_type_mismatch")]
+    #[test_case("{% for x in \"\" %}{% end %}" => (EvalErrorKind::Function(FuncError::TypeMismatch { expected: "List", got: "String" }), 12, 2); "for_type_mismatch")]
+    fn test_error(template: &str) -> (EvalErrorKind, usize, usize) {
+        let source = template.to_owned().into_bytes();
         let mut buf = Vec::new();
-        let e = tmpl.render(&mut buf, vars(), &Functions).unwrap_err();
+        let e = eval_nodes(
+            &parse(&scan(&source).unwrap(), &source).unwrap(),
+            &source,
+            &mut buf,
+            &mut EvalContext::new(vars(), &Functions),
+        )
+        .unwrap_err();
         match e {
             RenderError::Eval(e) => e.destruct(),
             _ => unreachable!(),

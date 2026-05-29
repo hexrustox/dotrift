@@ -31,8 +31,8 @@ struct Token {
     range: Range<usize>,
 }
 
-fn tag_error(kind: ParseErrorKind, range: &Range<usize>, source: &[u8]) -> ParseError {
-    ParseError::new(kind, range.start.saturating_sub(2), range.len() + 4, source)
+fn tag_error(kind: ParseErrorKind, range: &Range<usize>) -> ParseError {
+    ParseError::new(kind, range.start.saturating_sub(2), range.len() + 4)
 }
 
 pub fn parse(tokens: &[RawToken], source: &[u8]) -> Result<Vec<Node>, ParseError> {
@@ -55,25 +55,24 @@ pub fn parse(tokens: &[RawToken], source: &[u8]) -> Result<Vec<Node>, ParseError
                 let toks = tokenize(source, range.clone())?;
                 let kw = toks
                     .first()
-                    .ok_or_else(|| tag_error(ParseErrorKind::EmptyStatement, &opening, source))?;
+                    .ok_or_else(|| tag_error(ParseErrorKind::EmptyStatement, &opening))?;
                 let (stmt_nodes, consumed) = match &kw.kind {
                     TokenKind::If => parse_if_block(tokens, source, i)?,
                     TokenKind::For => parse_for_block(tokens, source, i)?,
                     TokenKind::Elif => {
-                        return Err(tag_error(ParseErrorKind::StrayElif, &opening, source));
+                        return Err(tag_error(ParseErrorKind::StrayElif, &opening));
                     }
                     TokenKind::Else => {
-                        return Err(tag_error(ParseErrorKind::StrayElse, &opening, source));
+                        return Err(tag_error(ParseErrorKind::StrayElse, &opening));
                     }
                     TokenKind::End => {
-                        return Err(tag_error(ParseErrorKind::StrayEnd, &opening, source));
+                        return Err(tag_error(ParseErrorKind::StrayEnd, &opening));
                     }
                     _ => {
                         return Err(ParseError::new(
                             ParseErrorKind::UnexpectedKeyword,
                             kw.range.start,
                             kw.range.len(),
-                            source,
                         ));
                     }
                 };
@@ -89,13 +88,12 @@ pub fn parse(tokens: &[RawToken], source: &[u8]) -> Result<Vec<Node>, ParseError
 fn parse_interpolate(source: &[u8], range: &Range<usize>) -> Result<Expr, ParseError> {
     let toks = tokenize(source, range.clone())?;
     let mut pos = 0;
-    let expr = parse_postfix(&toks, &mut pos, source, range.start, range.end)?;
+    let expr = parse_postfix(&toks, &mut pos, range.start, range.end)?;
     if pos != toks.len() {
         return Err(ParseError::new(
             ParseErrorKind::UnexpectedTokensAfterExpr,
             toks[pos].range.start,
             1,
-            source,
         ));
     }
     Ok(expr)
@@ -104,18 +102,16 @@ fn parse_interpolate(source: &[u8], range: &Range<usize>) -> Result<Expr, ParseE
 fn parse_trailing_expr(
     toks: &[Token],
     start_pos: usize,
-    source: &[u8],
     base: usize,
     end: usize,
 ) -> Result<Expr, ParseError> {
     let mut pos = start_pos;
-    let expr = parse_postfix(toks, &mut pos, source, base, end)?;
+    let expr = parse_postfix(toks, &mut pos, base, end)?;
     if pos != toks.len() {
         return Err(ParseError::new(
             ParseErrorKind::UnexpectedTokensAfterExpr,
             toks[pos].range.start,
             1,
-            source,
         ));
     }
     Ok(expr)
@@ -133,14 +129,14 @@ fn parse_if_block(
 
     let opening = match tokens.get(start) {
         Some(RawToken::Statement(r)) => r.clone(),
-        _ => return Err(ParseError::new(ParseErrorKind::UnclosedBlock, 0, 1, source)),
+        _ => return Err(ParseError::new(ParseErrorKind::UnclosedBlock, 0, 1)),
     };
 
     loop {
         let raw = match tokens.get(i) {
             Some(RawToken::Statement(range)) => range.clone(),
             None => {
-                return Err(tag_error(ParseErrorKind::UnclosedBlock, &opening, source));
+                return Err(tag_error(ParseErrorKind::UnclosedBlock, &opening));
             }
             _ => {
                 unreachable!()
@@ -159,7 +155,7 @@ fn parse_if_block(
                 kind: TokenKind::Elif,
                 ..
             }) => {
-                let cond = parse_trailing_expr(&toks, 1, source, toks[0].range.end, raw.end)?;
+                let cond = parse_trailing_expr(&toks, 1, toks[0].range.end, raw.end)?;
                 let (body, body_consumed) =
                     collect_body_until(tokens, source, i + 1, &[TokenKind::Elif, TokenKind::Else])?;
                 branches.push((cond, body));
@@ -187,7 +183,6 @@ fn parse_if_block(
                     ParseErrorKind::UnexpectedKeyword,
                     tok.range.start,
                     tok.range.len(),
-                    source,
                 ));
             }
             None => {
@@ -222,7 +217,6 @@ fn parse_for_block(
             ParseErrorKind::ExpectedForSyntax,
             toks[0].range.end,
             1,
-            source,
         ));
     }
 
@@ -233,7 +227,6 @@ fn parse_for_block(
                 ParseErrorKind::ExpectedForVar,
                 toks[1].range.start,
                 toks[1].range.len(),
-                source,
             ));
         }
     };
@@ -243,11 +236,10 @@ fn parse_for_block(
             ParseErrorKind::ExpectedForIn,
             toks[2].range.start,
             toks[2].range.len(),
-            source,
         ));
     }
 
-    let collection = parse_trailing_expr(&toks, 3, source, toks[0].range.end, range.end)?;
+    let collection = parse_trailing_expr(&toks, 3, toks[0].range.end, range.end)?;
 
     let (body, body_consumed) = collect_body_until(tokens, source, start + 1, &[])?;
 
@@ -256,7 +248,7 @@ fn parse_for_block(
         Some(RawToken::Statement(r))
             if tokenize(source, r.clone())?.first().map(|t| &t.kind) == Some(&TokenKind::End) => {}
         _ => {
-            return Err(tag_error(ParseErrorKind::UnclosedFor, &range, source));
+            return Err(tag_error(ParseErrorKind::UnclosedFor, &range));
         }
     }
 
@@ -358,7 +350,6 @@ fn tokenize(source: &[u8], range: Range<usize>) -> Result<Vec<Token>, ParseError
                             ParseErrorKind::UnclosedString,
                             quote_start,
                             end - quote_start,
-                            source,
                         ));
                     }
                     match bytes[pos] {
@@ -452,7 +443,6 @@ fn tokenize(source: &[u8], range: Range<usize>) -> Result<Vec<Token>, ParseError
                     ParseErrorKind::UnexpectedToken,
                     range.start + pos,
                     1,
-                    source,
                 ));
             }
         }
@@ -464,11 +454,10 @@ fn tokenize(source: &[u8], range: Range<usize>) -> Result<Vec<Token>, ParseError
 fn parse_postfix(
     tokens: &[Token],
     pos: &mut usize,
-    source: &[u8],
     base: usize,
     end: usize,
 ) -> Result<Expr, ParseError> {
-    let mut left = parse_primary(tokens, pos, source, base, end)?;
+    let mut left = parse_primary(tokens, pos, base, end)?;
 
     while *pos < tokens.len() && tokens[*pos].kind == TokenKind::Dot {
         *pos += 1;
@@ -483,12 +472,7 @@ fn parse_postfix(
             }) => n.to_string(),
             tok => {
                 let at = tok.map_or(base, |t| t.range.start);
-                return Err(ParseError::new(
-                    ParseErrorKind::ExpectedFieldName,
-                    at,
-                    1,
-                    source,
-                ));
+                return Err(ParseError::new(ParseErrorKind::ExpectedFieldName, at, 1));
             }
         };
         *pos += 1;
@@ -509,7 +493,6 @@ fn parse_postfix(
 fn parse_primary(
     tokens: &[Token],
     pos: &mut usize,
-    source: &[u8],
     base: usize,
     end: usize,
 ) -> Result<Expr, ParseError> {
@@ -545,7 +528,6 @@ fn parse_primary(
     fn parse_delimited_items(
         tokens: &[Token],
         pos: &mut usize,
-        source: &[u8],
         base: usize,
         end: usize,
         dc: &DelimConfig,
@@ -557,21 +539,19 @@ fn parse_primary(
                     dc.unclosed_kind.clone(),
                     dc.open_at,
                     dc.unclosed_span_len,
-                    source,
                 ));
             }
             if tokens[*pos].kind == dc.close_kind {
                 *pos += 1;
                 break;
             }
-            let item = parse_postfix(tokens, pos, source, base, end)?;
+            let item = parse_postfix(tokens, pos, base, end)?;
             items.push(item);
             if *pos >= tokens.len() {
                 return Err(ParseError::new(
                     dc.unclosed_kind.clone(),
                     dc.open_at,
                     dc.unclosed_span_len,
-                    source,
                 ));
             }
             match &tokens[*pos].kind {
@@ -587,7 +567,6 @@ fn parse_primary(
                         dc.comma_kind.clone(),
                         tokens[*pos].range.start,
                         1,
-                        source,
                     ));
                 }
             }
@@ -600,7 +579,6 @@ fn parse_primary(
             ParseErrorKind::UnexpectedEndOfExpr,
             base,
             1,
-            source,
         ));
     }
 
@@ -644,7 +622,6 @@ fn parse_primary(
             let items = parse_delimited_items(
                 tokens,
                 pos,
-                source,
                 base,
                 end,
                 &DelimConfig::list(start, stop - start),
@@ -665,7 +642,6 @@ fn parse_primary(
                 let args = parse_delimited_items(
                     tokens,
                     pos,
-                    source,
                     base,
                     end,
                     &DelimConfig::group(lparen_start, end.saturating_sub(lparen_start) + 1),
@@ -683,12 +659,7 @@ fn parse_primary(
         }
         _ => {
             let at = tokens[*pos].range.start;
-            Err(ParseError::new(
-                ParseErrorKind::UnexpectedToken,
-                at,
-                1,
-                source,
-            ))
+            Err(ParseError::new(ParseErrorKind::UnexpectedToken, at, 1))
         }
     }
 }

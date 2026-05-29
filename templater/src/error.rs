@@ -70,6 +70,36 @@ pub enum ParseErrorKind {
     UnclosedGroup,
 }
 
+#[derive(Debug, Diagnostic, Error)]
+#[error("{kind}")]
+pub struct ParseError {
+    kind: ParseErrorKind,
+    #[label]
+    at: SourceSpan,
+}
+
+impl ParseError {
+    pub fn new(kind: ParseErrorKind, at: usize, len: usize) -> Self {
+        ParseError {
+            kind,
+            at: (at, len).into(),
+        }
+    }
+
+    pub fn get_at(&self) -> (usize, usize) {
+        (self.at.offset(), self.at.len())
+    }
+
+    pub fn set_at(&mut self, offset: usize, len: usize) {
+        self.at = (offset, len).into();
+    }
+
+    #[cfg(test)]
+    pub fn destruct(self) -> (ParseErrorKind, usize, usize) {
+        (self.kind, self.at.offset(), self.at.len())
+    }
+}
+
 #[derive(Debug, Error, PartialEq)]
 pub enum FuncError {
     #[error("undefined function `{0}`")]
@@ -110,21 +140,33 @@ pub enum EvalErrorKind {
     Function(FuncError),
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Diagnostic, Error)]
 #[error("{kind}")]
 pub struct EvalError {
     kind: EvalErrorKind,
-    range: Range<usize>,
+    #[label]
+    at: SourceSpan,
 }
 
 impl EvalError {
     pub fn new(kind: EvalErrorKind, range: Range<usize>) -> Self {
-        Self { kind, range }
+        Self {
+            kind,
+            at: (range.start, range.end - range.start).into(),
+        }
+    }
+
+    pub fn get_at(&self) -> (usize, usize) {
+        (self.at.offset(), self.at.len())
+    }
+
+    pub fn set_at(&mut self, offset: usize, len: usize) {
+        self.at = (offset, len).into();
     }
 
     #[cfg(test)]
-    pub fn destruct(self) -> (EvalErrorKind, Range<usize>) {
-        (self.kind, self.range)
+    pub fn destruct(self) -> (EvalErrorKind, usize, usize) {
+        (self.kind, self.at.offset(), self.at.len())
     }
 }
 
@@ -140,40 +182,5 @@ pub enum RenderError {
 impl From<EvalError> for RenderError {
     fn from(e: EvalError) -> Self {
         RenderError::Eval(e)
-    }
-}
-
-#[derive(Debug, Diagnostic, Error, PartialEq)]
-#[error("{kind}")]
-pub struct ParseError {
-    #[source_code]
-    src: String,
-    kind: ParseErrorKind,
-    #[label]
-    at: SourceSpan,
-}
-
-impl ParseError {
-    pub fn new(kind: ParseErrorKind, at: usize, len: usize, source: &[u8]) -> Self {
-        let start = source[..at]
-            .iter()
-            .rposition(|b| *b == b'\n')
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        let end = source[at + len..]
-            .iter()
-            .position(|b| *b == b'\n')
-            .map(|i| i + at + len)
-            .unwrap_or(source.len());
-        ParseError {
-            kind,
-            at: (at - start, len).into(),
-            src: String::from_utf8_lossy(&source[start..end]).into_owned(),
-        }
-    }
-
-    #[cfg(test)]
-    pub fn destruct(self) -> (ParseErrorKind, usize, usize) {
-        (self.kind, self.at.offset(), self.at.len())
     }
 }
