@@ -59,8 +59,8 @@ pub fn parse(tokens: &[RawToken], source: &[u8]) -> miette::Result<Vec<Node>> {
                     .first()
                     .ok_or_else(|| tag_error(ErrorKind::EmptyStatement, &opening))?;
                 let (stmt_nodes, consumed) = match &kw.kind {
-                    TokenKind::If => parse_if_block(tokens, source, i)?,
-                    TokenKind::For => parse_for_block(tokens, source, i)?,
+                    TokenKind::If => parse_if_block(tokens, source, i, toks)?,
+                    TokenKind::For => parse_for_block(tokens, source, i, toks)?,
                     TokenKind::Elif => {
                         bail!(tag_error(ErrorKind::StrayElif, &opening));
                     }
@@ -114,15 +114,17 @@ fn parse_if_block(
     tokens: &[RawToken],
     source: &[u8],
     start: usize,
+    first_toks: Vec<Token>,
 ) -> miette::Result<(Vec<Node>, usize)> {
     let mut branches: Vec<(Expr, Vec<Node>)> = Vec::new();
     let mut else_branch: Option<Vec<Node>> = None;
     let mut i = start;
     let mut consumed = 0;
+    let mut cached = Some(first_toks);
 
     let opening = match tokens.get(start) {
         Some(RawToken::Statement(r)) => r.clone(),
-        _ => bail!(Error::new(ErrorKind::UnclosedBlock, 0, 1)),
+        _ => bail!("expected statement tag at block opening"),
     };
 
     loop {
@@ -134,7 +136,10 @@ fn parse_if_block(
             _ => bail!("expected statement tag in if-block, got text or interpolate"),
         };
 
-        let toks = tokenize(source, raw.clone())?;
+        let toks = match cached.take() {
+            Some(t) => t,
+            None => tokenize(source, raw.clone())?,
+        };
         let first = toks.first().cloned();
 
         match first {
@@ -193,13 +198,12 @@ fn parse_for_block(
     tokens: &[RawToken],
     source: &[u8],
     start: usize,
+    toks: Vec<Token>,
 ) -> miette::Result<(Vec<Node>, usize)> {
     let range = match tokens.get(start) {
         Some(RawToken::Statement(r)) => r.clone(),
         _ => bail!("expected statement tag in for-block, got text or interpolate"),
     };
-
-    let toks = tokenize(source, range.clone())?;
 
     if toks.len() < 4 {
         bail!(Error::new(
@@ -266,12 +270,12 @@ fn collect_body_until(
                 let toks = tokenize(source, range.clone())?;
                 match toks.first().map(|t| &t.kind) {
                     Some(TokenKind::If) => {
-                        let (nodes, consumed) = parse_if_block(tokens, source, i)?;
+                        let (nodes, consumed) = parse_if_block(tokens, source, i, toks)?;
                         body.extend(nodes);
                         i += consumed - 1;
                     }
                     Some(TokenKind::For) => {
-                        let (nodes, consumed) = parse_for_block(tokens, source, i)?;
+                        let (nodes, consumed) = parse_for_block(tokens, source, i, toks)?;
                         body.extend(nodes);
                         i += consumed - 1;
                     }
