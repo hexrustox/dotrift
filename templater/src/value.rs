@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -7,7 +7,7 @@ pub enum Value {
     Int(i64),
     Bool(bool),
     List(Vec<Value>),
-    Map(HashMap<String, Value>),
+    Map(BTreeMap<String, Value>),
 }
 
 impl Value {

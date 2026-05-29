@@ -1,7 +1,9 @@
 use std::ops::Range;
 
+use miette::bail;
+
 use crate::ast::{Expr, ExprKind, Node};
-use crate::error::{ParseError, ParseErrorKind};
+use crate::error::{Error, ErrorKind};
 use crate::scanner::RawToken;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,11 +33,11 @@ struct Token {
     range: Range<usize>,
 }
 
-fn tag_error(kind: ParseErrorKind, range: &Range<usize>) -> ParseError {
-    ParseError::new(kind, range.start.saturating_sub(2), range.len() + 4)
+fn tag_error(kind: ErrorKind, range: &Range<usize>) -> Error {
+    Error::new(kind, range.start.saturating_sub(2), range.len() + 4)
 }
 
-pub fn parse(tokens: &[RawToken], source: &[u8]) -> Result<Vec<Node>, ParseError> {
+pub fn parse(tokens: &[RawToken], source: &[u8]) -> miette::Result<Vec<Node>> {
     let mut nodes = Vec::new();
     let mut i = 0;
 
@@ -55,22 +57,22 @@ pub fn parse(tokens: &[RawToken], source: &[u8]) -> Result<Vec<Node>, ParseError
                 let toks = tokenize(source, range.clone())?;
                 let kw = toks
                     .first()
-                    .ok_or_else(|| tag_error(ParseErrorKind::EmptyStatement, &opening))?;
+                    .ok_or_else(|| tag_error(ErrorKind::EmptyStatement, &opening))?;
                 let (stmt_nodes, consumed) = match &kw.kind {
                     TokenKind::If => parse_if_block(tokens, source, i)?,
                     TokenKind::For => parse_for_block(tokens, source, i)?,
                     TokenKind::Elif => {
-                        return Err(tag_error(ParseErrorKind::StrayElif, &opening));
+                        bail!(tag_error(ErrorKind::StrayElif, &opening));
                     }
                     TokenKind::Else => {
-                        return Err(tag_error(ParseErrorKind::StrayElse, &opening));
+                        bail!(tag_error(ErrorKind::StrayElse, &opening));
                     }
                     TokenKind::End => {
-                        return Err(tag_error(ParseErrorKind::StrayEnd, &opening));
+                        bail!(tag_error(ErrorKind::StrayEnd, &opening));
                     }
                     _ => {
-                        return Err(ParseError::new(
-                            ParseErrorKind::UnexpectedKeyword,
+                        bail!(Error::new(
+                            ErrorKind::UnexpectedKeyword,
                             kw.range.start,
                             kw.range.len(),
                         ));
@@ -85,31 +87,22 @@ pub fn parse(tokens: &[RawToken], source: &[u8]) -> Result<Vec<Node>, ParseError
     Ok(nodes)
 }
 
-fn parse_interpolate(source: &[u8], range: &Range<usize>) -> Result<Expr, ParseError> {
+fn parse_interpolate(source: &[u8], range: &Range<usize>) -> miette::Result<Expr> {
     let toks = tokenize(source, range.clone())?;
-    let mut pos = 0;
-    let expr = parse_postfix(&toks, &mut pos, range.start, range.end)?;
-    if pos != toks.len() {
-        return Err(ParseError::new(
-            ParseErrorKind::UnexpectedTokensAfterExpr,
-            toks[pos].range.start,
-            1,
-        ));
-    }
-    Ok(expr)
+    parse_expr_from(&toks, 0, range.start, range.end)
 }
 
-fn parse_trailing_expr(
+fn parse_expr_from(
     toks: &[Token],
     start_pos: usize,
     base: usize,
     end: usize,
-) -> Result<Expr, ParseError> {
+) -> miette::Result<Expr> {
     let mut pos = start_pos;
     let expr = parse_postfix(toks, &mut pos, base, end)?;
     if pos != toks.len() {
-        return Err(ParseError::new(
-            ParseErrorKind::UnexpectedTokensAfterExpr,
+        bail!(Error::new(
+            ErrorKind::UnexpectedTokensAfterExpr,
             toks[pos].range.start,
             1,
         ));
@@ -121,7 +114,7 @@ fn parse_if_block(
     tokens: &[RawToken],
     source: &[u8],
     start: usize,
-) -> Result<(Vec<Node>, usize), ParseError> {
+) -> miette::Result<(Vec<Node>, usize)> {
     let mut branches: Vec<(Expr, Vec<Node>)> = Vec::new();
     let mut else_branch: Option<Vec<Node>> = None;
     let mut i = start;
@@ -129,18 +122,16 @@ fn parse_if_block(
 
     let opening = match tokens.get(start) {
         Some(RawToken::Statement(r)) => r.clone(),
-        _ => return Err(ParseError::new(ParseErrorKind::UnclosedBlock, 0, 1)),
+        _ => bail!(Error::new(ErrorKind::UnclosedBlock, 0, 1)),
     };
 
     loop {
         let raw = match tokens.get(i) {
             Some(RawToken::Statement(range)) => range.clone(),
             None => {
-                return Err(tag_error(ParseErrorKind::UnclosedBlock, &opening));
+                bail!(tag_error(ErrorKind::UnclosedBlock, &opening));
             }
-            _ => {
-                unreachable!()
-            }
+            _ => bail!("expected statement tag in if-block, got text or interpolate"),
         };
 
         let toks = tokenize(source, raw.clone())?;
@@ -155,7 +146,7 @@ fn parse_if_block(
                 kind: TokenKind::Elif,
                 ..
             }) => {
-                let cond = parse_trailing_expr(&toks, 1, toks[0].range.end, raw.end)?;
+                let cond = parse_expr_from(&toks, 1, toks[0].range.end, raw.end)?;
                 let (body, body_consumed) =
                     collect_body_until(tokens, source, i + 1, &[TokenKind::Elif, TokenKind::Else])?;
                 branches.push((cond, body));
@@ -179,15 +170,13 @@ fn parse_if_block(
                 break;
             }
             Some(tok) => {
-                return Err(ParseError::new(
-                    ParseErrorKind::UnexpectedKeyword,
+                bail!(Error::new(
+                    ErrorKind::UnexpectedKeyword,
                     tok.range.start,
                     tok.range.len(),
                 ));
             }
-            None => {
-                unreachable!()
-            }
+            None => bail!("empty statement tag"),
         }
     }
 
@@ -204,17 +193,17 @@ fn parse_for_block(
     tokens: &[RawToken],
     source: &[u8],
     start: usize,
-) -> Result<(Vec<Node>, usize), ParseError> {
+) -> miette::Result<(Vec<Node>, usize)> {
     let range = match tokens.get(start) {
         Some(RawToken::Statement(r)) => r.clone(),
-        _ => unreachable!(),
+        _ => bail!("expected statement tag in for-block, got text or interpolate"),
     };
 
     let toks = tokenize(source, range.clone())?;
 
     if toks.len() < 4 {
-        return Err(ParseError::new(
-            ParseErrorKind::ExpectedForSyntax,
+        bail!(Error::new(
+            ErrorKind::ExpectedForSyntax,
             toks[0].range.end,
             1,
         ));
@@ -223,8 +212,8 @@ fn parse_for_block(
     let var = match &toks[1].kind {
         TokenKind::Ident(name) => name.clone(),
         _ => {
-            return Err(ParseError::new(
-                ParseErrorKind::ExpectedForVar,
+            bail!(Error::new(
+                ErrorKind::ExpectedForVar,
                 toks[1].range.start,
                 toks[1].range.len(),
             ));
@@ -232,14 +221,14 @@ fn parse_for_block(
     };
 
     if toks[2].kind != TokenKind::In {
-        return Err(ParseError::new(
-            ParseErrorKind::ExpectedForIn,
+        bail!(Error::new(
+            ErrorKind::ExpectedForIn,
             toks[2].range.start,
             toks[2].range.len(),
         ));
     }
 
-    let collection = parse_trailing_expr(&toks, 3, toks[0].range.end, range.end)?;
+    let collection = parse_expr_from(&toks, 3, toks[0].range.end, range.end)?;
 
     let (body, body_consumed) = collect_body_until(tokens, source, start + 1, &[])?;
 
@@ -248,7 +237,7 @@ fn parse_for_block(
         Some(RawToken::Statement(r))
             if tokenize(source, r.clone())?.first().map(|t| &t.kind) == Some(&TokenKind::End) => {}
         _ => {
-            return Err(tag_error(ParseErrorKind::UnclosedFor, &range));
+            bail!(tag_error(ErrorKind::UnclosedFor, &range));
         }
     }
 
@@ -267,7 +256,7 @@ fn collect_body_until(
     source: &[u8],
     start: usize,
     stop_at: &[TokenKind],
-) -> Result<(Vec<Node>, usize), ParseError> {
+) -> miette::Result<(Vec<Node>, usize)> {
     let mut body = Vec::new();
     let mut i = start;
 
@@ -292,9 +281,7 @@ fn collect_body_until(
                     Some(tok) if stop_at.contains(tok) => {
                         return Ok((body, i - start));
                     }
-                    _ => {
-                        unreachable!()
-                    }
+                    _ => bail!("unrecognized statement keyword"),
                 }
             }
             RawToken::Interpolate(range) => {
@@ -311,7 +298,7 @@ fn collect_body_until(
     Ok((body, tokens.len() - start))
 }
 
-fn tokenize(source: &[u8], range: Range<usize>) -> Result<Vec<Token>, ParseError> {
+fn tokenize(source: &[u8], range: Range<usize>) -> miette::Result<Vec<Token>> {
     macro_rules! push_token {
         ($kind:expr, $r:expr, $p:expr, $tokens:expr) => {{
             $tokens.push(Token {
@@ -346,8 +333,8 @@ fn tokenize(source: &[u8], range: Range<usize>) -> Result<Vec<Token>, ParseError
                         while end > quote_start && source[end - 1].is_ascii_whitespace() {
                             end -= 1;
                         }
-                        return Err(ParseError::new(
-                            ParseErrorKind::UnclosedString,
+                        bail!(Error::new(
+                            ErrorKind::UnclosedString,
                             quote_start,
                             end - quote_start,
                         ));
@@ -439,11 +426,7 @@ fn tokenize(source: &[u8], range: Range<usize>) -> Result<Vec<Token>, ParseError
                 });
             }
             _ => {
-                return Err(ParseError::new(
-                    ParseErrorKind::UnexpectedToken,
-                    range.start + pos,
-                    1,
-                ));
+                bail!(Error::new(ErrorKind::UnexpectedToken, range.start + pos, 1));
             }
         }
     }
@@ -456,7 +439,7 @@ fn parse_postfix(
     pos: &mut usize,
     base: usize,
     end: usize,
-) -> Result<Expr, ParseError> {
+) -> miette::Result<Expr> {
     let mut left = parse_primary(tokens, pos, base, end)?;
 
     while *pos < tokens.len() && tokens[*pos].kind == TokenKind::Dot {
@@ -472,7 +455,7 @@ fn parse_postfix(
             }) => n.to_string(),
             tok => {
                 let at = tok.map_or(base, |t| t.range.start);
-                return Err(ParseError::new(ParseErrorKind::ExpectedFieldName, at, 1));
+                bail!(Error::new(ErrorKind::ExpectedFieldName, at, 1));
             }
         };
         *pos += 1;
@@ -495,11 +478,11 @@ fn parse_primary(
     pos: &mut usize,
     base: usize,
     end: usize,
-) -> Result<Expr, ParseError> {
+) -> miette::Result<Expr> {
     struct DelimConfig {
         close_kind: TokenKind,
-        unclosed_kind: ParseErrorKind,
-        comma_kind: ParseErrorKind,
+        unclosed_kind: ErrorKind,
+        comma_kind: ErrorKind,
         open_at: usize,
         unclosed_span_len: usize,
     }
@@ -508,8 +491,8 @@ fn parse_primary(
         fn list(open_at: usize, span_len: usize) -> Self {
             Self {
                 close_kind: TokenKind::RBracket,
-                unclosed_kind: ParseErrorKind::UnclosedList,
-                comma_kind: ParseErrorKind::ExpectedCommaInList,
+                unclosed_kind: ErrorKind::UnclosedList,
+                comma_kind: ErrorKind::ExpectedCommaInList,
                 open_at,
                 unclosed_span_len: span_len,
             }
@@ -517,8 +500,8 @@ fn parse_primary(
         fn group(open_at: usize, span_len: usize) -> Self {
             Self {
                 close_kind: TokenKind::RParen,
-                unclosed_kind: ParseErrorKind::UnclosedGroup,
-                comma_kind: ParseErrorKind::ExpectedCommaBetweenArgs,
+                unclosed_kind: ErrorKind::UnclosedGroup,
+                comma_kind: ErrorKind::ExpectedCommaBetweenArgs,
                 open_at,
                 unclosed_span_len: span_len,
             }
@@ -531,11 +514,11 @@ fn parse_primary(
         base: usize,
         end: usize,
         dc: &DelimConfig,
-    ) -> Result<Vec<Expr>, ParseError> {
+    ) -> miette::Result<Vec<Expr>> {
         let mut items = Vec::new();
         loop {
             if *pos >= tokens.len() {
-                return Err(ParseError::new(
+                bail!(Error::new(
                     dc.unclosed_kind.clone(),
                     dc.open_at,
                     dc.unclosed_span_len,
@@ -548,7 +531,7 @@ fn parse_primary(
             let item = parse_postfix(tokens, pos, base, end)?;
             items.push(item);
             if *pos >= tokens.len() {
-                return Err(ParseError::new(
+                bail!(Error::new(
                     dc.unclosed_kind.clone(),
                     dc.open_at,
                     dc.unclosed_span_len,
@@ -563,7 +546,7 @@ fn parse_primary(
                     break;
                 }
                 _ => {
-                    return Err(ParseError::new(
+                    bail!(Error::new(
                         dc.comma_kind.clone(),
                         tokens[*pos].range.start,
                         1,
@@ -574,47 +557,23 @@ fn parse_primary(
         Ok(items)
     }
 
+    macro_rules! literal {
+        ($kind:expr) => {{
+            let range = tokens[*pos].range.clone();
+            *pos += 1;
+            Ok(Expr { kind: $kind, range })
+        }};
+    }
+
     if *pos >= tokens.len() {
-        return Err(ParseError::new(
-            ParseErrorKind::UnexpectedEndOfExpr,
-            base,
-            1,
-        ));
+        bail!(Error::new(ErrorKind::UnexpectedEndOfExpr, base, 1));
     }
 
     match &tokens[*pos].kind {
-        TokenKind::Str(s) => {
-            let range = tokens[*pos].range.clone();
-            *pos += 1;
-            Ok(Expr {
-                kind: ExprKind::Str(s.clone()),
-                range,
-            })
-        }
-        TokenKind::Int(n) => {
-            let range = tokens[*pos].range.clone();
-            *pos += 1;
-            Ok(Expr {
-                kind: ExprKind::Int(*n),
-                range,
-            })
-        }
-        TokenKind::True => {
-            let range = tokens[*pos].range.clone();
-            *pos += 1;
-            Ok(Expr {
-                kind: ExprKind::Bool(true),
-                range,
-            })
-        }
-        TokenKind::False => {
-            let range = tokens[*pos].range.clone();
-            *pos += 1;
-            Ok(Expr {
-                kind: ExprKind::Bool(false),
-                range,
-            })
-        }
+        TokenKind::Str(s) => literal!(ExprKind::Str(s.clone())),
+        TokenKind::Int(n) => literal!(ExprKind::Int(*n)),
+        TokenKind::True => literal!(ExprKind::Bool(true)),
+        TokenKind::False => literal!(ExprKind::Bool(false)),
         TokenKind::LBracket => {
             let start = tokens[*pos].range.start;
             *pos += 1;
@@ -659,7 +618,7 @@ fn parse_primary(
         }
         _ => {
             let at = tokens[*pos].range.start;
-            Err(ParseError::new(ParseErrorKind::UnexpectedToken, at, 1))
+            bail!(Error::new(ErrorKind::UnexpectedToken, at, 1))
         }
     }
 }
@@ -669,7 +628,6 @@ mod tests {
     use crate::scanner::scan;
 
     use super::*;
-    use rand::RngExt;
     use test_case::test_case;
 
     macro_rules! expr {
@@ -801,37 +759,33 @@ mod tests {
         parse(&scan(input).unwrap(), input).unwrap()
     }
 
-    #[test_case("{{ }}" => (ParseErrorKind::UnexpectedEndOfExpr, 2, 1); "unexpected_end_of_expr")]
-    #[test_case("{{ @ }}" => (ParseErrorKind::UnexpectedToken, 3, 1); "unexpected_token_at_sign")]
-    #[test_case("{{ p% }}" => (ParseErrorKind::UnexpectedToken, 4, 1); "unexpected_token_percent")]
-    #[test_case("{{ a b }}" => (ParseErrorKind::UnexpectedTokensAfterExpr, 5, 1); "unexpected_tokens_after_expr")]
-    #[test_case("{{ () }}" => (ParseErrorKind::UnexpectedToken, 3, 1); "unexpected_token_empty_paren")]
-    #[test_case("{{ a..b }}" => (ParseErrorKind::ExpectedFieldName, 5, 1); "expected_field_name_after_dot")]
-    #[test_case("{{ list., }}" => (ParseErrorKind::ExpectedFieldName, 8, 1); "expected_field_name_trailing_dot")]
-    #[test_case("{{ \"hello }}" => (ParseErrorKind::UnclosedString, 3, 6); "unclosed_string")]
-    #[test_case("{{ [1, 2 }}" => (ParseErrorKind::UnclosedList, 3, 5); "unclosed_list")]
-    #[test_case("{{ fn(a, b }}" => (ParseErrorKind::UnclosedGroup, 5, 7); "unclosed_group")]
-    #[test_case("{{ [1  2] }}" => (ParseErrorKind::ExpectedCommaInList, 7, 1); "expected_comma_in_list")]
-    #[test_case("{{ fn(a b) }}" => (ParseErrorKind::ExpectedCommaBetweenArgs, 8, 1); "expected_comma_between_args")]
-    #[test_case("{%%}" => (ParseErrorKind::EmptyStatement, 0, 4); "empty_statement")]
-    #[test_case("{% foobar %}" => (ParseErrorKind::UnexpectedKeyword, 3, 6); "unexpected_keyword")]
-    #[test_case("{% if %}" => (ParseErrorKind::UnexpectedEndOfExpr, 5, 1); "if_no_condition")]
-    #[test_case("{% if true %}" => (ParseErrorKind::UnclosedBlock, 0, 13); "unclosed_if_block")]
-    #[test_case("{% elif true %}" => (ParseErrorKind::StrayElif, 0, 15); "stray_elif")]
-    #[test_case("{% else true %}" => (ParseErrorKind::StrayElse, 0, 15); "stray_else")]
-    #[test_case("{% end %}" => (ParseErrorKind::StrayEnd, 0, 9); "stray_end")]
-    #[test_case("{% for %}" => (ParseErrorKind::ExpectedForSyntax, 6, 1); "for_no_var")]
-    #[test_case("{% for 123 in items %}" => (ParseErrorKind::ExpectedForVar, 7, 3); "for_non_ident_var")]
-    #[test_case("{% for x of items %}" => (ParseErrorKind::ExpectedForIn, 9, 2); "for_missing_in")]
-    #[test_case("{% for x in items %}" => (ParseErrorKind::UnclosedFor, 0, 20); "unclosed_for")]
-    fn test_error(input: &str) -> (ParseErrorKind, usize, usize) {
-        let mut rng = rand::rng();
-        let prefix_len = rng.random::<u8>() as usize;
-        let aug_input = String::from(" ").repeat(prefix_len) + input;
-        let input = aug_input.as_bytes();
-        let e = parse(&scan(input).unwrap(), input).unwrap_err();
-        let mut e = e.destruct();
-        e.1 = e.1.saturating_sub(prefix_len);
-        e
+    #[test_case("{{ }}" => (ErrorKind::UnexpectedEndOfExpr, 2, 1); "unexpected_end_of_expr")]
+    #[test_case("{{ @ }}" => (ErrorKind::UnexpectedToken, 3, 1); "unexpected_token_at_sign")]
+    #[test_case("{{ p% }}" => (ErrorKind::UnexpectedToken, 4, 1); "unexpected_token_percent")]
+    #[test_case("{{ a b }}" => (ErrorKind::UnexpectedTokensAfterExpr, 5, 1); "unexpected_tokens_after_expr")]
+    #[test_case("{{ () }}" => (ErrorKind::UnexpectedToken, 3, 1); "unexpected_token_empty_paren")]
+    #[test_case("{{ a..b }}" => (ErrorKind::ExpectedFieldName, 5, 1); "expected_field_name_after_dot")]
+    #[test_case("{{ list., }}" => (ErrorKind::ExpectedFieldName, 8, 1); "expected_field_name_trailing_dot")]
+    #[test_case("{{ \"hello }}" => (ErrorKind::UnclosedString, 3, 6); "unclosed_string")]
+    #[test_case("{{ [1, 2 }}" => (ErrorKind::UnclosedList, 3, 5); "unclosed_list")]
+    #[test_case("{{ fn(a, b }}" => (ErrorKind::UnclosedGroup, 5, 7); "unclosed_group")]
+    #[test_case("{{ [1  2] }}" => (ErrorKind::ExpectedCommaInList, 7, 1); "expected_comma_in_list")]
+    #[test_case("{{ fn(a b) }}" => (ErrorKind::ExpectedCommaBetweenArgs, 8, 1); "expected_comma_between_args")]
+    #[test_case("{%%}" => (ErrorKind::EmptyStatement, 0, 4); "empty_statement")]
+    #[test_case("{% foobar %}" => (ErrorKind::UnexpectedKeyword, 3, 6); "unexpected_keyword")]
+    #[test_case("{% if %}" => (ErrorKind::UnexpectedEndOfExpr, 5, 1); "if_no_condition")]
+    #[test_case("{% if true %}" => (ErrorKind::UnclosedBlock, 0, 13); "unclosed_if_block")]
+    #[test_case("{% elif true %}" => (ErrorKind::StrayElif, 0, 15); "stray_elif")]
+    #[test_case("{% else true %}" => (ErrorKind::StrayElse, 0, 15); "stray_else")]
+    #[test_case("{% end %}" => (ErrorKind::StrayEnd, 0, 9); "stray_end")]
+    #[test_case("{% for %}" => (ErrorKind::ExpectedForSyntax, 6, 1); "for_no_var")]
+    #[test_case("{% for 123 in items %}" => (ErrorKind::ExpectedForVar, 7, 3); "for_non_ident_var")]
+    #[test_case("{% for x of items %}" => (ErrorKind::ExpectedForIn, 9, 2); "for_missing_in")]
+    #[test_case("{% for x in items %}" => (ErrorKind::UnclosedFor, 0, 20); "unclosed_for")]
+    fn test_error(input: &str) -> (ErrorKind, usize, usize) {
+        let input = input.as_bytes();
+        let report = parse(&scan(input).unwrap(), input).unwrap_err();
+        let error = report.downcast_ref::<Error>().unwrap().clone();
+        error.destruct()
     }
 }

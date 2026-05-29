@@ -11,7 +11,7 @@ use std::io;
 
 use memmap2::Mmap;
 
-use crate::{ast::Node, error::ParseError, function::FunctionRegistry};
+use crate::{ast::Node, error::Error, function::FunctionRegistry};
 pub use crate::{
     error::{FuncError, RenderError},
     eval::{EvalContext, eval_nodes},
@@ -66,29 +66,29 @@ impl Template {
         let mut writer = io::BufWriter::new(writer);
         let source = self.source.as_bytes();
         eval_nodes(&self.nodes, source, &mut writer, &mut ctx).map_err(|e| match e {
-            RenderError::Eval(mut e) => {
-                let (at, len) = e.get_at();
+            RenderError::Eval(mut error) => {
+                let (at, len) = error.get_at();
                 let (src, adj) = source_context(at, len, source);
-                e.set_at(adj, len);
-                miette::Report::new(e).with_source_code(src)
+                error.set_at(adj, len);
+                miette::Report::new(error).with_source_code(src)
             }
-            RenderError::Io(e) => miette::miette!("{e}"),
+            RenderError::Io(e) => miette::miette!("failed to write rendered template: {e}"),
         })
     }
 }
 
 fn parse(source: &[u8]) -> miette::Result<Vec<Node>> {
     let tokens = scanner::scan(source)?;
-    Ok(parser::parse(&tokens, source)?)
+    parser::parse(&tokens, source)
 }
 
 fn annotate<T>(source: &[u8], result: miette::Result<T>) -> miette::Result<T> {
-    if let Err(mut e) = result {
-        let pe = e.downcast_mut::<ParseError>().unwrap();
-        let (at, len) = pe.get_at();
+    if let Err(mut report) = result {
+        let error = report.downcast_mut::<Error>().unwrap();
+        let (at, len) = error.get_at();
         let (src, adj) = source_context(at, len, source);
-        pe.set_at(adj, len);
-        Err(e.with_source_code(src))
+        error.set_at(adj, len);
+        Err(report.with_source_code(src))
     } else {
         result
     }

@@ -5,7 +5,7 @@ use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Error, PartialEq)]
-pub enum ParseErrorKind {
+pub enum ErrorKind {
     #[error("unclosed delimiter")]
     UnclosedDelimiter,
 
@@ -68,22 +68,41 @@ pub enum ParseErrorKind {
 
     #[error("unclosed grouping")]
     UnclosedGroup,
+
+    #[error("undefined variable `{0}`")]
+    UndefinedVariable(String),
+
+    #[error("list index out of bounds: index {index} with length {len}")]
+    IndexOutOfBounds { index: usize, len: usize },
+
+    #[error("map key not found `{0}`")]
+    MapKeyNotFound(String),
+
+    #[error("invalid field access on {ty}: `{field}`")]
+    InvalidFieldAccess { ty: &'static str, field: String },
+
+    #[error("{0}")]
+    Function(FuncError),
 }
 
-#[derive(Debug, Diagnostic, Error)]
+#[derive(Debug, Clone, Diagnostic, Error)]
 #[error("{kind}")]
-pub struct ParseError {
-    kind: ParseErrorKind,
+pub struct Error {
+    kind: ErrorKind,
     #[label]
     at: SourceSpan,
 }
 
-impl ParseError {
-    pub fn new(kind: ParseErrorKind, at: usize, len: usize) -> Self {
-        ParseError {
+impl Error {
+    pub fn new(kind: ErrorKind, at: usize, len: usize) -> Self {
+        Error {
             kind,
             at: (at, len).into(),
         }
+    }
+
+    pub fn from_range(kind: ErrorKind, range: Range<usize>) -> Self {
+        Error::new(kind, range.start, range.end - range.start)
     }
 
     pub fn get_at(&self) -> (usize, usize) {
@@ -95,12 +114,12 @@ impl ParseError {
     }
 
     #[cfg(test)]
-    pub fn destruct(self) -> (ParseErrorKind, usize, usize) {
+    pub fn destruct(self) -> (ErrorKind, usize, usize) {
         (self.kind, self.at.offset(), self.at.len())
     }
 }
 
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Clone, Error, PartialEq)]
 pub enum FuncError {
     #[error("undefined function `{0}`")]
     Undefined(String),
@@ -122,65 +141,17 @@ pub enum FuncError {
     Custom(String),
 }
 
-#[derive(Debug, Error, PartialEq)]
-pub enum EvalErrorKind {
-    #[error("undefined variable `{0}`")]
-    UndefinedVariable(String),
-
-    #[error("list index out of bounds: index {index} with length {len}")]
-    IndexOutOfBounds { index: usize, len: usize },
-
-    #[error("map key not found `{0}`")]
-    MapKeyNotFound(String),
-
-    #[error("invalid field access on {ty}: `{field}`")]
-    InvalidFieldAccess { ty: &'static str, field: String },
-
-    #[error("{0}")]
-    Function(FuncError),
-}
-
-#[derive(Debug, Diagnostic, Error)]
-#[error("{kind}")]
-pub struct EvalError {
-    kind: EvalErrorKind,
-    #[label]
-    at: SourceSpan,
-}
-
-impl EvalError {
-    pub fn new(kind: EvalErrorKind, range: Range<usize>) -> Self {
-        Self {
-            kind,
-            at: (range.start, range.end - range.start).into(),
-        }
-    }
-
-    pub fn get_at(&self) -> (usize, usize) {
-        (self.at.offset(), self.at.len())
-    }
-
-    pub fn set_at(&mut self, offset: usize, len: usize) {
-        self.at = (offset, len).into();
-    }
-
-    #[cfg(test)]
-    pub fn destruct(self) -> (EvalErrorKind, usize, usize) {
-        (self.kind, self.at.offset(), self.at.len())
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum RenderError {
     #[error("{0}")]
-    Eval(EvalError),
+    Eval(Error),
 
     #[error("{0}")]
     Io(#[from] io::Error),
 }
 
-impl From<EvalError> for RenderError {
-    fn from(e: EvalError) -> Self {
+impl From<Error> for RenderError {
+    fn from(e: Error) -> Self {
         RenderError::Eval(e)
     }
 }

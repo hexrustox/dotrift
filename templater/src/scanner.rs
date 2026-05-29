@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::error::{ParseError, ParseErrorKind};
+use crate::error::{Error, ErrorKind};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum TagKind {
@@ -44,13 +44,13 @@ pub enum RawToken {
     Statement(Range<usize>),
 }
 
-pub fn scan(source: &[u8]) -> Result<Vec<RawToken>, ParseError> {
+pub fn scan(source: &[u8]) -> Result<Vec<RawToken>, Error> {
     let tags = find_tags(source)?;
     let tokens = build_tokens(source, &tags);
     Ok(tokens)
 }
 
-fn find_tags(source: &[u8]) -> Result<Vec<Tag>, ParseError> {
+fn find_tags(source: &[u8]) -> Result<Vec<Tag>, Error> {
     let mut tags = Vec::new();
     let mut pos = 0;
 
@@ -68,7 +68,7 @@ fn find_tags(source: &[u8]) -> Result<Vec<Tag>, ParseError> {
         let b2 = source.get(next + 1).copied();
 
         if b == b'}' && b2 == Some(b'}') || b == b'%' && b2 == Some(b'}') {
-            return Err(ParseError::new(ParseErrorKind::StrayDelimiter, next, 2));
+            return Err(Error::new(ErrorKind::StrayDelimiter, next, 2));
         }
         if b != b'{' {
             pos = next + 1;
@@ -94,7 +94,7 @@ fn find_tags(source: &[u8]) -> Result<Vec<Tag>, ParseError> {
         let interior_start = next + 2;
 
         let close = find_close(source, interior_start, close_delim)
-            .ok_or_else(|| ParseError::new(ParseErrorKind::UnclosedDelimiter, next, 2))?;
+            .ok_or_else(|| Error::new(ErrorKind::UnclosedDelimiter, next, 2))?;
 
         let interior_end = close;
 
@@ -197,6 +197,15 @@ fn build_tokens(source: &[u8], tags: &[Tag]) -> Vec<RawToken> {
     tokens
 }
 
+fn trim_all_boundary(nl_pos: Option<usize>, fallback: usize, source: &[u8]) -> usize {
+    let stop = nl_pos.unwrap_or(fallback);
+    if stop < source.len() && source[stop] == b'\n' {
+        stop + 1
+    } else {
+        stop
+    }
+}
+
 fn apply_right_modifier(source: &[u8], text_start: &mut usize, tag: &Tag, next_tag_start: usize) {
     match tag.modifier_right {
         Modifier::TrimWhitespace => {
@@ -205,17 +214,8 @@ fn apply_right_modifier(source: &[u8], text_start: &mut usize, tag: &Tag, next_t
             }
         }
         Modifier::TrimAll => {
-            let nl = find_byte(source, tag.end, b'\n');
-            let stop = match nl {
-                Some(n) if n < next_tag_start => n,
-                _ => next_tag_start,
-            };
-            let new_start = if stop < source.len() && source[stop] == b'\n' {
-                stop + 1
-            } else {
-                stop
-            };
-            *text_start = new_start;
+            let nl = find_byte(source, tag.end, b'\n').filter(|&n| n < next_tag_start);
+            *text_start = trim_all_boundary(nl, next_tag_start, source);
         }
         Modifier::None => {}
     }
@@ -229,17 +229,8 @@ fn apply_left_modifier(source: &[u8], text_end: &mut usize, tag: &Tag, prev_end:
             }
         }
         Modifier::TrimAll => {
-            let nl = rfind_byte(source, *text_end, b'\n');
-            let stop = match nl {
-                Some(n) if n > prev_end => n,
-                _ => prev_end,
-            };
-            let new_end = if stop < source.len() && source[stop] == b'\n' {
-                stop + 1
-            } else {
-                stop
-            };
-            *text_end = new_end;
+            let nl = rfind_byte(source, *text_end, b'\n').filter(|&n| n > prev_end);
+            *text_end = trim_all_boundary(nl, prev_end, source);
         }
         Modifier::None => {}
     }
@@ -397,11 +388,11 @@ mod tests {
         scan(input.as_bytes()).unwrap()
     }
 
-    #[test_case("{{ unclosed" => (ParseErrorKind::UnclosedDelimiter, 0, 2); "unclosed_interpolation")]
-    #[test_case("{% unclosed" => (ParseErrorKind::UnclosedDelimiter, 0, 2); "unclosed_stmt")]
-    #[test_case("stray }}" => (ParseErrorKind::StrayDelimiter, 6, 2); "stray_interpolation")]
-    #[test_case("stray %}" => (ParseErrorKind::StrayDelimiter, 6, 2); "stray_stmt")]
-    fn test_error(input: &str) -> (ParseErrorKind, usize, usize) {
+    #[test_case("{{ unclosed" => (ErrorKind::UnclosedDelimiter, 0, 2); "unclosed_interpolation")]
+    #[test_case("{% unclosed" => (ErrorKind::UnclosedDelimiter, 0, 2); "unclosed_stmt")]
+    #[test_case("stray }}" => (ErrorKind::StrayDelimiter, 6, 2); "stray_interpolation")]
+    #[test_case("stray %}" => (ErrorKind::StrayDelimiter, 6, 2); "stray_stmt")]
+    fn test_error(input: &str) -> (ErrorKind, usize, usize) {
         let e = find_tags(input.as_bytes()).unwrap_err();
         e.destruct()
     }
