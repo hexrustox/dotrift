@@ -43,16 +43,16 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1779748924,
-        "narHash": "sha256-cr7DY2GiQBYu9wZxzzbz+ik9sFIifh0zNbv/LRUlZek=",
+        "lastModified": 1780149107,
+        "narHash": "sha256-ul+L8JguwIjqBcLh3BsH+vQHxjoxfKxUtgl1JZXq5+M=",
         "owner": "codnixus",
         "repo": "nix-capsule",
-        "rev": "4e4404df814cc8917b2e0eb4e7bbc4a70fe334a2",
+        "rev": "98d012cfbca877ce5933b38477166c5c6e7e4c60",
         "type": "gitlab"
       },
       "original": {
         "owner": "codnixus",
-        "ref": "v0.4.0",
+        "ref": "v0.5.0",
         "repo": "nix-capsule",
         "type": "gitlab"
       }

@@ -6,7 +6,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-parts.url = "github:hercules-ci/flake-parts";
-    nix-capsule.url = "gitlab:codnixus/nix-capsule?ref=v0.4.0";
+    nix-capsule.url = "gitlab:codnixus/nix-capsule?ref=v0.5.0";
   };
 
   outputs =
@@ -28,6 +28,11 @@
           capsule-lib = inputs.nix-capsule.lib { inherit pkgs; };
         in
         {
+          apps.default = {
+            type = "app";
+            program = "${pkgs.ncap}/bin/ncap-direnv";
+          };
+
           devShells = {
             default = capsule-lib.mkShell {
               image = "alpine:latest";
@@ -35,9 +40,12 @@
               socketPath = "/tmp/dotrift/ncap-socket";
               containerName = "dotrift";
               extraOptions = [
-                "-e HOME"
-                "-e CARGO_HOME"
-                "-v \"$CARGO_HOME\":\"$CARGO_HOME\""
+                "-e"
+                "HOME"
+                "-e"
+                "CARGO_HOME"
+                "-v"
+                "$CARGO_HOME:$CARGO_HOME"
               ];
               wrappers = [
                 "cargo"
