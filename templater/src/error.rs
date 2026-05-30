@@ -1,4 +1,3 @@
-use std::io;
 use std::ops::Range;
 
 use miette::{Diagnostic, SourceSpan};
@@ -140,19 +139,4 @@ pub enum FuncError {
 
     #[error("{0}")]
     Custom(String),
-}
-
-#[derive(Debug, Error)]
-pub enum RenderError {
-    #[error("{0}")]
-    Eval(Error),
-
-    #[error("{0}")]
-    Io(#[from] io::Error),
-}
-
-impl From<Error> for RenderError {
-    fn from(e: Error) -> Self {
-        RenderError::Eval(e)
-    }
 }

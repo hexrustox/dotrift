@@ -10,10 +10,11 @@ use std::collections::HashMap;
 use std::io;
 
 use memmap2::Mmap;
+use miette::{Report, Result};
 
 use crate::{ast::Node, error::Error, function::FunctionRegistry};
 pub use crate::{
-    error::{FuncError, RenderError},
+    error::FuncError,
     eval::{EvalContext, eval_nodes},
     value::{Value, ValueType},
 };
@@ -40,7 +41,7 @@ pub struct Template {
 }
 
 impl Template {
-    pub fn from_mmap(mmap: Mmap) -> miette::Result<Self> {
+    pub fn from_mmap(mmap: Mmap) -> Result<Self> {
         let nodes = annotate(&mmap, parse(&mmap))?;
         Ok(Self {
             source: Source::Mapped(mmap),
@@ -48,7 +49,7 @@ impl Template {
         })
     }
 
-    pub fn from_bytes(source: Vec<u8>) -> miette::Result<Self> {
+    pub fn from_bytes(source: Vec<u8>) -> Result<Self> {
         let nodes = annotate(&source, parse(&source))?;
         Ok(Self {
             source: Source::Owned(source),
@@ -61,28 +62,29 @@ impl Template {
         writer: W,
         variables: HashMap<String, Value>,
         functions: &dyn FunctionRegistry,
-    ) -> miette::Result<()> {
+    ) -> Result<()> {
         let mut ctx = EvalContext::new(variables, functions);
         let mut writer = io::BufWriter::new(writer);
         let source = self.source.as_bytes();
-        eval_nodes(&self.nodes, source, &mut writer, &mut ctx).map_err(|e| match e {
-            RenderError::Eval(mut error) => {
+        eval_nodes(&self.nodes, source, &mut writer, &mut ctx).map_err(|report| {
+            if let Some(error) = report.downcast_ref::<Error>() {
                 let (at, len) = error.get_at();
                 let (src, adj) = source_context(at, len, source);
+                let mut error = error.clone();
                 error.set_at(adj, len);
-                miette::Report::new(error).with_source_code(src)
+                return Report::new(error).with_source_code(src);
             }
-            RenderError::Io(e) => miette::miette!("failed to write rendered template: {e}"),
+            report
         })
     }
 }
 
-fn parse(source: &[u8]) -> miette::Result<Vec<Node>> {
+fn parse(source: &[u8]) -> Result<Vec<Node>> {
     let tokens = scanner::scan(source)?;
     parser::parse(&tokens, source)
 }
 
-fn annotate<T>(source: &[u8], result: miette::Result<T>) -> miette::Result<T> {
+fn annotate<T>(source: &[u8], result: Result<T>) -> Result<T> {
     if let Err(mut report) = result {
         let error = report.downcast_mut::<Error>().unwrap();
         let (at, len) = error.get_at();

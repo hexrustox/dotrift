@@ -3,7 +3,9 @@ use std::io;
 use std::ops::Range;
 
 use crate::ast::{Expr, ExprKind, Node};
-use crate::error::{Error, ErrorKind, FuncError, RenderError};
+use miette::{Context, Report, Result, miette};
+
+use crate::error::{Error, ErrorKind, FuncError};
 use crate::function::FunctionRegistry;
 use crate::value::Value;
 
@@ -49,7 +51,7 @@ pub fn eval_nodes<W: io::Write>(
     source: &[u8],
     writer: &mut W,
     ctx: &mut EvalContext<'_>,
-) -> Result<(), RenderError> {
+) -> Result<()> {
     for node in nodes {
         eval_node(node, source, writer, ctx)?;
     }
@@ -61,15 +63,21 @@ fn eval_node<W: io::Write>(
     source: &[u8],
     writer: &mut W,
     ctx: &mut EvalContext<'_>,
-) -> Result<(), RenderError> {
+) -> Result<()> {
     match node {
         Node::Text(range) => {
-            writer.write_all(&source[range.clone()])?;
+            writer
+                .write_all(&source[range.clone()])
+                .map_err(|e| miette!("{e}"))
+                .wrap_err("failed to write rendered template")?;
             Ok(())
         }
         Node::Interpolate(expr) => {
             let value = eval_expr(expr, ctx)?;
-            value.write_to(writer)?;
+            value
+                .write_to(writer)
+                .map_err(|e| miette!("{e}"))
+                .wrap_err("failed to write rendered template")?;
             Ok(())
         }
         Node::If {
@@ -85,15 +93,14 @@ fn eval_node<W: io::Write>(
                     }
                     Value::Bool(false) => continue,
                     other => {
-                        return Err(Error::from_range(
+                        return Err(Report::new(Error::from_range(
                             ErrorKind::Function(FuncError::TypeMismatch {
                                 arg: None,
                                 expected: "Bool",
                                 got: other.type_name(),
                             }),
                             cond.range.clone(),
-                        )
-                        .into());
+                        )));
                     }
                 }
             }
@@ -118,15 +125,14 @@ fn eval_node<W: io::Write>(
                     }
                     Ok(())
                 }
-                other => Err(Error::from_range(
+                other => Err(Report::new(Error::from_range(
                     ErrorKind::Function(FuncError::TypeMismatch {
                         arg: None,
                         expected: "List",
                         got: other.type_name(),
                     }),
                     collection.range.clone(),
-                )
-                .into()),
+                ))),
             }
         }
     }
@@ -203,8 +209,12 @@ mod tests {
     use test_case::test_case;
 
     use crate::{
-        EvalContext, FuncError, RenderError, Template, Value, error::ErrorKind, eval_nodes,
-        function::FunctionRegistry, parser::parse, scanner::scan,
+        EvalContext, FuncError, Template, Value,
+        error::{Error, ErrorKind},
+        eval_nodes,
+        function::FunctionRegistry,
+        parser::parse,
+        scanner::scan,
     };
 
     struct Functions;
@@ -321,9 +331,6 @@ mod tests {
             &mut EvalContext::new(vars(), &Functions),
         )
         .unwrap_err();
-        match e {
-            RenderError::Eval(e) => e.destruct(),
-            _ => unreachable!(),
-        }
+        e.downcast::<Error>().unwrap().destruct()
     }
 }
