@@ -2,11 +2,11 @@ use std::{collections::BTreeMap, path::Path};
 
 use templater::value::Value;
 
-use crate::{cli::GlobalFlags, data, db::Db, path::data_path};
+use crate::{cli::GlobalFlags, db::Db, path::data_path, templater::data::TemplateData};
 
 pub fn list(global: &GlobalFlags, db_path: &Path) -> color_eyre::Result<()> {
     let source_dir = global.source()?;
-    let data = data::TemplateData::read(&source_dir)?;
+    let data = TemplateData::read(&source_dir)?;
 
     if data.profile.is_empty() {
         color_eyre::eyre::bail!(
@@ -35,7 +35,7 @@ pub fn list(global: &GlobalFlags, db_path: &Path) -> color_eyre::Result<()> {
 
 pub fn activate(global: &GlobalFlags, db_path: &Path, name: &str) -> color_eyre::Result<()> {
     let source_dir = global.source()?;
-    let data = data::TemplateData::read(&source_dir)?;
+    let data = TemplateData::read(&source_dir)?;
 
     if !data.profile.contains_key(name) {
         color_eyre::eyre::bail!(
@@ -59,7 +59,7 @@ pub fn deactivate(db_path: &Path, name: &str) -> color_eyre::Result<()> {
 
 pub fn show(global: &GlobalFlags, db_path: &Path) -> color_eyre::Result<()> {
     let source_dir = global.source()?;
-    let data = data::TemplateData::read(&source_dir)?;
+    let data = TemplateData::read(&source_dir)?;
     let db = Db::init(db_path)?;
     let active_profiles = db.get_active_profiles()?;
 
