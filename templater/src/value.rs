@@ -12,15 +12,41 @@ pub enum Value {
     Map(BTreeMap<String, Value>),
 }
 
-impl Value {
+pub enum ValueType {
+    Str,
+    Int,
+    Bool,
+    List,
+    Map,
+}
+
+impl ValueType {
     pub fn type_name(&self) -> &'static str {
         match self {
-            Value::Str(_) => "String",
-            Value::Int(_) => "Int",
-            Value::Bool(_) => "Bool",
-            Value::List(_) => "List",
-            Value::Map(_) => "Map",
+            ValueType::Str => "String",
+            ValueType::Int => "Int",
+            ValueType::Bool => "Bool",
+            ValueType::List => "List",
+            ValueType::Map => "Map",
         }
+    }
+}
+
+impl From<&Value> for ValueType {
+    fn from(value: &Value) -> Self {
+        match value {
+            Value::Str(_) => ValueType::Str,
+            Value::Int(_) => ValueType::Int,
+            Value::Bool(_) => ValueType::Bool,
+            Value::List(_) => ValueType::List,
+            Value::Map(_) => ValueType::Map,
+        }
+    }
+}
+
+impl Value {
+    pub fn type_name(&self) -> &'static str {
+        ValueType::from(self).type_name()
     }
 
     pub fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {

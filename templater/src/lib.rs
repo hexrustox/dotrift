@@ -15,7 +15,7 @@ use crate::{ast::Node, error::Error, function::FunctionRegistry};
 pub use crate::{
     error::{FuncError, RenderError},
     eval::{EvalContext, eval_nodes},
-    value::Value,
+    value::{Value, ValueType},
 };
 
 #[derive(Debug)]
