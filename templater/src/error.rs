@@ -126,6 +126,7 @@ pub enum FuncError {
 
     #[error("type mismatch: expected {expected}, got {got}")]
     TypeMismatch {
+        arg: Option<usize>,
         expected: &'static str,
         got: &'static str,
     },

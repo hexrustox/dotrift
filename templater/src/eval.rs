@@ -87,6 +87,7 @@ fn eval_node<W: io::Write>(
                     other => {
                         return Err(Error::from_range(
                             ErrorKind::Function(FuncError::TypeMismatch {
+                                arg: None,
                                 expected: "Bool",
                                 got: other.type_name(),
                             }),
@@ -119,6 +120,7 @@ fn eval_node<W: io::Write>(
                 }
                 other => Err(Error::from_range(
                     ErrorKind::Function(FuncError::TypeMismatch {
+                        arg: None,
                         expected: "List",
                         got: other.type_name(),
                     }),
@@ -145,9 +147,12 @@ fn eval_expr(expr: &Expr, ctx: &EvalContext<'_>) -> Result<Value, Error> {
         }
         ExprKind::FnCall { name, args } => {
             let arg_vals: Result<Vec<_>, _> = args.iter().map(|e| eval_expr(e, ctx)).collect();
-            ctx.functions
-                .call(name, &arg_vals?)
-                .map_err(|fe| Error::from_range(ErrorKind::Function(fe), expr.range.clone()))
+            ctx.functions.call(name, &arg_vals?).map_err(|fe| match fe {
+                FuncError::TypeMismatch { arg: Some(i), .. } => {
+                    Error::from_range(ErrorKind::Function(fe), args[i].range.clone())
+                }
+                _ => Error::from_range(ErrorKind::Function(fe), expr.range.clone()),
+            })
         }
         ExprKind::Dot { left, field } => {
             let val = eval_expr(left, ctx)?;
@@ -209,11 +214,12 @@ mod tests {
             match name {
                 "add" => {
                     let mut total = 0i64;
-                    for v in args {
+                    for (i, v) in args.iter().enumerate() {
                         match v {
                             Value::Int(n) => total += n,
                             other => {
                                 return Err(FuncError::TypeMismatch {
+                                    arg: Some(i),
                                     expected: "Int",
                                     got: other.type_name(),
                                 });
@@ -301,9 +307,10 @@ mod tests {
     #[test_case("{{ count.field }}" => (ErrorKind::InvalidFieldAccess { ty: "Int", field: "field".to_string() }, 8, 6); "invalid_field_access_int")]
     #[test_case("{{ nofunc() }}" => (ErrorKind::Function(FuncError::Undefined("nofunc".to_string())), 3, 8); "function_undefined")]
     #[test_case("{{ wrong_count(1) }}" => (ErrorKind::Function(FuncError::WrongArgCount { name: "wrong_count".to_string(), expected: "0".to_string(), got: 1 }), 3, 14); "function_wrong_arg_count")]
-    #[test_case("{{ add(true) }}" => (ErrorKind::Function(FuncError::TypeMismatch { expected: "Int", got: "Bool" }), 3, 9); "function_type_mismatch")]
-    #[test_case("{% if \"\" %}{% end %}" => (ErrorKind::Function(FuncError::TypeMismatch { expected: "Bool", got: "String" }), 6, 2); "if_type_mismatch")]
-    #[test_case("{% for x in \"\" %}{% end %}" => (ErrorKind::Function(FuncError::TypeMismatch { expected: "List", got: "String" }), 12, 2); "for_type_mismatch")]
+    #[test_case("{{ add(true) }}" => (ErrorKind::Function(FuncError::TypeMismatch { arg: Some(0), expected: "Int", got: "Bool" }), 7, 4); "function_arg_type_mismatch_1")]
+    #[test_case("{{ add(1, 2, true) }}" => (ErrorKind::Function(FuncError::TypeMismatch { arg: Some(2), expected: "Int", got: "Bool" }), 13, 4); "function_arg_type_mismatch_2")]
+    #[test_case("{% if \"\" %}{% end %}" => (ErrorKind::Function(FuncError::TypeMismatch { arg: None, expected: "Bool", got: "String" }), 6, 2); "if_type_mismatch")]
+    #[test_case("{% for x in \"\" %}{% end %}" => (ErrorKind::Function(FuncError::TypeMismatch { arg: None, expected: "List", got: "String" }), 12, 2); "for_type_mismatch")]
     fn test_error(template: &str) -> (ErrorKind, usize, usize) {
         let source = template.to_owned().into_bytes();
         let mut buf = Vec::new();
