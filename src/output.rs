@@ -8,6 +8,7 @@ fn deploy_type_label(t: DeployType) -> &'static str {
     match t {
         DeployType::Symlink => "symlink",
         DeployType::Copy => "file",
+        DeployType::Tmpl => "tmpl",
     }
 }
 

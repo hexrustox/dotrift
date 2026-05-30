@@ -15,6 +15,10 @@ pub fn config_path(source_dir: &Path) -> PathBuf {
     source_dir.join(format!("{}.toml", PKG_NAME))
 }
 
+pub fn data_path(source_dir: &Path) -> PathBuf {
+    source_dir.join(format!("{}_data.toml", PKG_NAME))
+}
+
 pub fn db_path() -> Result<PathBuf> {
     match state_dir() {
         Some(p) => Ok(p.join(PKG_NAME).join("db.sqlite")),

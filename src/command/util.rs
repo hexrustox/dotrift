@@ -298,6 +298,7 @@ pub fn is_managed_entry(entry: &DbEntry, target: &Path, target_hash: Option<u64>
                     && fs::read_link(target).is_ok_and(|l| Some(l) == entry.symlink_target)
             }
         }
+        DeployType::Tmpl => todo!(),
     }
 }
 

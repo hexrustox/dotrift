@@ -301,6 +301,7 @@ fn is_identical(
                     })
                 })
         }
+        DeployType::Tmpl => false,
     }
 }
 
@@ -385,6 +386,7 @@ fn deploy_file(
                     })?;
             }
         }
+        DeployType::Tmpl => todo!(),
     }
     if verbose {
         output::print_created_file(target, &entry.source, entry.deploy_type);
@@ -977,6 +979,7 @@ mod tests {
             match deploy_type {
                 DeployType::Symlink => "",
                 DeployType::Copy => r#""**/*" = { type = "copy" }"#,
+                DeployType::Tmpl => r#""**/*" = { type = "tmpl" }"#,
             },
             false,
         );
@@ -1185,6 +1188,7 @@ mod tests {
             match deploy_type {
                 DeployType::Symlink => "",
                 DeployType::Copy => r#""**/*" = { type = "copy" }"#,
+                DeployType::Tmpl => r#""**/*" = { type = "tmpl" }"#,
             },
             false,
         );

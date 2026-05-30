@@ -1,0 +1,96 @@
+use std::{collections::BTreeMap, path::Path};
+
+use templater::value::Value;
+
+use crate::{cli::GlobalFlags, data, db::Db, path::data_path};
+
+pub fn list(global: &GlobalFlags, db_path: &Path) -> color_eyre::Result<()> {
+    let source_dir = global.source()?;
+    let data = data::TemplateData::read(&source_dir)?;
+
+    if data.profile.is_empty() {
+        color_eyre::eyre::bail!(
+            "No profiles defined in `{}`",
+            data_path(&source_dir).display()
+        );
+    }
+
+    let db = Db::init(db_path)?;
+    let active_profiles: Vec<String> = db
+        .get_active_profiles()?
+        .into_iter()
+        .map(|p| p.name)
+        .collect();
+
+    for profile in active_profiles {
+        if data.profile.contains_key(&profile) {
+            eprintln!("{profile} (active)");
+        } else {
+            eprintln!("{profile}");
+        }
+    }
+
+    Ok(())
+}
+
+pub fn activate(global: &GlobalFlags, db_path: &Path, name: &str) -> color_eyre::Result<()> {
+    let source_dir = global.source()?;
+    let data = data::TemplateData::read(&source_dir)?;
+
+    if !data.profile.contains_key(name) {
+        color_eyre::eyre::bail!(
+            "Profile `{name}` is not defined in `{}`",
+            data_path(&source_dir).display()
+        );
+    }
+
+    let db = Db::init(db_path)?;
+    db.activate_profile(name)?;
+    eprintln!("Profile `{name}` activated");
+    Ok(())
+}
+
+pub fn deactivate(db_path: &Path, name: &str) -> color_eyre::Result<()> {
+    let db = Db::init(db_path)?;
+    db.deactivate_profile(name)?;
+    eprintln!("Profile `{name}` deactivated");
+    Ok(())
+}
+
+pub fn show(global: &GlobalFlags, db_path: &Path) -> color_eyre::Result<()> {
+    let source_dir = global.source()?;
+    let data = data::TemplateData::read(&source_dir)?;
+    let db = Db::init(db_path)?;
+    let active_profiles = db.get_active_profiles()?;
+
+    let mut ctx: BTreeMap<String, Value> = BTreeMap::new();
+
+    for (k, v) in data.variable {
+        ctx.insert(k, v);
+    }
+
+    for profile in active_profiles {
+        if let Some(vars) = data.profile.get(&profile.name) {
+            for (k, v) in vars {
+                ctx.insert(k.clone(), v.clone());
+            }
+        }
+    }
+
+    if ctx.is_empty() {
+        return Ok(());
+    }
+
+    let max_key_len = ctx.keys().map(|k| k.len()).max().unwrap_or(0);
+    for (key, val) in &ctx {
+        let mut buf = Vec::new();
+        val.write_to(&mut buf).unwrap();
+        eprintln!(
+            "{key:<width$}  {}",
+            String::from_utf8_lossy(&buf),
+            width = max_key_len
+        );
+    }
+
+    Ok(())
+}

@@ -2,8 +2,8 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use color_eyre::eyre::Context;
 use dotrift::{
-    cli::{self, StatusSubcommand},
-    command::{add, apply, diff, init, status, unapply},
+    cli::{self, ProfileSubcommand, StatusSubcommand},
+    command::{add, apply, diff, init, profile, status, unapply},
     path::db_path,
 };
 
@@ -47,6 +47,24 @@ fn main() -> color_eyre::Result<()> {
                 }
                 StatusSubcommand::Clear { file } => {
                     status::clear(file, &db).wrap_err("Failed to clear managed files")?;
+                }
+            }
+        }
+        Commands::Profile { command } => {
+            let db = db_path()?;
+            match command {
+                ProfileSubcommand::List => {
+                    profile::list(&cli.global, &db).wrap_err("Failed to list profiles")?;
+                }
+                ProfileSubcommand::Activate { name } => {
+                    profile::activate(&cli.global, &db, &name)
+                        .wrap_err("Failed to activate profile")?;
+                }
+                ProfileSubcommand::Deactivate { name } => {
+                    profile::deactivate(&db, &name).wrap_err("Failed to deactivate profile")?;
+                }
+                ProfileSubcommand::Show => {
+                    profile::show(&cli.global, &db).wrap_err("Failed to show variables")?;
                 }
             }
         }

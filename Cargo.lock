@@ -428,6 +428,7 @@ dependencies = [
  "serde",
  "strum 0.28.0",
  "tempfile",
+ "templater",
  "test-case",
  "toml",
  "tui",
@@ -1440,6 +1441,7 @@ dependencies = [
  "memmap2",
  "miette",
  "rand 0.10.1",
+ "serde",
  "test-case",
  "thiserror",
 ]

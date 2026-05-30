@@ -1,7 +1,9 @@
+use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::io;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
 pub enum Value {
     Str(String),
     Int(i64),

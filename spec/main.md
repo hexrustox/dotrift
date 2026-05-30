@@ -535,7 +535,7 @@ Manages template profiles.
 3. `INSERT OR REPLACE` into `active_profiles` (REPLACE updates `activated_at`).
 
 **`deactivate <name>`:**
-1. Delete from `active_profiles` where `name` = `<name>`. No error if not found.
+1. Delete from `active_profiles` where `name` = `<name>`. Error if profile is not active.
 
 **`show`:**
 1. Parse `dotrift_data.toml`.

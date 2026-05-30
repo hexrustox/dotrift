@@ -1,6 +1,7 @@
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use color_eyre::eyre::{Context, eyre};
@@ -9,6 +10,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::config::DeployType;
 
 const TABLE_NAME: &str = "managed_files";
+const PROFILES_TABLE: &str = "active_profiles";
 
 pub struct Db {
     conn: Connection,
@@ -22,6 +24,11 @@ pub struct DbEntry {
     pub hash: Option<u64>,
     pub symlink_target: Option<PathBuf>,
     pub mtime: Option<i64>,
+}
+
+pub struct ActiveProfile {
+    pub name: String,
+    pub activated_at: i64,
 }
 
 fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
@@ -78,6 +85,18 @@ impl Db {
             [],
         )
         .wrap_err("Failed to initialize database")?;
+
+        conn.execute(
+            &format!(
+                "CREATE TABLE IF NOT EXISTS {} (
+                activated_at INTEGER NOT NULL,
+                name TEXT NOT NULL UNIQUE
+            )",
+                PROFILES_TABLE
+            ),
+            [],
+        )
+        .wrap_err("Failed to initialize profile table")?;
 
         Ok(Self { conn })
     }
@@ -175,12 +194,66 @@ impl Db {
         }
         Ok(result)
     }
+
+    pub fn activate_profile(&self, name: &str) -> color_eyre::Result<()> {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .wrap_err("System clock is before epoch")?
+            .as_millis() as i64;
+
+        self.conn
+            .execute(
+                &format!(
+                    "INSERT OR REPLACE INTO {} (name, activated_at) VALUES (?1, ?2)",
+                    PROFILES_TABLE
+                ),
+                params![name, now_ms],
+            )
+            .wrap_err_with(|| format!("Failed to activate profile `{name}`"))?;
+        Ok(())
+    }
+
+    pub fn deactivate_profile(&self, name: &str) -> color_eyre::Result<()> {
+        self.conn
+            .execute(
+                &format!("DELETE FROM {} WHERE name = ?1", PROFILES_TABLE),
+                params![name],
+            )
+            .wrap_err_with(|| format!("Failed to deactivate profile `{name}`"))?;
+        Ok(())
+    }
+
+    pub fn get_active_profiles(&self) -> color_eyre::Result<Vec<ActiveProfile>> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT name, activated_at FROM {} ORDER BY activated_at ASC",
+                PROFILES_TABLE
+            ))
+            .wrap_err("Failed to query active profiles")?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(ActiveProfile {
+                    name: row.get(0)?,
+                    activated_at: row.get(1)?,
+                })
+            })
+            .wrap_err("Failed to query active profiles")?;
+
+        let mut result = Vec::new();
+        for profile in rows {
+            result.push(profile.wrap_err("Failed to read active profile")?);
+        }
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use test_case::test_case;
 
     #[test]
     fn test_db_init() {
@@ -191,99 +264,150 @@ mod tests {
         let _db3 = Db::init(path).unwrap();
     }
 
-    #[test]
-    fn test_db_insert() {
-        let temp_dir = tempdir().unwrap();
-        let db = Db::init(&temp_dir.path().join("db")).unwrap();
-
-        let entry = DbEntry::default();
-
-        assert!(db.get_entry(&entry.target_path).unwrap().is_none());
-        db.insert_or_update(&entry).unwrap();
-        assert_eq!(
-            db.get_entry(&entry.target_path).unwrap(),
-            Some(DbEntry::default())
-        );
-    }
-
-    #[test]
-    fn test_db_multiple_insert() {
-        let temp_dir = tempdir().unwrap();
-        let db = Db::init(&temp_dir.path().join("db")).unwrap();
-
-        for p in 'a'..='z' {
-            db.insert_or_update(&DbEntry {
-                target_path: PathBuf::from(p.to_string()),
-                ..Default::default()
-            })
-            .unwrap();
-        }
-
-        assert_eq!(db.get_all_entries().unwrap().len(), 26);
-    }
-
-    #[test]
-    fn test_db_update() {
-        let temp_dir = tempdir().unwrap();
-        let db = Db::init(&temp_dir.path().join("db")).unwrap();
-
-        let entry = DbEntry::default();
-        let new_entry = DbEntry {
-            target_path: entry.target_path.clone(),
-            hash: Some(1),
-            ..Default::default()
+    #[test_case(
+        |db: &Db| {
+            db.insert_or_update(&DbEntry::default()).unwrap();
+        },
+        |db: &Db| {
+            assert_eq!(db.get_entry(&PathBuf::new()).unwrap(), Some(DbEntry::default()));
         };
-
-        db.insert_or_update(&entry).unwrap();
-        db.insert_or_update(&new_entry).unwrap();
-        assert_eq!(db.get_entry(&entry.target_path).unwrap(), Some(new_entry));
-        assert_eq!(db.get_all_entries().iter().len(), 1);
-    }
-
-    #[test]
-    fn test_db_delete() {
+        "insert"
+    )]
+    #[test_case(
+        |db: &Db| {
+            for p in 'a'..='z' {
+                db.insert_or_update(&DbEntry {
+                    target_path: PathBuf::from(p.to_string()),
+                    ..Default::default()
+                })
+                .unwrap();
+            }
+        },
+        |db: &Db| {
+            assert_eq!(db.get_all_entries().unwrap().len(), 26);
+        };
+        "multiple_insert"
+    )]
+    #[test_case(
+        |db: &Db| {
+            let entry = DbEntry::default();
+            db.insert_or_update(&entry).unwrap();
+            db.insert_or_update(&DbEntry { hash: Some(1), ..entry }).unwrap();
+        },
+        |db: &Db| {
+            assert_eq!(
+                db.get_entry(&PathBuf::new()).unwrap(),
+                Some(DbEntry { hash: Some(1), ..Default::default() })
+            );
+            assert_eq!(db.get_all_entries().unwrap().len(), 1);
+        };
+        "update"
+    )]
+    #[test_case(
+        |db: &Db| {
+            db.insert_or_update(&DbEntry::default()).unwrap();
+        },
+        |db: &Db| {
+            assert!(db.get_entry(&PathBuf::new()).unwrap().is_some());
+            db.delete_entry(Path::new("")).unwrap();
+            assert!(db.get_entry(&PathBuf::new()).unwrap().is_none());
+        };
+        "delete"
+    )]
+    #[test_case(
+        |db: &Db| {
+            db.insert_or_update(&DbEntry { target_path: PathBuf::from("/a/b"), ..Default::default() }).unwrap();
+            db.insert_or_update(&DbEntry { target_path: PathBuf::from("/a/c"), ..Default::default() }).unwrap();
+            db.insert_or_update(&DbEntry { target_path: PathBuf::from("/b/a"), ..Default::default() }).unwrap();
+        },
+        |db: &Db| {
+            db.delete_entry_with_prefix(Path::new("/ab")).unwrap();
+            assert_eq!(db.get_all_entries().unwrap().len(), 3);
+            db.delete_entry_with_prefix(Path::new("/a")).unwrap();
+            assert_eq!(db.get_all_entries().unwrap().len(), 1);
+        };
+        "delete_with_prefix"
+    )]
+    #[test_case(
+        |_: &Db| {},
+        |db: &Db| {
+            db.delete_table().unwrap();
+        };
+        "delete_table"
+    )]
+    #[test_case(
+        |db: &Db| {
+            db.activate_profile("foo").unwrap();
+        },
+        |db: &Db| {
+            let profiles = db.get_active_profiles().unwrap();
+            assert_eq!(profiles.len(), 1);
+            assert_eq!(profiles[0].name, "foo");
+            assert!(profiles[0].activated_at > 0);
+        };
+        "activate_profile"
+    )]
+    #[test_case(
+        |db: &Db| {
+            db.activate_profile("a").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            db.activate_profile("b").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            db.activate_profile("c").unwrap();
+        },
+        |db: &Db| {
+            let profiles = db.get_active_profiles().unwrap();
+            assert_eq!(profiles.len(), 3);
+            let names: Vec<&str> = profiles.iter().map(|p| p.name.as_str()).collect();
+            assert_eq!(names, vec!["a", "b", "c"]);
+        };
+        "activate_multiple"
+    )]
+    #[test_case(
+        |db: &Db| {
+            db.activate_profile("foo").unwrap();
+        },
+        |db: &Db| {
+            let first = db.get_active_profiles().unwrap()[0].activated_at;
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            db.activate_profile("foo").unwrap();
+            let profiles = db.get_active_profiles().unwrap();
+            assert_eq!(profiles.len(), 1);
+            assert_eq!(profiles[0].name, "foo");
+            assert!(profiles[0].activated_at > first);
+        };
+        "reactivate_profile"
+    )]
+    #[test_case(
+        |db: &Db| {
+            db.activate_profile("foo").unwrap();
+        },
+        |db: &Db| {
+            assert_eq!(db.get_active_profiles().unwrap().len(), 1);
+            db.deactivate_profile("foo").unwrap();
+            assert!(db.get_active_profiles().unwrap().is_empty());
+        };
+        "deactivate_profile"
+    )]
+    #[test_case(
+        |_: &Db| {},
+        |db: &Db| {
+            db.deactivate_profile("nope").unwrap();
+            assert!(db.get_active_profiles().unwrap().is_empty());
+        };
+        "deactivate_nonexistent"
+    )]
+    #[test_case(
+        |_: &Db| {},
+        |db: &Db| {
+            assert!(db.get_active_profiles().unwrap().is_empty());
+        };
+        "get_active_profiles_empty"
+    )]
+    fn test_db(setup: impl FnOnce(&Db), assert: impl FnOnce(&Db)) {
         let temp_dir = tempdir().unwrap();
         let db = Db::init(&temp_dir.path().join("db")).unwrap();
-
-        let entry = DbEntry::default();
-
-        db.insert_or_update(&entry).unwrap();
-        assert!(db.get_entry(&entry.target_path).unwrap().is_some());
-        db.delete_entry(&entry.target_path).unwrap();
-        assert!(db.get_entry(&entry.target_path).unwrap().is_none());
-    }
-
-    #[test]
-    fn test_db_delete_with_prefix() {
-        let temp_dir = tempdir().unwrap();
-        let db = Db::init(&temp_dir.path().join("db")).unwrap();
-
-        db.insert_or_update(&DbEntry {
-            target_path: PathBuf::from("/a/b"),
-            ..Default::default()
-        })
-        .unwrap();
-        db.insert_or_update(&DbEntry {
-            target_path: PathBuf::from("/a/c"),
-            ..Default::default()
-        })
-        .unwrap();
-        db.insert_or_update(&DbEntry {
-            target_path: PathBuf::from("/b/a"),
-            ..Default::default()
-        })
-        .unwrap();
-
-        db.delete_entry_with_prefix(Path::new("/ab")).unwrap();
-        assert_eq!(db.get_all_entries().unwrap().len(), 3);
-        db.delete_entry_with_prefix(Path::new("/a")).unwrap();
-        assert_eq!(db.get_all_entries().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn test_db_delete_table() {
-        let temp_dir = tempdir().unwrap();
-        let db = Db::init(&temp_dir.path().join("db")).unwrap();
-        db.delete_table().unwrap();
+        setup(&db);
+        assert(&db);
     }
 }

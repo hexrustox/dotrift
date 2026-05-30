@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod command;
 pub mod config;
+pub mod data;
 pub mod db;
 pub mod error;
 pub mod global_config;

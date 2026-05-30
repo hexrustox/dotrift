@@ -2,6 +2,7 @@ pub mod add;
 pub mod apply;
 pub mod diff;
 pub mod init;
+pub mod profile;
 mod prompt;
 pub mod status;
 mod tree;

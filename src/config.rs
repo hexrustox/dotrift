@@ -47,6 +47,7 @@ pub enum DeployType {
     #[default]
     Symlink,
     Copy,
+    Tmpl,
 }
 
 impl Display for DeployType {
@@ -54,6 +55,7 @@ impl Display for DeployType {
         match self {
             DeployType::Symlink => write!(f, "symlink"),
             DeployType::Copy => write!(f, "copy"),
+            DeployType::Tmpl => write!(f, "tmpl"),
         }
     }
 }
@@ -65,6 +67,7 @@ impl FromStr for DeployType {
         match s {
             "symlink" => Ok(DeployType::Symlink),
             "copy" => Ok(DeployType::Copy),
+            "tmpl" => Ok(DeployType::Tmpl),
             _ => Err(()),
         }
     }

@@ -117,6 +117,24 @@ pub enum OpenEditor {
 }
 
 #[derive(Subcommand)]
+pub enum ProfileSubcommand {
+    /// Show all profiles from dotrift_data.toml, mark active ones.
+    List,
+    /// Activate a profile. Re-activating updates its timestamp.
+    Activate {
+        /// Name of the profile to activate.
+        name: String,
+    },
+    /// Deactivate a profile. No error if not active.
+    Deactivate {
+        /// Name of the profile to deactivate.
+        name: String,
+    },
+    /// Print the resolved variable context as a key-value table.
+    Show,
+}
+
+#[derive(Subcommand)]
 pub enum StatusSubcommand {
     /// List all managed files, or check a specific file.
     List {
@@ -162,5 +180,11 @@ pub enum Commands {
     Status {
         #[command(subcommand)]
         command: StatusSubcommand,
+    },
+
+    /// Manage template profiles.
+    Profile {
+        #[command(subcommand)]
+        command: ProfileSubcommand,
     },
 }
