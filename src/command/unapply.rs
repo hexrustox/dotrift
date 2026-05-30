@@ -12,7 +12,7 @@ pub fn run(
     global_flags: GlobalFlags,
     db_path: &Path,
     flags: UnapplyFlags,
-) -> color_eyre::Result<()> {
+) -> miette::Result<()> {
     let source_dir = global_flags.source()?;
     let target_override = global_flags.target()?;
 

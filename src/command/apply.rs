@@ -6,13 +6,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use color_eyre::{
-    Section,
-    eyre::{Context, Result, eyre},
-};
 use glob::Pattern;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use memmap2::Mmap;
+use miette::{Context, Report, Result, miette};
 
 use crate::{
     cli::{ApplyFlags, GlobalFlags},
@@ -93,7 +90,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
         0
     };
 
-    let tree = build_tree(portal_entries).suggestion("Check portal entries for conflicting target paths. A file and a directory cannot share the same target path.")?;
+    let tree = build_tree(portal_entries).wrap_err("Check portal entries for conflicting target paths. A file and a directory cannot share the same target path.")?;
 
     if flags.dry_run {
         let create_count = print_tree(Path::new("/"), &tree)?;
@@ -143,11 +140,18 @@ pub fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore>
     for pattern in patterns {
         builder
             .add_line(None, pattern)
+            .map_err(|e| miette!("{e}"))
             .wrap_err_with(|| format!("Invalid ignore pattern: `{pattern}`"))
-            .note("Use gitignore-style patterns. See gitignore documentation for syntax.")?;
+            .map_err(|e| {
+                miette!(
+                    help = "Use gitignore-style patterns. See gitignore documentation for syntax.",
+                    "{e}"
+                )
+            })?;
     }
     builder
         .build()
+        .map_err(|e| miette!("{e}"))
         .wrap_err("Failed to compile ignore patterns")
 }
 
@@ -186,7 +190,7 @@ fn insert_portal_entry(
             mode: None,
         },
     ) {
-        return Err(eyre!(
+        return Err(miette!(
             "Target path collision at `{}`.\n  Source 1: `{}`\n  Source 2: `{}`",
             target_path.display(),
             existing.source.display(),
@@ -289,9 +293,8 @@ fn traverse_tree(
     Ok(())
 }
 
-fn abort_deploy(at: &Path) -> color_eyre::Report {
-    eyre!("Aborted at `{}`", at.display())
-        .note("Not all files were deployed. Files deployed before this point remain in place.")
+fn abort_deploy(at: &Path) -> Report {
+    miette!("Aborted at `{}`", at.display())
 }
 
 fn deploy_dir(path: &Path, db: &Db, verbose: bool) -> Result<bool> {
@@ -432,6 +435,7 @@ fn deploy_file(
                 && target.path_is_file()
             {
                 fs::set_permissions(target, fs::Permissions::from_mode(mode.0 as u32))
+                    .map_err(|e| miette!("{e}"))
                     .wrap_err_with(|| {
                         format!("Failed to set permissions on `{}`", target.display())
                     })?;
@@ -440,27 +444,32 @@ fn deploy_file(
         DeployType::Tmpl => {
             let mut src = entry.source.clone();
             while src.path_is_symlink() {
-                src = fs::read_link(&src)?;
+                src = fs::read_link(&src).map_err(|e| miette!("{e}"))?;
             }
             let file = fs::File::open(&src)
+                .map_err(|e| miette!("{e}"))
                 .wrap_err_with(|| format!("Failed to open template `{}`", src.display()))?;
             let mmap = unsafe { Mmap::map(&file) }
+                .map_err(|e| miette!("{e}"))
                 .wrap_err_with(|| format!("Failed to mmap template `{}`", src.display()))?;
             let tmpl = templater::Template::from_mmap(mmap)
-                .map_err(|e| eyre!("Failed to parse template `{}`: {e}", src.display()))?;
+                .wrap_err_with(|| format!("Failed to parse template `{}`", src.display()))?;
             let out = fs::File::create(target)
+                .map_err(|e| miette!("{e}"))
                 .wrap_err_with(|| format!("Failed to create `{}`", target.display()))?;
             let mut writer = BufWriter::new(out);
             let vars = template_ctx.variables.clone();
             tmpl.render(&mut writer, vars, &template_ctx.functions)
-                .map_err(|e| eyre!("Failed to render template `{}`: {e:#}", src.display()))?;
+                .wrap_err_with(|| format!("Failed to render template `{}`", src.display()))?;
             writer
                 .flush()
+                .map_err(|e| miette!("{e}"))
                 .wrap_err_with(|| format!("Failed to write `{}`", target.display()))?;
             if let Some(mode) = entry.mode
                 && target.path_is_file()
             {
                 fs::set_permissions(target, fs::Permissions::from_mode(mode.0 as u32))
+                    .map_err(|e| miette!("{e}"))
                     .wrap_err_with(|| {
                         format!("Failed to set permissions on `{}`", target.display())
                     })?;

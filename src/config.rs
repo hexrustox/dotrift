@@ -6,8 +6,8 @@ use std::{
     str::FromStr,
 };
 
-use color_eyre::eyre::Context;
 use indexmap::IndexMap;
+use miette::{Context, Result, miette};
 use serde::Deserialize;
 
 use crate::path::config_path;
@@ -23,7 +23,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn read(source_dir: &Path) -> color_eyre::Result<Self> {
+    pub fn read(source_dir: &Path) -> Result<Self> {
         let path = config_path(source_dir);
         let s = crate::read_file_err!(fs::read_to_string(&path), &path)?;
         crate::parse_err!(toml::from_str(&s), &path)

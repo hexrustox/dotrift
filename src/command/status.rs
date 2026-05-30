@@ -5,7 +5,7 @@ use crate::{
     db::Db,
     output,
 };
-use color_eyre::Result;
+use miette::Result;
 
 pub fn list(file: Option<PathBuf>, db_path: &Path) -> Result<()> {
     let file = file.map(|p| to_absolute_path(&p)).transpose()?;

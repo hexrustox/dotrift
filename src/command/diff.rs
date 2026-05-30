@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::eyre;
+use miette::{Result, miette};
 use tui::pager::{self, PagerArgs};
 
 use crate::{
@@ -8,30 +8,31 @@ use crate::{
     db::Db,
 };
 
-pub fn run(path: PathBuf, db_path: &Path) -> color_eyre::Result<()> {
+pub fn run(path: PathBuf, db_path: &Path) -> Result<()> {
     let path = to_absolute_path(&path)?;
 
     let db = Db::init(db_path)?;
 
     let entry = db
         .get_entry(&path)?
-        .ok_or_else(|| eyre!("`{}` is not managed", path.display()))?;
+        .ok_or_else(|| miette!("`{}` is not managed", path.display()))?;
 
     if !entry.source_path.path_exists() {
-        return Err(eyre!(
+        return Err(miette!(
             "Source file `{}` not found",
             entry.source_path.display()
         ));
     }
 
     if !path.path_exists() {
-        return Err(eyre!("Target file `{}` not found", path.display()));
+        return Err(miette!("Target file `{}` not found", path.display()));
     }
 
     pager::run(PagerArgs::Diff {
         source: &entry.source_path,
         target: &path,
-    })?;
+    })
+    .map_err(|e| miette!("{e}"))?;
 
     Ok(())
 }

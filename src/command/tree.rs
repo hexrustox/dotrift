@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Component, Path, PathBuf};
 
-use color_eyre::eyre::{Result, eyre};
+use miette::{Result, miette};
 
 use crate::command::apply::PortalEntry;
 
@@ -22,7 +22,7 @@ impl Node {
     fn path_components(path: &Path) -> Result<Vec<String>> {
         let mut comps: Vec<_> = path.components().collect();
         if comps.is_empty() {
-            return Err(eyre!("Cannot insert empty target path"));
+            return Err(miette!("Cannot insert empty target path"));
         }
         if let Some(Component::RootDir) = comps.first() {
             comps = comps[1..].to_vec();
@@ -48,13 +48,13 @@ impl Node {
                         if let Some(existing) = children.get(name) {
                             match existing {
                                 Node::Dir(_) => {
-                                    return Err(eyre!(
+                                    return Err(miette!(
                                         "Directory exists when creating file at `{}`",
                                         path.display()
                                     ));
                                 }
                                 Node::File(_) => {
-                                    return Err(eyre!(
+                                    return Err(miette!(
                                         "File already exists at `{}`",
                                         path.display()
                                     ));
@@ -71,7 +71,7 @@ impl Node {
                     current = child;
                 }
                 Node::File { .. } => {
-                    return Err(eyre!(
+                    return Err(miette!(
                         "File exists when creating directory at `{}`",
                         path.display()
                     ));

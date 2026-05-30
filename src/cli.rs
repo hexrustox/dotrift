@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use color_eyre::Result;
+use miette::Result;
 use std::path::PathBuf;
 
 use crate::{command::to_absolute_path, path::source_path};

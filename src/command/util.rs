@@ -10,10 +10,9 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-use color_eyre::Section;
-use color_eyre::eyre::{Context, Result, eyre};
 use glob::{MatchOptions, glob_with};
 use ignore::gitignore::Gitignore;
+use miette::{Context, Result, miette};
 use normalize_path::NormalizePath;
 use twox_hash::XxHash64;
 use walkdir::WalkDir;
@@ -38,7 +37,9 @@ pub fn to_absolute_path(path: &Path) -> Result<PathBuf> {
     if path.is_absolute() {
         Ok(path.normalize())
     } else {
-        let cwd = env::current_dir().wrap_err("Failed to get current directory")?;
+        let cwd = env::current_dir()
+            .map_err(|e| miette!("{e}"))
+            .wrap_err("Failed to get current directory")?;
         Ok(cwd.join(path).normalize())
     }
 }
@@ -52,20 +53,22 @@ pub fn resolve_target(
         .or(config.target_dir.clone())
         .or(dirs::home_dir())
         .ok_or_else(|| {
-            eyre!("Cannot determine target directory")
-                .suggestion("Provide --target flag, set target-directory in config, or set $HOME")
+            miette!(
+                help = "Provide --target flag, set target-directory in config, or set $HOME",
+                "Cannot determine target directory"
+            )
         })?
         .normalize();
 
     if !target_dir.is_absolute() {
-        return Err(eyre!(
+        return Err(miette!(
             "Target directory must be an absolute path: `{}`",
             target_dir.display()
         ));
     }
 
     if target_dir.starts_with(source_dir) {
-        return Err(eyre!(
+        return Err(miette!(
             "Target directory `{}` cannot be inside source directory `{}`",
             target_dir.display(),
             source_dir.display()
@@ -140,9 +143,9 @@ pub fn resolve_portal_entries<F>(
     ignore_matcher: &Gitignore,
     skip_missing: bool,
     mut on_entry: F,
-) -> color_eyre::Result<()>
+) -> Result<()>
 where
-    F: FnMut(PathBuf, PathBuf, String) -> color_eyre::Result<()>,
+    F: FnMut(PathBuf, PathBuf, String) -> Result<()>,
 {
     for (pattern, target_rel) in portals {
         let pattern_normalized = Path::new(pattern).normalize();
@@ -197,7 +200,7 @@ where
                 if skip_missing {
                     continue;
                 }
-                return Err(eyre!(
+                return Err(miette!(
                     "Source path does not exist: `{}`",
                     source_path.display()
                 ));
@@ -255,7 +258,9 @@ pub fn read_mtime(path: &Path) -> Option<i64> {
 }
 
 pub fn hash_file(path: &Path) -> Result<u64> {
-    let file = File::open(path).wrap_err_with(|| format!("Failed to open `{}`", path.display()))?;
+    let file = File::open(path)
+        .map_err(|e| miette!("{e}"))
+        .wrap_err_with(|| format!("Failed to open `{}`", path.display()))?;
     let mut reader = BufReader::with_capacity(BUFFER_SIZE, file);
     let mut hasher = XxHash64::with_seed(SEED);
     let mut buffer = [0u8; BUFFER_SIZE];
@@ -263,6 +268,7 @@ pub fn hash_file(path: &Path) -> Result<u64> {
     loop {
         let bytes_read = reader
             .read(&mut buffer)
+            .map_err(|e| miette!("{e}"))
             .wrap_err_with(|| format!("Failed to read from `{}`", path.display()))?;
         if bytes_read == 0 {
             break;

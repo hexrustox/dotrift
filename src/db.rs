@@ -4,7 +4,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use color_eyre::eyre::{Context, eyre};
+use miette::{Context, Result, miette};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::config::DeployType;
@@ -42,7 +42,7 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
         rusqlite::Error::FromSqlConversionFailure(
             1,
             rusqlite::types::Type::Text,
-            eyre!("Invalid deploy type `{deploy_str}` for `{target_str}`").into(),
+            miette!("Invalid deploy type `{deploy_str}` for `{target_str}`").into(),
         )
     })?;
 
@@ -62,12 +62,13 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
 }
 
 impl Db {
-    pub fn init(path: &Path) -> color_eyre::Result<Self> {
+    pub fn init(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             crate::create_dir_err!(std::fs::create_dir_all(parent), parent)?;
         }
 
         let conn = Connection::open(path)
+            .map_err(|e| miette!("{e}"))
             .wrap_err_with(|| format!("Failed to open connection at `{}`", path.display()))?;
 
         conn.execute(
@@ -84,6 +85,7 @@ impl Db {
             ),
             [],
         )
+        .map_err(|e| miette!("{e}"))
         .wrap_err("Failed to initialize database")?;
 
         conn.execute(
@@ -96,12 +98,13 @@ impl Db {
             ),
             [],
         )
+        .map_err(|e| miette!("{e}"))
         .wrap_err("Failed to initialize profile table")?;
 
         Ok(Self { conn })
     }
 
-    pub fn insert_or_update(&self, entry: &DbEntry) -> color_eyre::Result<()> {
+    pub fn insert_or_update(&self, entry: &DbEntry) -> Result<()> {
         let hash_str = entry.hash.map(|h| format!("{:x}", h));
         let symlink_target_str = entry
             .symlink_target
@@ -120,22 +123,24 @@ impl Db {
                     entry.mtime,
                 ],
             )
+            .map_err(|e| miette!("{e}"))
             .wrap_err_with(|| format!("Failed to insert/update entry for `{}`", entry.target_path.display()))?;
 
         Ok(())
     }
 
-    pub fn delete_entry(&self, target: &Path) -> color_eyre::Result<()> {
+    pub fn delete_entry(&self, target: &Path) -> Result<()> {
         self.conn
             .execute(
                 &format!("DELETE FROM {} WHERE target_path = ?1", TABLE_NAME),
                 params![target.to_string_lossy()],
             )
+            .map_err(|e| miette!("{e}"))
             .wrap_err_with(|| format!("Failed to delete entry for `{}`", target.display()))?;
         Ok(())
     }
 
-    pub fn delete_entry_with_prefix(&self, target: &Path) -> color_eyre::Result<()> {
+    pub fn delete_entry_with_prefix(&self, target: &Path) -> Result<()> {
         let prefix = target.to_string_lossy();
         let upper = format!("{}\u{10FFFF}", prefix);
         self.conn
@@ -146,6 +151,7 @@ impl Db {
                 ),
                 params![prefix.as_ref(), upper],
             )
+            .map_err(|e| miette!("{e}"))
             .wrap_err_with(|| {
                 format!(
                     "Failed to delete entries with prefix `{}`",
@@ -155,49 +161,59 @@ impl Db {
         Ok(())
     }
 
-    pub fn delete_table(&self) -> color_eyre::Result<()> {
+    pub fn delete_table(&self) -> Result<()> {
         self.conn
             .execute(&format!("DROP TABLE IF EXISTS {}", TABLE_NAME), [])
+            .map_err(|e| miette!("{e}"))
             .wrap_err("Failed to clear database")?;
         Ok(())
     }
 
-    pub fn get_entry(&self, target: &Path) -> color_eyre::Result<Option<DbEntry>> {
+    pub fn get_entry(&self, target: &Path) -> Result<Option<DbEntry>> {
         let mut stmt = self
             .conn
             .prepare(&format!(
                 "SELECT target_path, deploy_type, source_path, hash, symlink_target, mtime FROM {} WHERE target_path = ?1",
                 TABLE_NAME
             ))
+            .map_err(|e| miette!("{e}"))
             .wrap_err_with(|| format!("Failed to look up `{}`", target.display()))?;
 
         stmt.query_row(params![target.to_string_lossy()], row_to_entry)
             .optional()
+            .map_err(|e| miette!("{e}"))
             .wrap_err_with(|| format!("Failed to query entry for `{}`", target.display()))
     }
 
-    pub fn get_all_entries(&self) -> color_eyre::Result<Vec<DbEntry>> {
+    pub fn get_all_entries(&self) -> Result<Vec<DbEntry>> {
         let mut stmt = self
             .conn
             .prepare(&format!(
                 "SELECT target_path, deploy_type, source_path, hash, symlink_target, mtime FROM {}",
                 TABLE_NAME
             ))
+            .map_err(|e| miette!("{e}"))
             .wrap_err("Failed to list database entries")?;
 
         let rows = stmt
             .query_map([], row_to_entry)
+            .map_err(|e| miette!("{e}"))
             .wrap_err("Failed to query entries from database")?;
         let mut result = Vec::new();
         for entry in rows {
-            result.push(entry.wrap_err("Failed to read database entry")?);
+            result.push(
+                entry
+                    .map_err(|e| miette!("{e}"))
+                    .wrap_err("Failed to read database entry")?,
+            );
         }
         Ok(result)
     }
 
-    pub fn activate_profile(&self, name: &str) -> color_eyre::Result<()> {
+    pub fn activate_profile(&self, name: &str) -> Result<()> {
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
+            .map_err(|e| miette!("{e}"))
             .wrap_err("System clock is before epoch")?
             .as_millis() as i64;
 
@@ -209,27 +225,30 @@ impl Db {
                 ),
                 params![name, now_ms],
             )
+            .map_err(|e| miette!("{e}"))
             .wrap_err_with(|| format!("Failed to activate profile `{name}`"))?;
         Ok(())
     }
 
-    pub fn deactivate_profile(&self, name: &str) -> color_eyre::Result<()> {
+    pub fn deactivate_profile(&self, name: &str) -> Result<()> {
         self.conn
             .execute(
                 &format!("DELETE FROM {} WHERE name = ?1", PROFILES_TABLE),
                 params![name],
             )
+            .map_err(|e| miette!("{e}"))
             .wrap_err_with(|| format!("Failed to deactivate profile `{name}`"))?;
         Ok(())
     }
 
-    pub fn get_active_profiles(&self) -> color_eyre::Result<Vec<ActiveProfile>> {
+    pub fn get_active_profiles(&self) -> Result<Vec<ActiveProfile>> {
         let mut stmt = self
             .conn
             .prepare(&format!(
                 "SELECT name, activated_at FROM {} ORDER BY activated_at ASC",
                 PROFILES_TABLE
             ))
+            .map_err(|e| miette!("{e}"))
             .wrap_err("Failed to query active profiles")?;
 
         let rows = stmt
@@ -239,11 +258,16 @@ impl Db {
                     activated_at: row.get(1)?,
                 })
             })
+            .map_err(|e| miette!("{e}"))
             .wrap_err("Failed to query active profiles")?;
 
         let mut result = Vec::new();
         for profile in rows {
-            result.push(profile.wrap_err("Failed to read active profile")?);
+            result.push(
+                profile
+                    .map_err(|e| miette!("{e}"))
+                    .wrap_err("Failed to read active profile")?,
+            );
         }
         Ok(result)
     }

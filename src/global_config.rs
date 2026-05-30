@@ -1,9 +1,6 @@
 use std::{fs, io::ErrorKind, path::PathBuf};
 
-use color_eyre::{
-    Section,
-    eyre::{Context, Result, eyre},
-};
+use miette::{Context, Result, miette};
 use serde::Deserialize;
 
 use crate::path::global_config_path;
@@ -27,7 +24,7 @@ pub fn expand_arg(arg: &str, params: &[(&str, &str)]) -> Result<String> {
                         Some('}') => break,
                         Some(c) => name.push(c),
                         None => {
-                            return Err(eyre!(
+                            return Err(miette!(
                                 "Unclosed parameter in editor command argument: `{arg}`"
                             ));
                         }
@@ -36,19 +33,17 @@ pub fn expand_arg(arg: &str, params: &[(&str, &str)]) -> Result<String> {
                 match params.iter().find(|(n, _)| *n == name) {
                     Some((_, v)) => result.push_str(v),
                     None => {
-                        return Err(
-                            eyre!("Unknown parameter `{name}` in editor command argument",)
-                                .with_suggestion(|| {
-                                    format!(
-                                        "Valid parameters are: {}",
-                                        params
-                                            .iter()
-                                            .map(|(k, _)| format!("{{{k}}}"))
-                                            .collect::<Vec<_>>()
-                                            .join(", ")
-                                    )
-                                }),
-                        );
+                        return Err(miette!(
+                            help = format!(
+                                "Valid parameters are: {}",
+                                params
+                                    .iter()
+                                    .map(|(k, _)| format!("{{{k}}}"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                            "Unknown parameter `{name}` in editor command argument",
+                        ));
                     }
                 }
             }
@@ -111,7 +106,7 @@ pub struct GlobalConfig {
 }
 
 impl GlobalConfig {
-    pub fn read(path_override: Option<PathBuf>) -> color_eyre::Result<Self> {
+    pub fn read(path_override: Option<PathBuf>) -> Result<Self> {
         let specific = path_override.is_some();
         let path = match path_override {
             Some(p) => p,
@@ -122,7 +117,7 @@ impl GlobalConfig {
             Ok(c) => c,
             Err(e) if e.kind() == ErrorKind::NotFound && !specific => return Ok(Self::default()),
             Err(e) => {
-                return Err(e).wrap_err_with(|| {
+                return Err(e).map_err(|e| miette!("{e}")).wrap_err_with(|| {
                     format!("Failed to read global config `{}`", path.display())
                 });
             }

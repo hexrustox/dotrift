@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs, path::Path};
 
-use color_eyre::eyre::Context;
+use miette::{Context, Result, miette};
 use serde::Deserialize;
 use templater::value::Value;
 
@@ -14,7 +14,7 @@ pub struct TemplateData {
 }
 
 impl TemplateData {
-    pub fn read(source_dir: &Path) -> color_eyre::Result<Self> {
+    pub fn read(source_dir: &Path) -> Result<Self> {
         let path = data_path(source_dir);
         if !path.is_file() {
             return Ok(Self::default());

@@ -6,11 +6,8 @@ use std::{
     process::Command,
 };
 
-use color_eyre::{
-    Section,
-    eyre::{Context, Result, eyre},
-};
 use glob::Pattern;
+use miette::{Context, Result, miette};
 use normalize_path::NormalizePath;
 
 use crate::{
@@ -88,17 +85,19 @@ pub fn run(
             match db.get_entry(&path)? {
                 Some(entry) => entry.source_path,
                 None => {
-                    return Err(
-                        eyre!("Path `{}` not found in database", path.display()).note(format!(
-                            "Database records files that were deployed with `{} apply`",
+                    return Err(miette!(
+                        help = format!(
+                            "Deploy the path first with `{} apply`, or provide an explicit destination",
                             PKG_NAME
-                        )),
-                    );
+                        ),
+                        "Path `{}` not found in database",
+                        path.display(),
+                    ));
                 }
             }
         };
         if !dest.starts_with(&source_dir) {
-            return Err(eyre!(
+            return Err(miette!(
                 "Destination `{}` must be inside source directory `{}`",
                 dest.display(),
                 source_dir.display()
@@ -110,8 +109,11 @@ pub fn run(
     if !reimport_dir {
         let dest = &entries[0].1;
         if dest.path_exists() && !flags.force {
-            return Err(eyre!("`{}` already exists", dest.display())
-                .suggestion("Use --force to overwrite the existing file, or remove it manually"));
+            return Err(miette!(
+                help = "Use --force to overwrite the existing file, or remove it manually",
+                "`{}` already exists",
+                dest.display()
+            ));
         }
     }
 
@@ -126,9 +128,11 @@ pub fn run(
         if reimport || flags.copy {
             copy_recursive(src, dest)
         } else {
-            fs::rename(src, dest).wrap_err_with(|| {
-                format!("Failed to move `{}` to `{}`", src.display(), dest.display())
-            })
+            fs::rename(src, dest)
+                .map_err(|e| miette!("{e}"))
+                .wrap_err_with(|| {
+                    format!("Failed to move `{}` to `{}`", src.display(), dest.display())
+                })
         }?;
         if verbose {
             output::print_added(src, dest);
@@ -536,9 +540,12 @@ fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<(
                 let config_path = crate::path::global_config_path()
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_else(|_| "$XDG_CONFIG_HOME/dotrift/config.toml".into());
-                return Err(eyre!("No editor found").with_suggestion(|| {
-                    format!("Set $VISUAL or $EDITOR, or configure editor-command in {config_path}")
-                }));
+                return Err(miette!(
+                    help = format!(
+                        "Set $VISUAL or $EDITOR, or configure editor-command in {config_path}"
+                    ),
+                    "No editor found"
+                ));
             }
         },
     };
@@ -546,14 +553,17 @@ fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<(
     let status = Command::new(&cmd).args(&args).status();
     if let Err(ref e) = status {
         return if e.kind() == ErrorKind::NotFound {
-            Err(eyre!("Editor command not found: `{cmd}`"))
+            Err(miette!("Editor command not found: `{cmd}`"))
         } else {
-            status.map(|_| ()).wrap_err_with(|| {
-                format!(
-                    "Failed to launch editor: `{}`",
-                    [vec![cmd], args].concat().join(" ")
-                )
-            })
+            status
+                .map(|_| ())
+                .map_err(|e| miette!("{e}"))
+                .wrap_err_with(|| {
+                    format!(
+                        "Failed to launch editor: `{}`",
+                        [vec![cmd], args].concat().join(" ")
+                    )
+                })
         };
     }
 

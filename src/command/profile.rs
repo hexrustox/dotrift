@@ -1,15 +1,16 @@
 use std::{collections::BTreeMap, path::Path};
 
+use miette::{Result, bail};
 use templater::value::Value;
 
 use crate::{cli::GlobalFlags, db::Db, path::data_path, templater::data::TemplateData};
 
-pub fn list(global: &GlobalFlags, db_path: &Path) -> color_eyre::Result<()> {
+pub fn list(global: &GlobalFlags, db_path: &Path) -> Result<()> {
     let source_dir = global.source()?;
     let data = TemplateData::read(&source_dir)?;
 
     if data.profile.is_empty() {
-        color_eyre::eyre::bail!(
+        bail!(
             "No profiles defined in `{}`",
             data_path(&source_dir).display()
         );
@@ -33,12 +34,12 @@ pub fn list(global: &GlobalFlags, db_path: &Path) -> color_eyre::Result<()> {
     Ok(())
 }
 
-pub fn activate(global: &GlobalFlags, db_path: &Path, name: &str) -> color_eyre::Result<()> {
+pub fn activate(global: &GlobalFlags, db_path: &Path, name: &str) -> Result<()> {
     let source_dir = global.source()?;
     let data = TemplateData::read(&source_dir)?;
 
     if !data.profile.contains_key(name) {
-        color_eyre::eyre::bail!(
+        bail!(
             "Profile `{name}` is not defined in `{}`",
             data_path(&source_dir).display()
         );
@@ -50,14 +51,14 @@ pub fn activate(global: &GlobalFlags, db_path: &Path, name: &str) -> color_eyre:
     Ok(())
 }
 
-pub fn deactivate(db_path: &Path, name: &str) -> color_eyre::Result<()> {
+pub fn deactivate(db_path: &Path, name: &str) -> Result<()> {
     let db = Db::init(db_path)?;
     db.deactivate_profile(name)?;
     eprintln!("Profile `{name}` deactivated");
     Ok(())
 }
 
-pub fn show(global: &GlobalFlags, db_path: &Path) -> color_eyre::Result<()> {
+pub fn show(global: &GlobalFlags, db_path: &Path) -> Result<()> {
     let source_dir = global.source()?;
     let data = TemplateData::read(&source_dir)?;
     let db = Db::init(db_path)?;

@@ -1,15 +1,13 @@
 use clap::Parser;
 use cli::{Cli, Commands};
-use color_eyre::eyre::Context;
 use dotrift::{
     cli::{self, ProfileSubcommand, StatusSubcommand},
     command::{add, apply, diff, init, profile, status, unapply},
     path::db_path,
 };
+use miette::{Context, Result};
 
-fn main() -> color_eyre::Result<()> {
-    color_eyre::install()?;
-
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
