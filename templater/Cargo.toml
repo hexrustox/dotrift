@@ -4,11 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-memmap2 = "0.9"
-miette = { version = "7", features = ["fancy"] }
-serde = { version = "1", features = ["derive"] }
-thiserror = "2"
+memmap2.workspace = true
+miette.workspace = true
+serde.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-rand = "0.10.1"
 test-case.workspace = true
