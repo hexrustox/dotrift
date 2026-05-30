@@ -25,9 +25,9 @@ pub fn list(global: &GlobalFlags, db_path: &Path) -> Result<()> {
 
     for profile in active_profiles {
         if data.profile.contains_key(&profile) {
-            eprintln!("{profile} (active)");
+            println!("{profile} (active)");
         } else {
-            eprintln!("{profile}");
+            println!("{profile}");
         }
     }
 
@@ -86,7 +86,7 @@ pub fn show(global: &GlobalFlags, db_path: &Path) -> Result<()> {
     for (key, val) in &ctx {
         let mut buf = Vec::new();
         val.write_to(&mut buf).unwrap();
-        eprintln!(
+        println!(
             "{key:<width$}  {}",
             String::from_utf8_lossy(&buf),
             width = max_key_len

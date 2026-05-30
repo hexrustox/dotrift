@@ -23,7 +23,7 @@ pub fn list(file: Option<PathBuf>, db_path: &Path) -> Result<()> {
     } else {
         let entries = db.get_all_entries()?;
         for entry in &entries {
-            eprintln!(
+            println!(
                 "{}",
                 output::portal_str(&entry.target_path, &entry.source_path, entry.deploy_type)
             );
