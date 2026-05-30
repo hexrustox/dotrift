@@ -129,7 +129,7 @@ pub fn run(
             copy_recursive(src, dest)
         } else {
             fs::rename(src, dest)
-                .map_err(|e| miette!("{e}"))
+                .map_err(|e| miette!(e))
                 .wrap_err_with(|| {
                     format!("Failed to move `{}` to `{}`", src.display(), dest.display())
                 })
@@ -557,7 +557,7 @@ fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<(
         } else {
             status
                 .map(|_| ())
-                .map_err(|e| miette!("{e}"))
+                .map_err(|e| miette!(e))
                 .wrap_err_with(|| {
                     format!(
                         "Failed to launch editor: `{}`",

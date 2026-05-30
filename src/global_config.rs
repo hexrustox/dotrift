@@ -117,7 +117,7 @@ impl GlobalConfig {
             Ok(c) => c,
             Err(e) if e.kind() == ErrorKind::NotFound && !specific => return Ok(Self::default()),
             Err(e) => {
-                return Err(e).map_err(|e| miette!("{e}")).wrap_err_with(|| {
+                return Err(e).map_err(|e| miette!(e)).wrap_err_with(|| {
                     format!("Failed to read global config `{}`", path.display())
                 });
             }

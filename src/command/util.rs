@@ -38,7 +38,7 @@ pub fn to_absolute_path(path: &Path) -> Result<PathBuf> {
         Ok(path.normalize())
     } else {
         let cwd = env::current_dir()
-            .map_err(|e| miette!("{e}"))
+            .map_err(|e| miette!(e))
             .wrap_err("Failed to get current directory")?;
         Ok(cwd.join(path).normalize())
     }
@@ -259,7 +259,7 @@ pub fn read_mtime(path: &Path) -> Option<i64> {
 
 pub fn hash_file(path: &Path) -> Result<u64> {
     let file = File::open(path)
-        .map_err(|e| miette!("{e}"))
+        .map_err(|e| miette!(e))
         .wrap_err_with(|| format!("Failed to open `{}`", path.display()))?;
     let mut reader = BufReader::with_capacity(BUFFER_SIZE, file);
     let mut hasher = XxHash64::with_seed(SEED);
@@ -268,7 +268,7 @@ pub fn hash_file(path: &Path) -> Result<u64> {
     loop {
         let bytes_read = reader
             .read(&mut buffer)
-            .map_err(|e| miette!("{e}"))
+            .map_err(|e| miette!(e))
             .wrap_err_with(|| format!("Failed to read from `{}`", path.display()))?;
         if bytes_read == 0 {
             break;

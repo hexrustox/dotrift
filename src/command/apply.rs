@@ -140,7 +140,7 @@ pub fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore>
     for pattern in patterns {
         builder
             .add_line(None, pattern)
-            .map_err(|e| miette!("{e}"))
+            .map_err(|e| miette!(e))
             .wrap_err_with(|| format!("Invalid ignore pattern: `{pattern}`"))
             .map_err(|e| {
                 miette!(
@@ -151,7 +151,7 @@ pub fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore>
     }
     builder
         .build()
-        .map_err(|e| miette!("{e}"))
+        .map_err(|e| miette!(e))
         .wrap_err("Failed to compile ignore patterns")
 }
 
@@ -435,7 +435,7 @@ fn deploy_file(
                 && target.path_is_file()
             {
                 fs::set_permissions(target, fs::Permissions::from_mode(mode.0 as u32))
-                    .map_err(|e| miette!("{e}"))
+                    .map_err(|e| miette!(e))
                     .wrap_err_with(|| {
                         format!("Failed to set permissions on `{}`", target.display())
                     })?;
@@ -444,18 +444,18 @@ fn deploy_file(
         DeployType::Tmpl => {
             let mut src = entry.source.clone();
             while src.path_is_symlink() {
-                src = fs::read_link(&src).map_err(|e| miette!("{e}"))?;
+                src = fs::read_link(&src).map_err(|e| miette!(e))?;
             }
             let file = fs::File::open(&src)
-                .map_err(|e| miette!("{e}"))
+                .map_err(|e| miette!(e))
                 .wrap_err_with(|| format!("Failed to open template `{}`", src.display()))?;
             let mmap = unsafe { Mmap::map(&file) }
-                .map_err(|e| miette!("{e}"))
+                .map_err(|e| miette!(e))
                 .wrap_err_with(|| format!("Failed to mmap template `{}`", src.display()))?;
             let tmpl = templater::Template::from_mmap(mmap)
                 .wrap_err_with(|| format!("Failed to parse template `{}`", src.display()))?;
             let out = fs::File::create(target)
-                .map_err(|e| miette!("{e}"))
+                .map_err(|e| miette!(e))
                 .wrap_err_with(|| format!("Failed to create `{}`", target.display()))?;
             let mut writer = BufWriter::new(out);
             let vars = template_ctx.variables.clone();
@@ -463,13 +463,13 @@ fn deploy_file(
                 .wrap_err_with(|| format!("Failed to render template `{}`", src.display()))?;
             writer
                 .flush()
-                .map_err(|e| miette!("{e}"))
+                .map_err(|e| miette!(e))
                 .wrap_err_with(|| format!("Failed to write `{}`", target.display()))?;
             if let Some(mode) = entry.mode
                 && target.path_is_file()
             {
                 fs::set_permissions(target, fs::Permissions::from_mode(mode.0 as u32))
-                    .map_err(|e| miette!("{e}"))
+                    .map_err(|e| miette!(e))
                     .wrap_err_with(|| {
                         format!("Failed to set permissions on `{}`", target.display())
                     })?;

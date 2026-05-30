@@ -13,7 +13,7 @@ pub fn run(global_flags: GlobalFlags) -> Result<()> {
         if let Some(parent) = path.parent() {
             crate::create_dir_err!(fs::create_dir_all(parent), parent)?;
             fs::write(&path, include_bytes!("./template.toml"))
-                .map_err(|e| miette!("{e}"))
+                .map_err(|e| miette!(e))
                 .wrap_err_with(|| format!("Failed to write file `{}`", path.display()))?;
 
             output::print_ok(format_args!("Initialized at {}", path.display()));

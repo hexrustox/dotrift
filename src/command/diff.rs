@@ -32,7 +32,7 @@ pub fn run(path: PathBuf, db_path: &Path) -> Result<()> {
         source: &entry.source_path,
         target: &path,
     })
-    .map_err(|e| miette!("{e}"))?;
+    .map_err(|e| miette!(e))?;
 
     Ok(())
 }
