@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     fs::{self, remove_file, symlink_metadata},
+    io::{BufWriter, Write},
     os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
 };
@@ -11,6 +12,7 @@ use color_eyre::{
 };
 use glob::Pattern;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use memmap2::Mmap;
 
 use crate::{
     cli::{ApplyFlags, GlobalFlags},
@@ -26,6 +28,7 @@ use crate::{
     db::{Db, DbEntry},
     global_config::GlobalConfig,
     output,
+    templater::{data, function::BuiltinFunctions},
 };
 
 #[derive(Default, Debug, PartialEq)]
@@ -33,6 +36,30 @@ pub struct PortalEntry {
     pub source: PathBuf,
     pub deploy_type: DeployType,
     pub mode: Option<FileMode>,
+}
+
+struct TemplateContext {
+    variables: HashMap<String, templater::value::Value>,
+    functions: BuiltinFunctions,
+}
+
+impl TemplateContext {
+    fn build(source_dir: &Path, db: &Db) -> Result<Self> {
+        let data = data::TemplateData::read(source_dir)?;
+        let active = db.get_active_profiles()?;
+        let mut ctx: HashMap<String, templater::value::Value> = data.variable;
+        for profile in active {
+            if let Some(vars) = data.profile.get(&profile.name) {
+                for (k, v) in vars {
+                    ctx.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        Ok(Self {
+            variables: ctx,
+            functions: BuiltinFunctions::new(),
+        })
+    }
 }
 
 pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Result<()> {
@@ -92,7 +119,15 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
     }
 
     let overwrite_identical = GlobalConfig::read(config_override)?.overwrite_identical;
-    traverse_tree(Path::new("/"), &tree, &db, overwrite_identical, verbose)?;
+    let template_ctx = TemplateContext::build(&source_dir, &db)?;
+    traverse_tree(
+        Path::new("/"),
+        &tree,
+        &db,
+        overwrite_identical,
+        verbose,
+        &template_ctx,
+    )?;
 
     Ok(())
 }
@@ -218,6 +253,7 @@ fn traverse_tree(
     db: &Db,
     overwrite_identical: bool,
     verbose: bool,
+    template_ctx: &TemplateContext,
 ) -> Result<()> {
     match node {
         Node::Dir(children) => {
@@ -225,11 +261,25 @@ fn traverse_tree(
                 return Ok(());
             }
             for (name, child) in children {
-                traverse_tree(&target.join(name), child, db, overwrite_identical, verbose)?;
+                traverse_tree(
+                    &target.join(name),
+                    child,
+                    db,
+                    overwrite_identical,
+                    verbose,
+                    template_ctx,
+                )?;
             }
         }
         Node::File(entry) => {
-            deploy_file(target, entry, db, overwrite_identical, verbose)?;
+            deploy_file(
+                target,
+                entry,
+                db,
+                overwrite_identical,
+                verbose,
+                template_ctx,
+            )?;
         }
         Node::Marked(_) => {
             #[cfg(test)]
@@ -311,6 +361,7 @@ fn deploy_file(
     db: &Db,
     overwrite_identical: bool,
     verbose: bool,
+    template_ctx: &TemplateContext,
 ) -> Result<()> {
     let mut source_hash = None;
     let mut target_hash = None;
@@ -386,7 +437,35 @@ fn deploy_file(
                     })?;
             }
         }
-        DeployType::Tmpl => todo!(),
+        DeployType::Tmpl => {
+            let mut src = entry.source.clone();
+            while src.path_is_symlink() {
+                src = fs::read_link(&src)?;
+            }
+            let file = fs::File::open(&src)
+                .wrap_err_with(|| format!("Failed to open template `{}`", src.display()))?;
+            let mmap = unsafe { Mmap::map(&file) }
+                .wrap_err_with(|| format!("Failed to mmap template `{}`", src.display()))?;
+            let tmpl = templater::Template::from_mmap(mmap)
+                .map_err(|e| eyre!("Failed to parse template `{}`: {e}", src.display()))?;
+            let out = fs::File::create(target)
+                .wrap_err_with(|| format!("Failed to create `{}`", target.display()))?;
+            let mut writer = BufWriter::new(out);
+            let vars = template_ctx.variables.clone();
+            tmpl.render(&mut writer, vars, &template_ctx.functions)
+                .map_err(|e| eyre!("Failed to render template `{}`: {e:#}", src.display()))?;
+            writer
+                .flush()
+                .wrap_err_with(|| format!("Failed to write `{}`", target.display()))?;
+            if let Some(mode) = entry.mode
+                && target.path_is_file()
+            {
+                fs::set_permissions(target, fs::Permissions::from_mode(mode.0 as u32))
+                    .wrap_err_with(|| {
+                        format!("Failed to set permissions on `{}`", target.display())
+                    })?;
+            }
+        }
     }
     if verbose {
         output::print_created_file(target, &entry.source, entry.deploy_type);
@@ -402,11 +481,12 @@ fn update_db(target: &Path, entry: &PortalEntry, db: &Db, source_hash: Option<u6
         deploy_type: entry.deploy_type,
         source_path: entry.source.clone(),
         hash: if is_regular {
-            Some(
-                source_hash
+            Some(match entry.deploy_type {
+                DeployType::Tmpl => hash_file(target)?,
+                _ => source_hash
                     .map(Ok)
                     .unwrap_or_else(|| hash_file(&entry.source))?,
-            )
+            })
         } else {
             None
         },
@@ -644,6 +724,14 @@ mod tests {
         },
         |s, t| (t.join("target"), s.join("src"), DeployType::Copy)
         => false; "copy_symlink_source_target_is_file")]
+    #[test_case(
+        |s, t| {
+            fs::write(s.join("src"), "same").unwrap();
+            fs::write(t.join("target"), "same").unwrap();
+        },
+        |s, t| (t.join("target"), s.join("src"), DeployType::Tmpl)
+        => false; "tmpl_always_false"
+    )]
     fn test_is_identical(
         setup: impl FnOnce(&Path, &Path),
         paths: impl FnOnce(&Path, &Path) -> (PathBuf, PathBuf, DeployType),
@@ -968,6 +1056,29 @@ mod tests {
         },
         DeployType::Copy; "copy_symlink_to_dir_as_source"
     )]
+    #[test_case(
+        |s, _| {
+            fs::write(s.join("dotrift_data.toml"), r#"[variable]
+name = "world""#).unwrap();
+            fs::write(s.join("file"), "Hello {{ name }}").unwrap();
+        },
+        |_, t| {
+            assert_eq!(fs::read_to_string(t.join("file")).unwrap(), "Hello world");
+        },
+        DeployType::Tmpl; "tmpl_fresh"
+    )]
+    #[test_case(
+        |s, t| {
+            fs::write(s.join("dotrift_data.toml"), r#"[variable]
+name = "world""#).unwrap();
+            fs::write(t.join("template"), "Hello {{ name }}").unwrap();
+            unix_fs::symlink(t.join("template"), s.join("file")).unwrap();
+        },
+        |_, t| {
+            assert_eq!(fs::read_to_string(t.join("file")).unwrap(), "Hello world");
+        },
+        DeployType::Tmpl; "tmpl_symlink_source_fresh"
+    )]
     fn test_apply(
         setup: impl FnOnce(&Path, &Path),
         assert: impl FnOnce(&Path, &Path),
@@ -1175,6 +1286,22 @@ mod tests {
             assert!(entry.hash.is_some());
         },
         DeployType::Copy; "copy_reapply_target_type_changed_overwrite"
+    )]
+    #[test_case(
+        |s, _| {
+            fs::write(s.join("dotrift_data.toml"), r#"[variable]
+name = "world""#).unwrap();
+            fs::write(s.join("file"), "Hello {{ name }}").unwrap();
+        },
+        |_, _| {},
+        |_, t, db| {
+            let rendered = fs::read_to_string(t.join("file")).unwrap();
+            assert_eq!(rendered, "Hello world");
+            let entry = db.get_entry(&t.join("file")).unwrap().unwrap();
+            assert_eq!(entry.deploy_type, DeployType::Tmpl);
+            assert_eq!(entry.hash.unwrap(), hash_file(&t.join("file")).unwrap());
+        },
+        DeployType::Tmpl; "tmpl_reapply_identical"
     )]
     fn test_apply_twice(
         setup1: impl FnOnce(&Path, &Path),

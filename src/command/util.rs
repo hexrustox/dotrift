@@ -279,7 +279,7 @@ pub fn is_managed_entry(entry: &DbEntry, target: &Path, target_hash: Option<u64>
             Ok(p) => p == entry.source_path,
             Err(_) => false,
         },
-        DeployType::Copy => {
+        DeployType::Copy | DeployType::Tmpl => {
             if let Some(hash) = entry.hash {
                 target.path_is_file() && {
                     if entry
@@ -298,7 +298,6 @@ pub fn is_managed_entry(entry: &DbEntry, target: &Path, target_hash: Option<u64>
                     && fs::read_link(target).is_ok_and(|l| Some(l) == entry.symlink_target)
             }
         }
-        DeployType::Tmpl => todo!(),
     }
 }
 
@@ -715,6 +714,21 @@ pub mod tests {
             symlink_target: None,
             mtime: None,
         }) => false; "copy_source_unreadable"
+    )]
+    #[test_case(
+        |_, t| {
+            fs::write(t.join("file"), "data").unwrap();
+        },
+        |t| t.join("file"),
+        |_, t| Some(DbEntry {
+            target_path: t.join("file"),
+            deploy_type: DeployType::Tmpl,
+            source_path: PathBuf::from("/x"),
+            hash: Some(hash_file(&t.join("file")).unwrap()),
+            symlink_target: None,
+            mtime: None,
+        })
+        => true; "tmpl_matching_hash"
     )]
     fn test_is_managed(
         cb: impl FnOnce(&Path, &Path),

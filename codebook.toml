@@ -1,5 +1,6 @@
 words = [
     "cwd",
     "dotrift",
+    "tmpl",
     "unapply",
 ]

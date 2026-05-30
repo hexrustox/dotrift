@@ -423,6 +423,7 @@ dependencies = [
  "glob",
  "ignore",
  "indexmap",
+ "memmap2",
  "normalize-path",
  "rusqlite",
  "serde",
