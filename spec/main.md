@@ -568,3 +568,52 @@ Reports the management status of the target filesystem.
 **`clear`:**
 1. **Determine Scope:** Specific file or entire DB.
 2. **Delete:** Remove entry from DB only. Files on disk are not touched. Remove all entries if no file specified.
+
+---
+
+## `templater` Command
+
+Evaluates a dotrift template standalone and writes the rendered output to stdout or a file.
+
+**Usage:** `dotrift templater [OPTIONS]`
+
+**Template Source** (exactly one required):
+* `-s, --string <TEMPLATE>`: Inline template string to evaluate.
+* `-f, --file <PATH>`: Path to a template file on disk.
+
+**Options:**
+* `-o, --output <PATH>`: Write rendered output to the specified file instead of stdout. Parent directories are created if they do not exist.
+* `-v, --var <KEY=VALUE>`: Set a template variable. Overrides `dotrift_data.toml` and active profiles. Repeatable. Value is parsed as a TOML literal (string, integer, boolean, array, or inline table). Parse errors are fatal.
+* `--no-data`: Do not load `dotrift_data.toml` or active profiles. Only `--var` variables are available.
+* `--data-path <PATH>`: Explicit path to `dotrift_data.toml`. When omitted, resolves from the source directory (respects `-s, --source`).
+
+### Errors
+
+* **Missing template source:** Error if neither `--string` nor `--file` is provided.
+* **Ambiguous template source:** Error if both `--string` and `--file` are provided.
+* **Template errors:** Parse and render errors are fatal, reported with source annotations.
+* **`--var` parse errors:** Fatal.
+* **DB errors:** Fatal.
+
+### Variable Precedence
+
+From lowest to highest priority:
+
+1. `[variable]` from `dotrift_data.toml` (if `--no-data` is not set)
+2. Active profiles from the database (if `--no-data` is not set, in activation order — last-activated wins)
+3. `--var` CLI arguments (highest priority, overwrites any conflicting keys)
+
+### Execution Pipeline
+
+1. **Resolve template source:** If `--string`, use the inline string directly. If `--file`, read the file from disk.
+
+2. **Resolve variables** (unless `--no-data`):
+   - Load `dotrift_data.toml` from `--data-path` if provided, or from the source directory. Missing file is treated as empty (no variables from file).
+   - Query the database for active profiles. DB errors are fatal.
+   - Merge in order: `[variable]` → active profiles (by activation order).
+
+3. **Apply `--var` overrides:** Each `KEY=VALUE` argument sets a variable, parsed as a TOML literal. Parse errors are fatal. Overwrites any conflicting key from step 2.
+
+4. **Evaluate template:** Evaluate the template with the resolved variable context and the same built-in functions available to `apply`. Template syntax follows `spec/templater.md`.
+
+5. **Output:** Write rendered content to stdout, or to the file specified by `--output` (creating parent directories as needed).
