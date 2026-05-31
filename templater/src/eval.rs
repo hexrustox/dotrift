@@ -10,6 +10,7 @@ use crate::function::FunctionRegistry;
 use crate::value::Value;
 
 pub struct EvalContext<'a> {
+    variables: HashMap<String, Value>,
     scopes: Vec<HashMap<String, Value>>,
     functions: &'a dyn FunctionRegistry,
 }
@@ -17,32 +18,36 @@ pub struct EvalContext<'a> {
 impl<'a> EvalContext<'a> {
     pub fn new(variables: HashMap<String, Value>, functions: &'a dyn FunctionRegistry) -> Self {
         Self {
-            scopes: vec![variables],
+            variables,
+            scopes: Vec::new(),
             functions,
         }
     }
 
-    pub fn push_scope(&mut self) {
+    fn push_scope(&mut self, values: Vec<(String, Value)>) {
         self.scopes.push(HashMap::new());
-    }
-
-    pub fn pop_scope(&mut self) {
-        self.scopes.pop();
-    }
-
-    pub fn set(&mut self, name: String, value: Value) {
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name, value);
+            for (name, value) in values.into_iter() {
+                scope.insert(name, value);
+            }
         }
     }
 
-    pub fn get(&self, name: &str) -> Option<&Value> {
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn get(&self, name: &str) -> Option<&Value> {
         for scope in self.scopes.iter().rev() {
             if let Some(val) = scope.get(name) {
                 return Some(val);
             }
         }
-        None
+        self.variables.get(name)
+    }
+
+    pub fn destruct(self) -> HashMap<String, Value> {
+        self.variables
     }
 }
 
@@ -118,8 +123,7 @@ fn eval_node<W: io::Write>(
             match val {
                 Value::List(items) => {
                     for item in items {
-                        ctx.push_scope();
-                        ctx.set(var.clone(), item);
+                        ctx.push_scope(vec![(var.clone(), item)]);
                         eval_nodes(body, source, writer, ctx)?;
                         ctx.pop_scope();
                     }

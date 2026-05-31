@@ -42,13 +42,13 @@ struct TemplateContext {
 
 impl TemplateContext {
     fn build(source_dir: &Path, db: &Db) -> Result<Self> {
-        let data = data::TemplateData::read(source_dir)?;
-        let active = db.get_active_profiles()?;
+        let mut data = data::TemplateData::read(source_dir)?;
+        let active_profiles = db.get_active_profiles()?;
         let mut ctx: HashMap<String, templater::value::Value> = data.variable;
-        for profile in active {
-            if let Some(vars) = data.profile.get(&profile.name) {
+        for profile in active_profiles {
+            if let Some(vars) = data.profile.remove(&profile.name) {
                 for (k, v) in vars {
-                    ctx.insert(k.clone(), v.clone());
+                    ctx.insert(k, v);
                 }
             }
         }
@@ -123,7 +123,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
         &db,
         overwrite_identical,
         verbose,
-        &template_ctx,
+        template_ctx,
     )?;
 
     Ok(())
@@ -257,15 +257,15 @@ fn traverse_tree(
     db: &Db,
     overwrite_identical: bool,
     verbose: bool,
-    template_ctx: &TemplateContext,
-) -> Result<()> {
+    mut template_ctx: TemplateContext,
+) -> Result<TemplateContext> {
     match node {
         Node::Dir(children) => {
             if deploy_dir(target, db, verbose)? {
-                return Ok(());
+                return Ok(template_ctx);
             }
             for (name, child) in children {
-                traverse_tree(
+                template_ctx = traverse_tree(
                     &target.join(name),
                     child,
                     db,
@@ -276,7 +276,7 @@ fn traverse_tree(
             }
         }
         Node::File(entry) => {
-            deploy_file(
+            template_ctx = deploy_file(
                 target,
                 entry,
                 db,
@@ -290,7 +290,7 @@ fn traverse_tree(
             unreachable!()
         }
     }
-    Ok(())
+    Ok(template_ctx)
 }
 
 fn abort_deploy(at: &Path) -> Report {
@@ -364,8 +364,8 @@ fn deploy_file(
     db: &Db,
     overwrite_identical: bool,
     verbose: bool,
-    template_ctx: &TemplateContext,
-) -> Result<()> {
+    mut template_ctx: TemplateContext,
+) -> Result<TemplateContext> {
     let mut source_hash = None;
     let mut target_hash = None;
 
@@ -373,7 +373,7 @@ fn deploy_file(
         if target.path_is_dir() {
             let choice = prompt_collision(Some(&entry.source), target, false, true);
             match choice {
-                CollisionOptions::Skip => return Ok(()),
+                CollisionOptions::Skip => return Ok(template_ctx),
                 CollisionOptions::Overwrite => {
                     crate::remove_dir_err!(fs::remove_dir_all(target), target)?;
                     if verbose {
@@ -398,7 +398,7 @@ fn deploy_file(
                 if overwrite_identical {
                     update_db(target, entry, db, target_hash)?;
                 }
-                return Ok(());
+                return Ok(template_ctx);
             }
 
             #[cfg(test)]
@@ -409,7 +409,7 @@ fn deploy_file(
             if !managed {
                 let choice = prompt_collision(Some(&entry.source), target, false, false);
                 match choice {
-                    CollisionOptions::Skip => return Ok(()),
+                    CollisionOptions::Skip => return Ok(template_ctx),
                     CollisionOptions::Overwrite => {}
                     CollisionOptions::Quit => {
                         return Err(abort_deploy(target));
@@ -431,15 +431,6 @@ fn deploy_file(
         }
         DeployType::Copy => {
             clone_file(&entry.source, target)?;
-            if let Some(mode) = entry.mode
-                && target.path_is_file()
-            {
-                fs::set_permissions(target, fs::Permissions::from_mode(mode.0 as u32))
-                    .map_err(|e| miette!(e))
-                    .wrap_err_with(|| {
-                        format!("Failed to set permissions on `{}`", target.display())
-                    })?;
-            }
         }
         DeployType::Tmpl => {
             let mut src = entry.source.clone();
@@ -452,19 +443,24 @@ fn deploy_file(
             let mmap = unsafe { Mmap::map(&file) }
                 .map_err(|e| miette!(e))
                 .wrap_err_with(|| format!("Failed to mmap template `{}`", src.display()))?;
+
             let tmpl = templater::Template::from_mmap(mmap)
                 .wrap_err_with(|| format!("Failed to parse template `{}`", src.display()))?;
             let out = fs::File::create(target)
                 .map_err(|e| miette!(e))
                 .wrap_err_with(|| format!("Failed to create `{}`", target.display()))?;
             let mut writer = BufWriter::new(out);
-            let vars = template_ctx.variables.clone();
-            tmpl.render(&mut writer, vars, &template_ctx.functions)
+            template_ctx.variables = tmpl
+                .render(&mut writer, template_ctx.variables, &template_ctx.functions)
                 .wrap_err_with(|| format!("Failed to render template `{}`", src.display()))?;
             writer
                 .flush()
                 .map_err(|e| miette!(e))
                 .wrap_err_with(|| format!("Failed to write `{}`", target.display()))?;
+        }
+    }
+    match entry.deploy_type {
+        DeployType::Copy | DeployType::Tmpl => {
             if let Some(mode) = entry.mode
                 && target.path_is_file()
             {
@@ -475,13 +471,14 @@ fn deploy_file(
                     })?;
             }
         }
+        _ => {}
     }
     if verbose {
         output::print_created_file(target, &entry.source, entry.deploy_type);
     }
 
     update_db(target, entry, db, source_hash)?;
-    Ok(())
+    Ok(template_ctx)
 }
 
 fn update_db(target: &Path, entry: &PortalEntry, db: &Db, source_hash: Option<u64>) -> Result<()> {

@@ -60,7 +60,7 @@ pub fn deactivate(db_path: &Path, name: &str) -> Result<()> {
 
 pub fn show(global: &GlobalFlags, db_path: &Path) -> Result<()> {
     let source_dir = global.source()?;
-    let data = TemplateData::read(&source_dir)?;
+    let mut data = TemplateData::read(&source_dir)?;
     let db = Db::init(db_path)?;
     let active_profiles = db.get_active_profiles()?;
 
@@ -71,9 +71,9 @@ pub fn show(global: &GlobalFlags, db_path: &Path) -> Result<()> {
     }
 
     for profile in active_profiles {
-        if let Some(vars) = data.profile.get(&profile.name) {
+        if let Some(vars) = data.profile.remove(&profile.name) {
             for (k, v) in vars {
-                ctx.insert(k.clone(), v.clone());
+                ctx.insert(k, v);
             }
         }
     }

@@ -58,11 +58,11 @@ impl Template {
     }
 
     pub fn render<W: io::Write>(
-        &self,
+        self,
         writer: W,
         variables: HashMap<String, Value>,
         functions: &dyn FunctionRegistry,
-    ) -> Result<()> {
+    ) -> Result<HashMap<String, Value>> {
         let mut ctx = EvalContext::new(variables, functions);
         let mut writer = io::BufWriter::new(writer);
         let source = self.source.as_bytes();
@@ -75,7 +75,8 @@ impl Template {
                 return Report::new(error).with_source_code(src);
             }
             report
-        })
+        })?;
+        Ok(ctx.destruct())
     }
 }
 
