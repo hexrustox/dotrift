@@ -104,3 +104,48 @@ macro_rules! glob_err {
             .wrap_err_with(|| format!("Invalid glob pattern: `{}`", $pattern))
     };
 }
+
+#[macro_export]
+macro_rules! open_template_err {
+    ($result:expr, $path:expr) => {
+        $result
+            .map_err(|e| miette!(e))
+            .wrap_err_with(|| format!("Failed to open template `{}`", $path.display()))
+    };
+}
+
+#[macro_export]
+macro_rules! mmap_template_err {
+    ($result:expr, $path:expr) => {
+        $result
+            .map_err(|e| miette!(e))
+            .wrap_err_with(|| format!("Failed to mmap template `{}`", $path.display()))
+    };
+}
+
+#[macro_export]
+macro_rules! parse_template_err {
+    ($result:expr, $path:expr) => {
+        $result
+            .map_err(|e| miette!(e))
+            .wrap_err_with(|| format!("Failed to parse template `{}`", $path.display()))
+    };
+}
+
+#[macro_export]
+macro_rules! render_template_err {
+    ($result:expr, $path:expr) => {
+        $result
+            .map_err(|e| miette!(e))
+            .wrap_err_with(|| format!("Failed to render template `{}`", $path.display()))
+    };
+}
+
+#[macro_export]
+macro_rules! create_file_err {
+    ($result:expr, $path:expr) => {
+        $result
+            .map_err(|e| miette!(e))
+            .wrap_err_with(|| format!("Failed to create file `{}`", $path.display()))
+    };
+}

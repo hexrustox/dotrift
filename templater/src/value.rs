@@ -80,3 +80,28 @@ impl Value {
         }
     }
 }
+
+impl TryFrom<toml::Value> for Value {
+    type Error = ();
+
+    fn try_from(v: toml::Value) -> std::result::Result<Self, Self::Error> {
+        match v {
+            toml::Value::String(s) => Ok(Value::Str(s)),
+            toml::Value::Integer(i) => Ok(Value::Int(i)),
+            toml::Value::Boolean(b) => Ok(Value::Bool(b)),
+            toml::Value::Array(arr) => {
+                let items: std::result::Result<Vec<_>, _> =
+                    arr.into_iter().map(Value::try_from).collect();
+                Ok(Value::List(items?))
+            }
+            toml::Value::Table(table) => {
+                let map: std::result::Result<BTreeMap<_, _>, _> = table
+                    .into_iter()
+                    .map(|(k, v)| Ok((k, Value::try_from(v)?)))
+                    .collect();
+                Ok(Value::Map(map?))
+            }
+            _ => Err(()),
+        }
+    }
+}

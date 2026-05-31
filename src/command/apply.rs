@@ -13,6 +13,8 @@ use miette::{Context, Report, Result, miette};
 
 use crate::{
     cli::{ApplyFlags, GlobalFlags},
+    create_file_err, mmap_template_err, open_template_err, parse_template_err,
+    render_template_err, write_file_err,
     command::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
@@ -437,26 +439,17 @@ fn deploy_file(
             while src.path_is_symlink() {
                 src = fs::read_link(&src).map_err(|e| miette!(e))?;
             }
-            let file = fs::File::open(&src)
-                .map_err(|e| miette!(e))
-                .wrap_err_with(|| format!("Failed to open template `{}`", src.display()))?;
-            let mmap = unsafe { Mmap::map(&file) }
-                .map_err(|e| miette!(e))
-                .wrap_err_with(|| format!("Failed to mmap template `{}`", src.display()))?;
+            let file = open_template_err!(fs::File::open(&src), &src)?;
+            let mmap = mmap_template_err!(unsafe { Mmap::map(&file) }, &src)?;
 
-            let tmpl = templater::Template::from_mmap(mmap)
-                .wrap_err_with(|| format!("Failed to parse template `{}`", src.display()))?;
-            let out = fs::File::create(target)
-                .map_err(|e| miette!(e))
-                .wrap_err_with(|| format!("Failed to create `{}`", target.display()))?;
+            let tmpl = parse_template_err!(templater::Template::from_mmap(mmap), &src)?;
+            let out = create_file_err!(fs::File::create(target), target)?;
             let mut writer = BufWriter::new(out);
-            template_ctx.variables = tmpl
-                .render(&mut writer, template_ctx.variables, &template_ctx.functions)
-                .wrap_err_with(|| format!("Failed to render template `{}`", src.display()))?;
-            writer
-                .flush()
-                .map_err(|e| miette!(e))
-                .wrap_err_with(|| format!("Failed to write `{}`", target.display()))?;
+            template_ctx.variables = render_template_err!(
+                tmpl.render(&mut writer, template_ctx.variables, &template_ctx.functions),
+                &src
+            )?;
+            write_file_err!(writer.flush(), target)?;
         }
     }
     match entry.deploy_type {

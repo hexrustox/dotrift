@@ -22,7 +22,7 @@ normalize-path = "0.2"
 rusqlite = { version = "0.39", features = ["bundled"] }
 serde.workspace = true
 strum.workspace = true
-toml = "1"
+toml.workspace = true
 twox-hash = "2.1"
 walkdir = "2"
 
@@ -45,4 +45,5 @@ similar = "2"
 strum = { version = "0.28", features = ["derive"] }
 tempfile = "3"
 test-case = "3"
+toml = "1"
 thiserror = "2"

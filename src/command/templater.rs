@@ -11,24 +11,38 @@ use templater::{Template, Value};
 
 use crate::{
     cli::{GlobalFlags, TemplaterFlags},
-    create_dir_err,
+    create_dir_err, create_file_err,
     db::Db,
+    mmap_template_err, open_template_err, parse_template_err,
     templater::{data::TemplateData, function::BuiltinFunctions},
+    write_file_err,
 };
+
+struct LastByte<W> {
+    inner: W,
+    last: Option<u8>,
+}
+
+impl<W: Write> Write for LastByte<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Some(&b) = buf.last() {
+            self.last = Some(b);
+        }
+        self.inner.write(buf)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
 
 pub fn run(global: GlobalFlags, db_path: &Path, flags: TemplaterFlags) -> Result<()> {
     let tmpl = if let Some(s) = &flags.string {
         Template::from_bytes(s.as_bytes().to_vec()).wrap_err("Failed to parse template")?
     } else {
         let path = flags.file.as_ref().unwrap();
-        let file = fs::File::open(path)
-            .map_err(|e| miette!(e))
-            .wrap_err_with(|| format!("Failed to open template file `{}`", path.display()))?;
-        let mmap = unsafe { Mmap::map(&file) }
-            .map_err(|e| miette!(e))
-            .wrap_err_with(|| format!("Failed to mmap template file `{}`", path.display()))?;
-        Template::from_mmap(mmap)
-            .wrap_err_with(|| format!("Failed to parse template in `{}`", path.display()))?
+        let file = open_template_err!(fs::File::open(path), path)?;
+        let mmap = mmap_template_err!(unsafe { Mmap::map(&file) }, path)?;
+        parse_template_err!(Template::from_mmap(mmap), path)?
     };
 
     let mut variables: HashMap<String, Value> = HashMap::new();
@@ -51,41 +65,75 @@ pub fn run(global: GlobalFlags, db_path: &Path, flags: TemplaterFlags) -> Result
     }
 
     for var_str in &flags.var {
-        let (key, value_str) = var_str
-            .split_once('=')
-            .ok_or_else(|| miette!("Invalid --var `{var_str}`: expected KEY=VALUE"))?;
-        let value = parse_cli_value(value_str);
-        variables.insert(key.to_string(), value);
+        let (key, value) =
+            parse_cli_var(var_str).ok_or_else(|| miette!("Invalid --var `{var_str}`"))?;
+        variables.insert(key, value);
     }
 
-    let writer: Box<dyn Write> = if let Some(out_path) = &flags.output {
+    if let Some(out_path) = &flags.output {
         if let Some(parent) = out_path.parent() {
             create_dir_err!(fs::create_dir_all(parent), parent)?;
         }
-        let file = fs::File::create(out_path)
-            .map_err(|e| miette!(e))
-            .wrap_err_with(|| format!("Failed to create output file `{}`", out_path.display()))?;
-        Box::new(file)
+        let file = create_file_err!(fs::File::create(out_path), out_path)?;
+        let mut writer = BufWriter::new(file);
+        tmpl.render(&mut writer, variables, &BuiltinFunctions::new())
+            .wrap_err("Failed to render template")?;
+        write_file_err!(writer.flush(), out_path)?;
     } else {
-        Box::new(io::stdout())
-    };
-
-    let mut buf = BufWriter::new(writer);
-    tmpl.render(&mut buf, variables, &BuiltinFunctions::new())
-        .wrap_err("Failed to render template")?;
-    buf.flush()
-        .map_err(|e| miette!(e))
-        .wrap_err("Failed to flush output")?;
+        let stdout = io::stdout();
+        let mut writer = LastByte {
+            inner: stdout.lock(),
+            last: None,
+        };
+        tmpl.render(&mut writer, variables, &BuiltinFunctions::new())
+            .wrap_err("Failed to render template")?;
+        if writer.last != Some(b'\n') {
+            writer
+                .write_all(b"\n")
+                .map_err(|e| miette!(e))
+                .wrap_err("Failed to write newline to stdout")?;
+        }
+        writer
+            .flush()
+            .map_err(|e| miette!(e))
+            .wrap_err("Failed to flush stdout")?;
+    }
 
     Ok(())
 }
 
-fn parse_cli_value(s: &str) -> Value {
-    if let Ok(n) = s.parse::<i64>() {
-        return Value::Int(n);
+fn parse_cli_var(s: &str) -> Option<(String, Value)> {
+    let doc = toml::from_str::<toml::Value>(s).ok()?;
+    let table = doc.as_table()?;
+    let (key, value) = table.iter().next()?;
+    let value = Value::try_from(value.clone()).ok()?;
+    Some((key.to_string(), value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use test_case::test_case;
+
+    #[test_case("key=42" => ("key".into(), Value::Int(42)); "int")]
+    #[test_case("n=-7" => ("n".into(), Value::Int(-7)); "negative_int")]
+    #[test_case("flag=true" => ("flag".into(), Value::Bool(true)); "bool_true")]
+    #[test_case("off=false" => ("off".into(), Value::Bool(false)); "bool_false")]
+    #[test_case("name=\"hello\"" => ("name".into(), Value::Str("hello".into())); "toml_string")]
+    #[test_case("list=[1,2,3]" => ("list".into(), Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)])); "toml_list")]
+    #[test_case("obj={a=1,b=2}" => ("obj".into(), Value::Map(BTreeMap::from([("a".into(), Value::Int(1)), ("b".into(), Value::Int(2))]))); "toml_table")]
+    #[test_case("nested=[{x=1}]" => ("nested".into(), Value::List(vec![Value::Map(BTreeMap::from([("x".into(), Value::Int(1))]))])); "toml_nested")]
+    fn test_parse_cli_var(input: &str) -> (String, Value) {
+        parse_cli_var(input).unwrap()
     }
-    if let Ok(b) = s.parse::<bool>() {
-        return Value::Bool(b);
+
+    #[test_case("bad";          "no_equals")]
+    #[test_case("name=hello";   "bare_string")]
+    #[test_case("empty=";       "empty_value")]
+    #[test_case("path=a/b/c";   "path_with_slash")]
+    #[test_case("pi=3.14";      "float_unsupported")]
+    fn test_parse_cli_var_error(input: &str) {
+        assert!(parse_cli_var(input).is_none());
     }
-    Value::Str(s.to_string())
 }

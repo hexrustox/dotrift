@@ -126,8 +126,8 @@ pub struct TemplaterFlags {
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 
-    /// Set a template variable (key=value, repeatable).
-    #[arg(short = 'v', long)]
+    /// Set a template variable, repeatable.
+    #[arg(short = 'v', long, name = "KEY=VALUE")]
     pub var: Vec<String>,
 
     /// Do not load dotrift_data.toml or active profiles.
