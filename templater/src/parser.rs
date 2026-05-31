@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use miette::bail;
+use miette::{Result, bail};
 
 use crate::ast::{Expr, ExprKind, Node};
 use crate::error::{Error, ErrorKind};
@@ -37,7 +37,7 @@ fn tag_error(kind: ErrorKind, range: &Range<usize>) -> Error {
     Error::new(kind, range.start.saturating_sub(2), range.len() + 4)
 }
 
-pub fn parse(tokens: &[RawToken], source: &[u8]) -> miette::Result<Vec<Node>> {
+pub fn parse(tokens: &[RawToken], source: &[u8]) -> Result<Vec<Node>> {
     let mut nodes = Vec::new();
     let mut i = 0;
 
@@ -87,17 +87,12 @@ pub fn parse(tokens: &[RawToken], source: &[u8]) -> miette::Result<Vec<Node>> {
     Ok(nodes)
 }
 
-fn parse_interpolate(source: &[u8], range: &Range<usize>) -> miette::Result<Expr> {
+fn parse_interpolate(source: &[u8], range: &Range<usize>) -> Result<Expr> {
     let toks = tokenize(source, range.clone())?;
     parse_expr_from(&toks, 0, range.start, range.end)
 }
 
-fn parse_expr_from(
-    toks: &[Token],
-    start_pos: usize,
-    base: usize,
-    end: usize,
-) -> miette::Result<Expr> {
+fn parse_expr_from(toks: &[Token], start_pos: usize, base: usize, end: usize) -> Result<Expr> {
     let mut pos = start_pos;
     let expr = parse_postfix(toks, &mut pos, base, end)?;
     if pos != toks.len() {
@@ -115,7 +110,7 @@ fn parse_if_block(
     source: &[u8],
     start: usize,
     first_toks: Vec<Token>,
-) -> miette::Result<(Vec<Node>, usize)> {
+) -> Result<(Vec<Node>, usize)> {
     let mut branches: Vec<(Expr, Vec<Node>)> = Vec::new();
     let mut else_branch: Option<Vec<Node>> = None;
     let mut i = start;
@@ -199,7 +194,7 @@ fn parse_for_block(
     source: &[u8],
     start: usize,
     toks: Vec<Token>,
-) -> miette::Result<(Vec<Node>, usize)> {
+) -> Result<(Vec<Node>, usize)> {
     let range = match tokens.get(start) {
         Some(RawToken::Statement(r)) => r.clone(),
         _ => bail!("expected statement tag in for-block, got text or interpolate"),
@@ -260,7 +255,7 @@ fn collect_body_until(
     source: &[u8],
     start: usize,
     stop_at: &[TokenKind],
-) -> miette::Result<(Vec<Node>, usize)> {
+) -> Result<(Vec<Node>, usize)> {
     let mut body = Vec::new();
     let mut i = start;
 
@@ -302,7 +297,7 @@ fn collect_body_until(
     Ok((body, tokens.len() - start))
 }
 
-fn tokenize(source: &[u8], range: Range<usize>) -> miette::Result<Vec<Token>> {
+fn tokenize(source: &[u8], range: Range<usize>) -> Result<Vec<Token>> {
     macro_rules! push_token {
         ($kind:expr, $r:expr, $p:expr, $tokens:expr) => {{
             $tokens.push(Token {
@@ -438,12 +433,7 @@ fn tokenize(source: &[u8], range: Range<usize>) -> miette::Result<Vec<Token>> {
     Ok(tokens)
 }
 
-fn parse_postfix(
-    tokens: &[Token],
-    pos: &mut usize,
-    base: usize,
-    end: usize,
-) -> miette::Result<Expr> {
+fn parse_postfix(tokens: &[Token], pos: &mut usize, base: usize, end: usize) -> Result<Expr> {
     let mut left = parse_primary(tokens, pos, base, end)?;
 
     while *pos < tokens.len() && tokens[*pos].kind == TokenKind::Dot {
@@ -477,12 +467,7 @@ fn parse_postfix(
     Ok(left)
 }
 
-fn parse_primary(
-    tokens: &[Token],
-    pos: &mut usize,
-    base: usize,
-    end: usize,
-) -> miette::Result<Expr> {
+fn parse_primary(tokens: &[Token], pos: &mut usize, base: usize, end: usize) -> Result<Expr> {
     struct DelimConfig {
         close_kind: TokenKind,
         unclosed_kind: ErrorKind,
@@ -518,7 +503,7 @@ fn parse_primary(
         base: usize,
         end: usize,
         dc: &DelimConfig,
-    ) -> miette::Result<Vec<Expr>> {
+    ) -> Result<Vec<Expr>> {
         let mut items = Vec::new();
         loop {
             if *pos >= tokens.len() {
