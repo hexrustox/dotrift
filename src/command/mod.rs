@@ -5,6 +5,7 @@ pub mod init;
 pub mod profile;
 mod prompt;
 pub mod status;
+pub mod templater;
 mod tree;
 pub mod unapply;
 mod util;

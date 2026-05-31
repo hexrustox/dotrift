@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use miette::Result;
 use std::path::PathBuf;
 
@@ -110,6 +110,35 @@ pub struct AddFlags {
     pub no_modify: bool,
 }
 
+#[derive(Args, Clone)]
+#[command(group = ArgGroup::new("src").args(["string", "file"]).required(true))]
+#[command(group = ArgGroup::new("data").args(["no_data", "data_path"]).multiple(false))]
+pub struct TemplaterFlags {
+    /// Inline template string to evaluate.
+    #[arg(short, long)]
+    pub string: Option<String>,
+
+    /// Path to a template file on disk.
+    #[arg(short, long)]
+    pub file: Option<PathBuf>,
+
+    /// Write rendered output to file instead of stdout.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Set a template variable (key=value, repeatable).
+    #[arg(short = 'v', long)]
+    pub var: Vec<String>,
+
+    /// Do not load dotrift_data.toml or active profiles.
+    #[arg(long)]
+    pub no_data: bool,
+
+    /// Explicit path to dotrift_data.toml; resolves from source dir if omitted.
+    #[arg(long)]
+    pub data_path: Option<PathBuf>,
+}
+
 #[derive(ValueEnum, Clone, Copy)]
 pub enum OpenEditor {
     Always,
@@ -181,6 +210,9 @@ pub enum Commands {
         #[command(subcommand)]
         command: StatusSubcommand,
     },
+
+    /// Evaluate a dotrift template standalone.
+    Templater(TemplaterFlags),
 
     /// Manage template profiles.
     Profile {

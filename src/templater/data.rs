@@ -14,12 +14,16 @@ pub struct TemplateData {
 }
 
 impl TemplateData {
+    pub fn read_from_file(path: &Path) -> Result<Self> {
+        let s = crate::read_file_err!(fs::read_to_string(path), path)?;
+        crate::parse_err!(toml::from_str(&s), path)
+    }
+
     pub fn read(source_dir: &Path) -> Result<Self> {
         let path = data_path(source_dir);
         if !path.is_file() {
             return Ok(Self::default());
         }
-        let s = crate::read_file_err!(fs::read_to_string(&path), &path)?;
-        crate::parse_err!(toml::from_str(&s), &path)
+        Self::read_from_file(&path)
     }
 }

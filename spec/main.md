@@ -591,6 +591,7 @@ Evaluates a dotrift template standalone and writes the rendered output to stdout
 
 * **Missing template source:** Error if neither `--string` nor `--file` is provided.
 * **Ambiguous template source:** Error if both `--string` and `--file` are provided.
+* **Mutually exclusive flags:** Error if both `--no-data` and `--data-path` are provided.
 * **Template errors:** Parse and render errors are fatal, reported with source annotations.
 * **`--var` parse errors:** Fatal.
 * **DB errors:** Fatal.

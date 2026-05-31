@@ -2,7 +2,7 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use dotrift::{
     cli::{self, ProfileSubcommand, StatusSubcommand},
-    command::{add, apply, diff, init, profile, status, unapply},
+    command::{add, apply, diff, init, profile, status, templater, unapply},
     path::db_path,
 };
 use miette::{Context, MietteHandlerOpts, Result};
@@ -70,6 +70,11 @@ fn main() -> Result<()> {
                     profile::show(&cli.global, &db).wrap_err("Failed to show variables")?;
                 }
             }
+        }
+        Commands::Templater(flags) => {
+            let db = db_path()?;
+            templater::run(cli.global, &db, flags)
+                .wrap_err("Failed to evaluate template")?;
         }
     }
 
