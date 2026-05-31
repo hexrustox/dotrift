@@ -1,4 +1,4 @@
-use std::{fs, io::ErrorKind, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 use miette::{Context, Result, miette};
 use serde::Deserialize;
@@ -113,16 +113,11 @@ impl GlobalConfig {
             None => global_config_path()?,
         };
 
-        let content = match fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) if e.kind() == ErrorKind::NotFound && !specific => return Ok(Self::default()),
-            Err(e) => {
-                return Err(e).map_err(|e| miette!(e)).wrap_err_with(|| {
-                    format!("Failed to read global config `{}`", path.display())
-                });
-            }
-        };
-        crate::parse_err!(toml::from_str(&content), &path)
+        if !path.is_file() && !specific {
+            return Ok(Self::default());
+        }
+        let s = crate::read_file_err!(fs::read_to_string(&path), &path)?;
+        crate::parse_err!(toml::from_str(&s), &path)
     }
 }
 
