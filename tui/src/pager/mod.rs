@@ -7,7 +7,6 @@ mod view;
 use std::{
     io::{self, BufRead, IsTerminal, Seek, SeekFrom, stdout},
     path::Path,
-    sync::OnceLock,
 };
 
 use crossterm::{
@@ -25,6 +24,8 @@ use ratatui::{
 use diff::Diff;
 use explorer::Explorer;
 use view::View;
+
+use crate::is_unicode;
 
 const HELP_TOP: &str = r#"j / ↓         Scroll down
 k / ↑         Scroll up
@@ -270,16 +271,6 @@ fn offsets_from_bytes(data: &[u8]) -> Vec<u64> {
         offsets.push(data.len() as u64);
     }
     offsets
-}
-
-fn is_unicode() -> bool {
-    static UNICODE: OnceLock<bool> = OnceLock::new();
-    *UNICODE.get_or_init(|| {
-        ["LC_ALL", "LC_CTYPE", "LANG"]
-            .iter()
-            .filter_map(|v| std::env::var(v).ok())
-            .any(|s| s.contains("UTF-8") || s.contains("utf8"))
-    })
 }
 
 fn splitter_char() -> &'static str {

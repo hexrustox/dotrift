@@ -5,9 +5,14 @@ use dotrift::{
     command::{add, apply, diff, init, profile, status, unapply},
     path::db_path,
 };
-use miette::{Context, Result};
+use miette::{Context, MietteHandlerOpts, Result};
+use tui::is_unicode;
 
 fn main() -> Result<()> {
+    miette::set_hook(Box::new(|_| {
+        Box::new(MietteHandlerOpts::new().unicode(is_unicode()).build())
+    }))?;
+
     let cli = Cli::parse();
 
     match cli.command {
