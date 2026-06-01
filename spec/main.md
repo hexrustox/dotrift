@@ -244,6 +244,7 @@ Defines the deployment method (`type`) and file permissions (`mode`), directory 
 * **Invalid Target Directory:** If `target-directory` is provided but is not a valid absolute path.
 * **Source-Target Overlap:** Error if `source-dir` equals `target-dir` (prevents self-modification loops).
 * **Target Inside Source:** Error if `target-dir` is inside `source-dir` (prevents self-modification).
+* **Target Path Inside Source:** Error if any resolved target path is within `source-dir` (prevents dotfiles from being mapped back into the source tree).
 * **Target Collisions:** If two different source paths resolve to the exact same target path. Show all colliding source paths and the collision target. Halts program.
 
 ---
@@ -302,6 +303,7 @@ Evaluates `dotrift.toml` and applies the defined state to the target filesystem.
 2. **Portal Resolution:** Glob `[portal]` keys against source files/dirs. Calculate `target_path` via Stripping Rule. Filter using `ignore` list (see Configuration). Store in `HashMap<TargetPath, (SourcePath, DeployType, Option<Mode>)>`. A source file/dir can match multiple portals if no target collision.
    * Literal directory keys expand to one entry per contained file (not one entry for the directory itself).
    * *Error:* Target path collision. Show all colliding source paths and the collision target. Halt program.
+   * *Error:* Resolved target path is inside `source-dir`. Show the target path and source path. Halt program.
 3. **Rule Application:** Apply `[rule]` in order, shallow-merging properties to determine final `type` and `mode`. Last rule wins on conflict.
 
 #### Phase 2: Tree Construction

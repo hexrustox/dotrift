@@ -171,7 +171,7 @@ pub fn resolve_portals(
         ignore_matcher,
         false,
         |source_path, target_path, _| {
-            insert_portal_entry(&mut portal_entries, target_path, source_path)
+            insert_portal_entry(&mut portal_entries, target_path, source_path, source_dir)
         },
     )?;
 
@@ -182,7 +182,16 @@ fn insert_portal_entry(
     portal_entries: &mut HashMap<PathBuf, PortalEntry>,
     target_path: PathBuf,
     source_path: PathBuf,
+    source_dir: &Path,
 ) -> Result<()> {
+    if target_path.starts_with(source_dir) {
+        return Err(miette!(
+            "target path `{}` is inside source directory `{}`",
+            target_path.display(),
+            source_dir.display()
+        ));
+    }
+
     if let Some(existing) = portal_entries.insert(
         target_path.clone(),
         PortalEntry {
@@ -232,6 +241,7 @@ fn apply_rules(
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    use std::fs;
     use test_case::test_case;
 
     use crate::command::util::tests::setup_test;
@@ -300,6 +310,23 @@ mod tests {
         let portal_entries =
             resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
         flatten(portal_entries, temp_dir.path())
+    }
+
+    #[test_case(r#""file" = "b/file""# => panics "inside source"; "target_inside_source_literal")]
+    #[test_case(r#""*" = "b""# => panics "inside source"; "target_inside_source_glob")]
+    #[test_case(r#""file" = "other""# => (); "target_not_inside_source")]
+    fn test_target_not_in_source(portal: &str) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let target_dir = temp_dir.path().join("a");
+        let source_dir = target_dir.join("b");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::write(source_dir.join("file"), "").unwrap();
+        let config = format!("[portal]\n{portal}");
+        fs::write(source_dir.join("dotrift.toml"), config).unwrap();
+
+        let config = Config::read(&source_dir).unwrap();
+        let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
+        resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
     }
 
     #[test_case("" => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "empty")]
