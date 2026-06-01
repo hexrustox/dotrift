@@ -8,7 +8,7 @@ use miette::{Context, Result, miette};
 use serde::Deserialize;
 use templater::value::Value;
 
-use crate::path::data_path;
+use crate::{db::Db, path::data_path};
 
 #[derive(Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
@@ -29,5 +29,15 @@ impl TemplateData {
             return Ok(Self::default());
         }
         Self::read_from_file(&path)
+    }
+
+    pub fn resolve_variables(mut self, db: &Db) -> Result<HashMap<String, Value>> {
+        let active_profiles = db.get_active_profiles()?;
+        for profile in active_profiles {
+            if let Some(vars) = self.profile.remove(&profile.name) {
+                self.variable.extend(vars);
+            }
+        }
+        Ok(self.variable)
     }
 }

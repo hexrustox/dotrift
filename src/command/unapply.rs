@@ -1,7 +1,6 @@
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 
 use miette::Context;
-use templater::Value;
 
 use crate::{
     cli::{GlobalFlags, UnapplyFlags},
@@ -18,14 +17,8 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: UnapplyFlags) -> mi
     let target_override = global_flags.target()?;
 
     let db = Db::init(db_path)?;
-    let mut data = TemplateData::read(&source_dir)?;
-    let active_profiles = db.get_active_profiles()?;
-    let mut variables: HashMap<String, Value> = data.variable;
-    for profile in active_profiles {
-        if let Some(vars) = data.profile.remove(&profile.name) {
-            variables.extend(vars);
-        }
-    }
+    let data = TemplateData::read(&source_dir)?;
+    let variables = data.resolve_variables(&db)?;
     let functions = BuiltinFunctions::new();
     let (config, _) = Config::read_templated(&source_dir, variables, &functions)
         .wrap_err("failed to read config")?;

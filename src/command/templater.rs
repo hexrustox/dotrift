@@ -47,21 +47,14 @@ pub fn run(global: GlobalFlags, db_path: &Path, flags: TemplaterFlags) -> Result
 
     let mut variables: HashMap<String, Value> = HashMap::new();
     if !flags.no_data {
-        let mut data = if let Some(path) = flags.data_path {
+        let data = if let Some(path) = flags.data_path {
             TemplateData::read_from_file(&path)
         } else {
             TemplateData::read(&global.source()?)
         }?;
 
         let db = Db::init(db_path)?;
-        let active_profiles = db.get_active_profiles()?;
-
-        variables = data.variable;
-        for profile in &active_profiles {
-            if let Some(vars) = data.profile.remove(&profile.name) {
-                variables.extend(vars);
-            }
-        }
+        variables = data.resolve_variables(&db)?;
     }
 
     for var_str in &flags.var {

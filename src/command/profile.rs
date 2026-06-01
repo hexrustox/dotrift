@@ -63,23 +63,9 @@ pub fn deactivate(db_path: &Path, name: &str) -> Result<()> {
 
 pub fn show(global: &GlobalFlags, db_path: &Path) -> Result<()> {
     let source_dir = global.source()?;
-    let mut data = TemplateData::read(&source_dir)?;
+    let data = TemplateData::read(&source_dir)?;
     let db = Db::init(db_path)?;
-    let active_profiles = db.get_active_profiles()?;
-
-    let mut ctx: BTreeMap<String, Value> = BTreeMap::new();
-
-    for (k, v) in data.variable {
-        ctx.insert(k, v);
-    }
-
-    for profile in active_profiles {
-        if let Some(vars) = data.profile.remove(&profile.name) {
-            for (k, v) in vars {
-                ctx.insert(k, v);
-            }
-        }
-    }
+    let ctx: BTreeMap<String, Value> = data.resolve_variables(&db)?.into_iter().collect();
 
     if ctx.is_empty() {
         return Ok(());

@@ -44,18 +44,9 @@ struct TemplateContext {
 
 impl TemplateContext {
     fn build(source_dir: &Path, db: &Db) -> Result<Self> {
-        let mut data = data::TemplateData::read(source_dir)?;
-        let active_profiles = db.get_active_profiles()?;
-        let mut ctx: HashMap<String, templater::value::Value> = data.variable;
-        for profile in active_profiles {
-            if let Some(vars) = data.profile.remove(&profile.name) {
-                for (k, v) in vars {
-                    ctx.insert(k, v);
-                }
-            }
-        }
+        let data = data::TemplateData::read(source_dir)?;
         Ok(Self {
-            variables: ctx,
+            variables: data.resolve_variables(db)?,
             functions: BuiltinFunctions::new(),
         })
     }
