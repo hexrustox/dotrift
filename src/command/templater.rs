@@ -37,7 +37,7 @@ impl<W: Write> Write for LastByte<W> {
 
 pub fn run(global: GlobalFlags, db_path: &Path, flags: TemplaterFlags) -> Result<()> {
     let tmpl = if let Some(s) = &flags.string {
-        Template::from_bytes(s.as_bytes().to_vec()).wrap_err("Failed to parse template")?
+        Template::from_bytes(s.as_bytes().to_vec()).wrap_err("failed to parse template")?
     } else {
         let path = flags.file.as_ref().unwrap();
         let file = open_template_err!(fs::File::open(path), path)?;
@@ -65,8 +65,8 @@ pub fn run(global: GlobalFlags, db_path: &Path, flags: TemplaterFlags) -> Result
     }
 
     for var_str in &flags.var {
-        let (key, value) =
-            parse_cli_var(var_str).ok_or_else(|| miette!("Invalid --var `{var_str}`"))?;
+        let (key, value) = parse_cli_var(var_str)
+            .ok_or_else(|| miette!("invalid format `{var_str}`, expect KEY=VALUE"))?;
         variables.insert(key, value);
     }
 
@@ -77,7 +77,7 @@ pub fn run(global: GlobalFlags, db_path: &Path, flags: TemplaterFlags) -> Result
         let file = create_file_err!(fs::File::create(out_path), out_path)?;
         let mut writer = BufWriter::new(file);
         tmpl.render(&mut writer, variables, &BuiltinFunctions::new())
-            .wrap_err("Failed to render template")?;
+            .wrap_err("failed to render template")?;
         write_file_err!(writer.flush(), out_path)?;
     } else {
         let stdout = io::stdout();
@@ -86,17 +86,17 @@ pub fn run(global: GlobalFlags, db_path: &Path, flags: TemplaterFlags) -> Result
             last: None,
         };
         tmpl.render(&mut writer, variables, &BuiltinFunctions::new())
-            .wrap_err("Failed to render template")?;
+            .wrap_err("failed to render template")?;
         if writer.last != Some(b'\n') {
             writer
                 .write_all(b"\n")
                 .map_err(|e| miette!(e))
-                .wrap_err("Failed to write newline to stdout")?;
+                .wrap_err("failed to write newline to stdout")?;
         }
         writer
             .flush()
             .map_err(|e| miette!(e))
-            .wrap_err("Failed to flush stdout")?;
+            .wrap_err("failed to flush stdout")?;
     }
 
     Ok(())

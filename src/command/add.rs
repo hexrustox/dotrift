@@ -60,7 +60,7 @@ pub fn run(
                     }
                     if dest.path_exists() && !flags.force {
                         output::print_warn(format!(
-                            "`{} already exists`, skipping",
+                            "`{}` already exists, skipping",
                             dest.display()
                         ));
                         continue;
@@ -87,10 +87,10 @@ pub fn run(
                 None => {
                     return Err(miette!(
                         help = format!(
-                            "Deploy the path first with `{} apply`, or provide an explicit destination",
+                            "deploy the path first with `{} apply`, or provide an explicit destination",
                             PKG_NAME
                         ),
-                        "Path `{}` not found in database",
+                        "path `{}` not found in database",
                         path.display(),
                     ));
                 }
@@ -98,7 +98,7 @@ pub fn run(
         };
         if !dest.starts_with(&source_dir) {
             return Err(miette!(
-                "Destination `{}` must be inside source directory `{}`",
+                "destination `{}` must be inside source directory `{}`",
                 dest.display(),
                 source_dir.display()
             ));
@@ -110,7 +110,7 @@ pub fn run(
         let dest = &entries[0].1;
         if dest.path_exists() && !flags.force {
             return Err(miette!(
-                help = "Use --force to overwrite the existing file, or remove it manually",
+                help = "use --force to overwrite the existing file, or remove it manually",
                 "`{}` already exists",
                 dest.display()
             ));
@@ -131,7 +131,7 @@ pub fn run(
             fs::rename(src, dest)
                 .map_err(|e| miette!(e))
                 .wrap_err_with(|| {
-                    format!("Failed to move `{}` to `{}`", src.display(), dest.display())
+                    format!("failed to move `{}` to `{}`", src.display(), dest.display())
                 })
         }?;
         if verbose {
@@ -531,7 +531,7 @@ fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<(
                 ("col", &col.to_string()),
             ];
             let args = expand_args(&config.args, &params)
-                .wrap_err("Failed to expand editor command parameters")?;
+                .wrap_err("failed to expand editor command parameters")?;
             (config.command, args)
         }
         _ => match env::var_os("VISUAL").or(env::var_os("EDITOR")) {
@@ -542,9 +542,9 @@ fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<(
                     .unwrap_or_else(|_| "$XDG_CONFIG_HOME/dotrift/config.toml".into());
                 return Err(miette!(
                     help = format!(
-                        "Set $VISUAL or $EDITOR, or configure editor-command in {config_path}"
+                        "set $VISUAL or $EDITOR, or configure editor-command in {config_path}"
                     ),
-                    "No editor found"
+                    "no editor found"
                 ));
             }
         },
@@ -553,14 +553,14 @@ fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<(
     let status = Command::new(&cmd).args(&args).status();
     if let Err(ref e) = status {
         return if e.kind() == ErrorKind::NotFound {
-            Err(miette!("Editor command not found: `{cmd}`"))
+            Err(miette!("editor command not found: `{cmd}`"))
         } else {
             status
                 .map(|_| ())
                 .map_err(|e| miette!(e))
                 .wrap_err_with(|| {
                     format!(
-                        "Failed to launch editor: `{}`",
+                        "failed to launch editor: `{}`",
                         [vec![cmd], args].concat().join(" ")
                     )
                 })

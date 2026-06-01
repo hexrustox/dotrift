@@ -55,7 +55,7 @@ pub fn prompt_collision(
         if b { "directory" } else { "file" }
     };
     let msg = format!(
-        "Trying to create {} {} but another {} already exists ",
+        "trying to create {} {} but another {} already exists",
         type_str(create_dir),
         target.display(),
         type_str(existing_dir)
@@ -81,14 +81,14 @@ pub fn prompt_collision(
         match SelectPrompt::new().prompt(&msg).interact() {
             Ok(CollisionOptions::Diff) => {
                 if let Err(e) = tui::pager::run(arg.clone()) {
-                    print_warn(format!("Failed to open pager: {e}, skipping"));
+                    print_warn(format!("failed to open pager: {e}, skipping"));
                 }
             }
             Ok(o) => {
                 return o;
             }
             Err(e) => {
-                print_warn(format!("Failed to display prompt: {e}, skipping"));
+                print_warn(format!("failed to display prompt: {e}, skipping"));
                 return CollisionOptions::Skip;
             }
         }

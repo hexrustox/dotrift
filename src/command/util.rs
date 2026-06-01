@@ -39,7 +39,7 @@ pub fn to_absolute_path(path: &Path) -> Result<PathBuf> {
     } else {
         let cwd = env::current_dir()
             .map_err(|e| miette!(e))
-            .wrap_err("Failed to get current directory")?;
+            .wrap_err("failed to get current directory")?;
         Ok(cwd.join(path).normalize())
     }
 }
@@ -54,22 +54,22 @@ pub fn resolve_target(
         .or(dirs::home_dir())
         .ok_or_else(|| {
             miette!(
-                help = "Provide --target flag, set target-directory in config, or set $HOME",
-                "Cannot determine target directory"
+                help = "provide --target flag, set target-directory in config, or set $HOME",
+                "cannot determine target directory"
             )
         })?
         .normalize();
 
     if !target_dir.is_absolute() {
         return Err(miette!(
-            "Target directory must be an absolute path: `{}`",
+            "target directory must be an absolute path: `{}`",
             target_dir.display()
         ));
     }
 
     if target_dir.starts_with(source_dir) {
         return Err(miette!(
-            "Target directory `{}` cannot be inside source directory `{}`",
+            "target directory `{}` cannot be inside source directory `{}`",
             target_dir.display(),
             source_dir.display()
         ));
@@ -201,7 +201,7 @@ where
                     continue;
                 }
                 return Err(miette!(
-                    "Source path does not exist: `{}`",
+                    "source path does not exist: `{}`",
                     source_path.display()
                 ));
             }
@@ -260,7 +260,7 @@ pub fn read_mtime(path: &Path) -> Option<i64> {
 pub fn hash_file(path: &Path) -> Result<u64> {
     let file = File::open(path)
         .map_err(|e| miette!(e))
-        .wrap_err_with(|| format!("Failed to open `{}`", path.display()))?;
+        .wrap_err_with(|| format!("failed to open `{}`", path.display()))?;
     let mut reader = BufReader::with_capacity(BUFFER_SIZE, file);
     let mut hasher = XxHash64::with_seed(SEED);
     let mut buffer = [0u8; BUFFER_SIZE];
@@ -269,7 +269,7 @@ pub fn hash_file(path: &Path) -> Result<u64> {
         let bytes_read = reader
             .read(&mut buffer)
             .map_err(|e| miette!(e))
-            .wrap_err_with(|| format!("Failed to read from `{}`", path.display()))?;
+            .wrap_err_with(|| format!("failed to read from `{}`", path.display()))?;
         if bytes_read == 0 {
             break;
         }

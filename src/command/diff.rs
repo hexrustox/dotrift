@@ -19,13 +19,13 @@ pub fn run(path: PathBuf, db_path: &Path) -> Result<()> {
 
     if !entry.source_path.path_exists() {
         return Err(miette!(
-            "Source file `{}` not found",
+            "source file `{}` not found",
             entry.source_path.display()
         ));
     }
 
     if !path.path_exists() {
-        return Err(miette!("Target file `{}` not found", path.display()));
+        return Err(miette!("target file `{}` not found", path.display()));
     }
 
     pager::run(PagerArgs::Diff {

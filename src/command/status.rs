@@ -51,7 +51,7 @@ pub fn clear(file: Option<PathBuf>, db_path: &Path) -> Result<()> {
     } else {
         let count = db.get_all_entries()?.len();
         db.delete_table()?;
-        output::print_ok(format_args!("Cleared {} entries", count));
+        output::print_ok(format_args!("cleared {} entries", count));
     }
 
     Ok(())

@@ -25,7 +25,7 @@ pub fn expand_arg(arg: &str, params: &[(&str, &str)]) -> Result<String> {
                         Some(c) => name.push(c),
                         None => {
                             return Err(miette!(
-                                "Unclosed parameter in editor command argument: `{arg}`"
+                                "unclosed parameter in editor command argument: `{arg}`"
                             ));
                         }
                     }
@@ -35,14 +35,14 @@ pub fn expand_arg(arg: &str, params: &[(&str, &str)]) -> Result<String> {
                     None => {
                         return Err(miette!(
                             help = format!(
-                                "Valid parameters are: {}",
+                                "valid parameters are: {}",
                                 params
                                     .iter()
                                     .map(|(k, _)| format!("{{{k}}}"))
                                     .collect::<Vec<_>>()
                                     .join(", ")
                             ),
-                            "Unknown parameter `{name}` in editor command argument",
+                            "unknown parameter `{name}` in editor command argument",
                         ));
                     }
                 }
@@ -138,8 +138,8 @@ mod tests {
     #[test_case("-f", &[] => "-f"; "no_params")]
     #[test_case("{{file}}", &[] => "{file}"; "literal_braces")]
     #[test_case("}}", &[] => "}"; "literal_double_close")]
-    #[test_case("{foo}", &[("file", "/f")] => panics "Unknown parameter `foo`"; "unknown_param")]
-    #[test_case("{file", &[("file", "/f")] => panics "Unclosed parameter"; "unclosed_brace")]
+    #[test_case("{foo}", &[("file", "/f")] => panics "unknown parameter `foo`"; "unknown_param")]
+    #[test_case("{file", &[("file", "/f")] => panics "unclosed parameter"; "unclosed_brace")]
     fn test_expand_arg(arg: &str, params: &[(&str, &str)]) -> String {
         expand_arg(arg, params).unwrap()
     }

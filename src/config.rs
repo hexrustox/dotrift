@@ -82,10 +82,10 @@ impl TryFrom<String> for FileMode {
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
         let value =
-            u16::from_str_radix(&s, 8).map_err(|_| format!("Invalid octal mode: `{}`", s))?;
+            u16::from_str_radix(&s, 8).map_err(|_| format!("invalid octal mode: `{}`", s))?;
 
         if value > 0o777 {
-            return Err(format!("Mode `{}` exceeds 777", s));
+            return Err(format!("mode `{}` exceeds 777", s));
         }
 
         Ok(FileMode(value))

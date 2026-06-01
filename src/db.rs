@@ -42,7 +42,7 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
         rusqlite::Error::FromSqlConversionFailure(
             1,
             rusqlite::types::Type::Text,
-            miette!("Invalid deploy type `{deploy_str}` for `{target_str}`").into(),
+            miette!("invalid deploy type `{deploy_str}` for `{target_str}`").into(),
         )
     })?;
 
@@ -69,7 +69,7 @@ impl Db {
 
         let conn = Connection::open(path)
             .map_err(|e| miette!(e))
-            .wrap_err_with(|| format!("Failed to open connection at `{}`", path.display()))?;
+            .wrap_err_with(|| format!("failed to open connection at `{}`", path.display()))?;
 
         conn.execute(
             &format!(
@@ -86,7 +86,7 @@ impl Db {
             [],
         )
         .map_err(|e| miette!(e))
-        .wrap_err("Failed to initialize database")?;
+        .wrap_err("failed to initialize database")?;
 
         conn.execute(
             &format!(
@@ -99,7 +99,7 @@ impl Db {
             [],
         )
         .map_err(|e| miette!(e))
-        .wrap_err("Failed to initialize profile table")?;
+        .wrap_err("failed to initialize profile table")?;
 
         Ok(Self { conn })
     }
@@ -124,7 +124,7 @@ impl Db {
                 ],
             )
             .map_err(|e| miette!(e))
-            .wrap_err_with(|| format!("Failed to insert/update entry for `{}`", entry.target_path.display()))?;
+            .wrap_err_with(|| format!("failed to insert/update entry for `{}`", entry.target_path.display()))?;
 
         Ok(())
     }
@@ -136,7 +136,7 @@ impl Db {
                 params![target.to_string_lossy()],
             )
             .map_err(|e| miette!(e))
-            .wrap_err_with(|| format!("Failed to delete entry for `{}`", target.display()))?;
+            .wrap_err_with(|| format!("failed to delete entry for `{}`", target.display()))?;
         Ok(())
     }
 
@@ -154,7 +154,7 @@ impl Db {
             .map_err(|e| miette!(e))
             .wrap_err_with(|| {
                 format!(
-                    "Failed to delete entries with prefix `{}`",
+                    "failed to delete entries with prefix `{}`",
                     target.display()
                 )
             })?;
@@ -165,7 +165,7 @@ impl Db {
         self.conn
             .execute(&format!("DROP TABLE IF EXISTS {}", TABLE_NAME), [])
             .map_err(|e| miette!(e))
-            .wrap_err("Failed to clear database")?;
+            .wrap_err("failed to clear database")?;
         Ok(())
     }
 
@@ -177,12 +177,12 @@ impl Db {
                 TABLE_NAME
             ))
             .map_err(|e| miette!(e))
-            .wrap_err_with(|| format!("Failed to look up `{}`", target.display()))?;
+            .wrap_err_with(|| format!("failed to look up `{}`", target.display()))?;
 
         stmt.query_row(params![target.to_string_lossy()], row_to_entry)
             .optional()
             .map_err(|e| miette!(e))
-            .wrap_err_with(|| format!("Failed to query entry for `{}`", target.display()))
+            .wrap_err_with(|| format!("failed to query entry for `{}`", target.display()))
     }
 
     pub fn get_all_entries(&self) -> Result<Vec<DbEntry>> {
@@ -193,18 +193,18 @@ impl Db {
                 TABLE_NAME
             ))
             .map_err(|e| miette!(e))
-            .wrap_err("Failed to list database entries")?;
+            .wrap_err("failed to list database entries")?;
 
         let rows = stmt
             .query_map([], row_to_entry)
             .map_err(|e| miette!(e))
-            .wrap_err("Failed to query entries from database")?;
+            .wrap_err("failed to query entries from database")?;
         let mut result = Vec::new();
         for entry in rows {
             result.push(
                 entry
                     .map_err(|e| miette!(e))
-                    .wrap_err("Failed to read database entry")?,
+                    .wrap_err("failed to read database entry")?,
             );
         }
         Ok(result)
@@ -214,7 +214,7 @@ impl Db {
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|e| miette!(e))
-            .wrap_err("System clock is before epoch")?
+            .wrap_err("system clock is before epoch")?
             .as_millis() as i64;
 
         self.conn
@@ -226,7 +226,7 @@ impl Db {
                 params![name, now_ms],
             )
             .map_err(|e| miette!(e))
-            .wrap_err_with(|| format!("Failed to activate profile `{name}`"))?;
+            .wrap_err_with(|| format!("failed to activate profile `{name}`"))?;
         Ok(())
     }
 
@@ -237,7 +237,7 @@ impl Db {
                 params![name],
             )
             .map_err(|e| miette!(e))
-            .wrap_err_with(|| format!("Failed to deactivate profile `{name}`"))?;
+            .wrap_err_with(|| format!("failed to deactivate profile `{name}`"))?;
         Ok(())
     }
 
@@ -249,7 +249,7 @@ impl Db {
                 PROFILES_TABLE
             ))
             .map_err(|e| miette!(e))
-            .wrap_err("Failed to query active profiles")?;
+            .wrap_err("failed to query active profiles")?;
 
         let rows = stmt
             .query_map([], |row| {
@@ -259,14 +259,14 @@ impl Db {
                 })
             })
             .map_err(|e| miette!(e))
-            .wrap_err("Failed to query active profiles")?;
+            .wrap_err("failed to query active profiles")?;
 
         let mut result = Vec::new();
         for profile in rows {
             result.push(
                 profile
                     .map_err(|e| miette!(e))
-                    .wrap_err("Failed to read active profile")?,
+                    .wrap_err("failed to read active profile")?,
             );
         }
         Ok(result)

@@ -22,7 +22,7 @@ impl Node {
     fn path_components(path: &Path) -> Result<Vec<String>> {
         let mut comps: Vec<_> = path.components().collect();
         if comps.is_empty() {
-            return Err(miette!("Cannot insert empty target path"));
+            return Err(miette!("cannot insert empty target path"));
         }
         if let Some(Component::RootDir) = comps.first() {
             comps = comps[1..].to_vec();
@@ -49,13 +49,13 @@ impl Node {
                             match existing {
                                 Node::Dir(_) => {
                                     return Err(miette!(
-                                        "Directory exists when creating file at `{}`",
+                                        "directory exists when creating file at `{}`",
                                         path.display()
                                     ));
                                 }
                                 Node::File(_) => {
                                     return Err(miette!(
-                                        "File already exists at `{}`",
+                                        "file already exists at `{}`",
                                         path.display()
                                     ));
                                 }
@@ -72,7 +72,7 @@ impl Node {
                 }
                 Node::File { .. } => {
                     return Err(miette!(
-                        "File exists when creating directory at `{}`",
+                        "file exists when creating directory at `{}`",
                         path.display()
                     ));
                 }
@@ -190,8 +190,8 @@ mod tests {
         assert_eq!(node_count(&tree), total + 1);
     }
 
-    #[test_case("/dir", "/dir/file" => panics "File exist"; "file")]
-    #[test_case("/dir/file", "/dir" => panics "Directory exist"; "directory")]
+    #[test_case("/dir", "/dir/file" => panics "file exists"; "file")]
+    #[test_case("/dir/file", "/dir" => panics "directory exists"; "directory")]
     fn test_conflict(e1: &str, e2: &str) {
         let mut t = Node::default();
         t.insert_entry(e1.into(), Default::default()).unwrap();

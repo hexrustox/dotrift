@@ -11,7 +11,7 @@ pub fn list(global: &GlobalFlags, db_path: &Path) -> Result<()> {
 
     if data.profile.is_empty() {
         bail!(
-            "No profiles defined in `{}`",
+            "no profiles defined in `{}`",
             data_path(&source_dir).display()
         );
     }
@@ -40,21 +40,21 @@ pub fn activate(global: &GlobalFlags, db_path: &Path, name: &str) -> Result<()> 
 
     if !data.profile.contains_key(name) {
         bail!(
-            "Profile `{name}` is not defined in `{}`",
+            "profile `{name}` is not defined in `{}`",
             data_path(&source_dir).display()
         );
     }
 
     let db = Db::init(db_path)?;
     db.activate_profile(name)?;
-    eprintln!("Profile `{name}` activated");
+    eprintln!("profile `{name}` activated");
     Ok(())
 }
 
 pub fn deactivate(db_path: &Path, name: &str) -> Result<()> {
     let db = Db::init(db_path)?;
     db.deactivate_profile(name)?;
-    eprintln!("Profile `{name}` deactivated");
+    eprintln!("profile `{name}` deactivated");
     Ok(())
 }
 

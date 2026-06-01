@@ -13,8 +13,6 @@ use miette::{Context, Report, Result, miette};
 
 use crate::{
     cli::{ApplyFlags, GlobalFlags},
-    create_file_err, mmap_template_err, open_template_err, parse_template_err,
-    render_template_err, write_file_err,
     command::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
@@ -24,10 +22,12 @@ use crate::{
         },
     },
     config::{Config, DeployType, FileMode, Rules},
+    create_file_err,
     db::{Db, DbEntry},
     global_config::GlobalConfig,
-    output,
+    mmap_template_err, open_template_err, output, parse_template_err, render_template_err,
     templater::{data, function::BuiltinFunctions},
+    write_file_err,
 };
 
 #[derive(Default, Debug, PartialEq)]
@@ -92,7 +92,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
         0
     };
 
-    let tree = build_tree(portal_entries).wrap_err("Check portal entries for conflicting target paths. A file and a directory cannot share the same target path.")?;
+    let tree = build_tree(portal_entries).wrap_err("check portal entries for conflicting target paths, a file and a directory cannot share the same target path")?;
 
     if flags.dry_run {
         let create_count = print_tree(Path::new("/"), &tree)?;
@@ -137,16 +137,16 @@ pub fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore>
     #[allow(unused_variables)]
     let result = builder.add_line(None, "dotrift.toml");
     #[cfg(test)]
-    result.unwrap_or_else(|_| panic!("Failed to add dotrift.toml ignore"));
+    result.unwrap_or_else(|_| panic!("failed to add dotrift.toml ignore"));
 
     for pattern in patterns {
         builder
             .add_line(None, pattern)
             .map_err(|e| miette!(e))
-            .wrap_err_with(|| format!("Invalid ignore pattern: `{pattern}`"))
+            .wrap_err_with(|| format!("invalid ignore pattern: `{pattern}`"))
             .map_err(|e| {
                 miette!(
-                    help = "Use gitignore-style patterns. See gitignore documentation for syntax.",
+                    help = "use gitignore-style patterns, see gitignore documentation for syntax",
                     "{e}"
                 )
             })?;
@@ -154,7 +154,7 @@ pub fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore>
     builder
         .build()
         .map_err(|e| miette!(e))
-        .wrap_err("Failed to compile ignore patterns")
+        .wrap_err("failed to compile ignore patterns")
 }
 
 fn resolve_portals(
@@ -193,7 +193,7 @@ fn insert_portal_entry(
         },
     ) {
         return Err(miette!(
-            "Target path collision at `{}`.\n  Source 1: `{}`\n  Source 2: `{}`",
+            "target path collision at `{}`: source 1: `{}`, source 2: `{}`",
             target_path.display(),
             existing.source.display(),
             source_path.display()
@@ -296,7 +296,7 @@ fn traverse_tree(
 }
 
 fn abort_deploy(at: &Path) -> Report {
-    miette!("Aborted at `{}`", at.display())
+    miette!("aborted at `{}`", at.display())
 }
 
 fn deploy_dir(path: &Path, db: &Db, verbose: bool) -> Result<bool> {
@@ -460,7 +460,7 @@ fn deploy_file(
                 fs::set_permissions(target, fs::Permissions::from_mode(mode.0 as u32))
                     .map_err(|e| miette!(e))
                     .wrap_err_with(|| {
-                        format!("Failed to set permissions on `{}`", target.display())
+                        format!("failed to set permissions on `{}`", target.display())
                     })?;
             }
         }
@@ -1018,7 +1018,7 @@ mod tests {
             assert!(t.join("file1").exists());
             assert!(!t.join("file2").exists());
         },
-        DeployType::Symlink => panics "Abort"; "quit_symlink"
+        DeployType::Symlink => panics "abort"; "quit_symlink"
     )]
     #[test_case(
         |s, t| {
@@ -1031,7 +1031,7 @@ mod tests {
             assert!(t.join("file1").exists());
             assert!(!t.join("file2").exists());
         },
-        DeployType::Copy => panics "Abort"; "quit_copy"
+        DeployType::Copy => panics "abort"; "quit_copy"
     )]
     #[test_case(
         |s, t| {
