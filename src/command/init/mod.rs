@@ -2,7 +2,7 @@ use std::fs;
 
 use miette::{Context, Result, miette};
 
-use crate::{cli::GlobalFlags, command::util::PathLiteral, output, path::config_path};
+use crate::{cli::GlobalFlags, command::util::PathExt, output, path::config_path};
 
 pub fn run(global_flags: GlobalFlags) -> Result<()> {
     let source_dir = global_flags.source()?;

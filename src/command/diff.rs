@@ -4,7 +4,7 @@ use miette::{Result, miette};
 use tui::pager::{self, PagerArgs};
 
 use crate::{
-    command::util::{PathLiteral, to_absolute_path},
+    command::util::{PathExt, to_absolute_path},
     db::Db,
 };
 

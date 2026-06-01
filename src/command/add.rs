@@ -16,7 +16,7 @@ use crate::{
         apply::build_ignore,
         to_absolute_path, tree,
         util::{
-            GLOB_OPTION, PathLiteral, SafeStripPrefix, copy_recursive, is_glob,
+            GLOB_OPTION, PathExt, StripPrefixOrSelf, copy_recursive, is_glob,
             resolve_portal_entries, resolve_target, walk_files,
         },
     },
@@ -30,7 +30,6 @@ use crate::{
     templater::{data::TemplateData, function::BuiltinFunctions},
     write_file_err,
 };
-
 
 pub fn run(
     global_flags: GlobalFlags,

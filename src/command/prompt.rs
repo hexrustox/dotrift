@@ -6,7 +6,7 @@ use tui::{
     prompt::{HotKey, SelectPrompt},
 };
 
-use crate::{command::util::PathLiteral, output::print_warn};
+use crate::{command::util::PathExt, output::print_warn};
 
 #[derive(Default, Clone, Copy, PartialEq, EnumIter)]
 pub enum CollisionOptions {

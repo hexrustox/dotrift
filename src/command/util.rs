@@ -78,11 +78,11 @@ pub fn resolve_target(
     Ok(target_dir.to_path_buf())
 }
 
-pub trait SafeStripPrefix<P> {
+pub trait StripPrefixOrSelf<P> {
     fn safe_strip_prefix(&self, base: P) -> &Path;
 }
 
-impl<P: AsRef<Path> + Debug> SafeStripPrefix<P> for Path {
+impl<P: AsRef<Path> + Debug> StripPrefixOrSelf<P> for Path {
     fn safe_strip_prefix(&self, base: P) -> &Path {
         match self.strip_prefix(&base) {
             Ok(p) => p,
@@ -114,14 +114,14 @@ pub fn strip_prefix_filter_glob(glob_pattern: &str) -> String {
     prefix
 }
 
-pub trait PathLiteral {
+pub trait PathExt {
     fn path_exists(&self) -> bool;
     fn path_is_file(&self) -> bool;
     fn path_is_dir(&self) -> bool;
     fn path_is_symlink(&self) -> bool;
 }
 
-impl PathLiteral for Path {
+impl PathExt for Path {
     fn path_exists(&self) -> bool {
         fs::symlink_metadata(self).is_ok()
     }

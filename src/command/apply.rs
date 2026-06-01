@@ -17,7 +17,7 @@ use crate::{
         prompt::{CollisionOptions, prompt_collision},
         tree::{Node, build_tree},
         util::{
-            GLOB_OPTION, PathLiteral, SafeStripPrefix, clean_up, clone_file, hash_file, is_managed,
+            GLOB_OPTION, PathExt, StripPrefixOrSelf, clean_up, clone_file, hash_file, is_managed,
             read_mtime, resolve_portal_entries, resolve_target,
         },
     },
@@ -235,7 +235,7 @@ fn print_tree(path: &Path, node: &Node) -> Result<usize> {
             count += 1;
             output::print_dry_create_file(path, &entry.source, entry.deploy_type);
         }
-        Node::Marked(_) => {
+        Node::Claim(_) => {
             #[cfg(test)]
             unreachable!()
         }
@@ -278,7 +278,7 @@ fn traverse_tree(
                 template_ctx,
             )?;
         }
-        Node::Marked(_) => {
+        Node::Claim(_) => {
             #[cfg(test)]
             unreachable!()
         }

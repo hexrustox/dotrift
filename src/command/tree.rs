@@ -8,7 +8,7 @@ use crate::command::apply::PortalEntry;
 #[derive(Debug)]
 pub enum Node {
     File(PortalEntry),
-    Marked(String),
+    Claim(String),
     Dir(BTreeMap<String, Node>),
 }
 
@@ -59,7 +59,7 @@ impl Node {
                                         path.display()
                                     ));
                                 }
-                                Node::Marked(key) => {
+                                Node::Claim(key) => {
                                     return Ok(Some(key.clone()));
                                 }
                             }
@@ -76,7 +76,7 @@ impl Node {
                         path.display()
                     ));
                 }
-                Node::Marked(key) => {
+                Node::Claim(key) => {
                     return Ok(Some(key.clone()));
                 }
             }
@@ -91,12 +91,12 @@ impl Node {
     }
 
     pub fn check_entry(&mut self, path: &Path, key: String) -> Result<Option<String>> {
-        self.traverse_and_insert(path, Node::Marked(key))
+        self.traverse_and_insert(path, Node::Claim(key))
     }
 
     fn all_keys(&self) -> Vec<String> {
         match self {
-            Node::Marked(k) => vec![k.clone()],
+            Node::Claim(k) => vec![k.clone()],
             Node::Dir(children) => {
                 let mut keys = Vec::new();
                 for child in children.values() {
@@ -153,7 +153,7 @@ mod tests {
     fn node_count(node: &Node) -> usize {
         match node {
             Node::File(_) => 1,
-            Node::Marked(_) => 1,
+            Node::Claim(_) => 1,
             Node::Dir(children) => 1 + children.values().map(node_count).sum::<usize>(),
         }
     }
@@ -165,12 +165,12 @@ mod tests {
                 Node::Dir(children) => {
                     current = children.get(*segment)?;
                 }
-                Node::File(_) | Node::Marked(_) => return None,
+                Node::File(_) | Node::Claim(_) => return None,
             }
         }
         match current {
             Node::File(entry) => Some(entry),
-            Node::Marked(_) | Node::Dir(_) => None,
+            Node::Claim(_) | Node::Dir(_) => None,
         }
     }
 
