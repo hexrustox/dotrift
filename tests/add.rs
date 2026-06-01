@@ -2,8 +2,8 @@ use dotrift::cli::{AddFlags, ApplyFlags, GlobalFlags, OpenEditor};
 use dotrift::command::{add, apply};
 use dotrift::config::DeployType;
 use dotrift::db::{Db, DbEntry};
-use std::fs;
 use std::path::PathBuf;
+use std::{env, fs};
 
 use crate::common::setup_test;
 
@@ -261,12 +261,45 @@ fn test_add_then_apply() {
 }
 
 #[test]
+fn test_editor_not_found() {
+    let (temp_dir, source_dir, _, _) = setup_test("");
+
+    let path = temp_dir.path().join("file");
+    fs::write(&path, "").unwrap();
+
+    unsafe {
+        env::remove_var("VISUAL");
+        env::remove_var("EDITOR");
+    }
+
+    assert!(
+        add::run(
+            flags(source_dir.clone()),
+            path,
+            Some(PathBuf::from("file")),
+            AddFlags {
+                copy: false,
+                force: false,
+                editor: None,
+                no_modify: false,
+            },
+            &temp_dir.path().join("db"),
+        )
+        .is_err()
+    );
+}
+
+#[test]
 #[ignore]
 fn test_editor_open() {
     let (temp_dir, source_dir, _, _) = setup_test("# test editor open");
 
     let path = temp_dir.path().join("file");
     fs::write(&path, "").unwrap();
+
+    unsafe {
+        env::set_var("VISUAL", "nano");
+    }
 
     add::run(
         flags(source_dir.clone()),
@@ -333,6 +366,10 @@ fn test_editor_missing() {
     let path = target_dir.join("file");
     fs::write(&path, "").unwrap();
 
+    unsafe {
+        env::set_var("VISUAL", "nano");
+    }
+
     add::run(
         GlobalFlags::new(Some(source_dir.clone()), Some(target_dir), None),
         path,
@@ -361,6 +398,10 @@ fn test_editor_collision() {
     let path = target_dir.join("file");
     fs::write(&path, "").unwrap();
     fs::write(source_dir.join("other"), "").unwrap();
+
+    unsafe {
+        env::set_var("VISUAL", "nano");
+    }
 
     add::run(
         GlobalFlags::new(Some(source_dir.clone()), Some(target_dir), None),

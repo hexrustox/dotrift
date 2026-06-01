@@ -541,7 +541,14 @@ fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<(
             (config.command, args)
         }
         _ => match env::var_os("VISUAL").or(env::var_os("EDITOR")) {
-            Some(cmd) => (cmd.to_string_lossy().into_owned(), vec![file]),
+            Some(cmd_os) => {
+                let cmd_str = cmd_os.to_string_lossy();
+                let mut parts = cmd_str.split_whitespace();
+                let cmd = parts.next().unwrap_or("").to_string();
+                let mut args: Vec<String> = parts.map(String::from).collect();
+                args.push(file);
+                (cmd, args)
+            }
             None => {
                 let config_path = crate::path::global_config_path()
                     .map(|p| p.to_string_lossy().into_owned())
