@@ -353,20 +353,21 @@ pub fn clone_file(from: &Path, to: &Path) -> Result<()> {
 }
 
 pub fn clean_up(
-    portal_entries: Option<&HashMap<PathBuf, PortalEntry>>,
+    portal_entries: &HashMap<PathBuf, PortalEntry>,
     db: &Db,
     dry_run: bool,
     prune_empty_dirs: bool,
     verbose: bool,
+    invert: bool,
 ) -> Result<usize> {
     let db_entries = db.get_all_entries()?;
 
     let mut count = 0;
     for entry in db_entries {
         let path = &entry.target_path;
-        if portal_entries.is_some_and(|m| m.contains_key(path)) {
-            continue;
-        }
+        let in_portal = portal_entries.contains_key(path);
+        if invert { if !in_portal { continue; } }
+        else      { if in_portal  { continue; } }
 
         if path.path_exists() {
             let managed = is_managed_entry(&entry, path, None);
@@ -1132,11 +1133,14 @@ pub mod tests {
         } else {
             None
         };
+        let empty_portal = HashMap::new();
+        let portal_ref = portal_entries.as_ref().unwrap_or(&empty_portal);
         clean_up(
-            portal_entries.as_ref(),
+            portal_ref,
             &db,
             dry_run,
             prune_empty_dirs,
+            false,
             false,
         )
         .unwrap();

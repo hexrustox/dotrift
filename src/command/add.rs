@@ -26,8 +26,11 @@ use crate::{
     global_config::{GlobalConfig, expand_args, find_portal_cursor, portal_insertion_point},
     output,
     path::{PKG_NAME, config_path, tmp_path},
-    read_file_err, write_file_err,
+    read_file_err,
+    templater::{data::TemplateData, function::BuiltinFunctions},
+    write_file_err,
 };
+use templater::Value;
 
 pub fn run(
     global_flags: GlobalFlags,
@@ -139,7 +142,17 @@ pub fn run(
         }
     }
 
-    let config = Config::read(&source_dir)?;
+    let db = Db::init(db_path)?;
+    let mut data = TemplateData::read(&source_dir)?;
+    let active_profiles = db.get_active_profiles()?;
+    let mut variables: HashMap<String, Value> = data.variable;
+    for profile in active_profiles {
+        if let Some(vars) = data.profile.remove(&profile.name) {
+            variables.extend(vars);
+        }
+    }
+    let functions = BuiltinFunctions::new();
+    let (config, _) = Config::read_templated(&source_dir, variables, &functions)?;
     let target_override = global_flags.target()?;
     let target_dir = resolve_target(&source_dir, target_override, &config)?;
 

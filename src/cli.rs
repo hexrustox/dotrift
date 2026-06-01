@@ -154,7 +154,7 @@ pub enum ProfileSubcommand {
         /// Name of the profile to activate.
         name: String,
     },
-    /// Deactivate a profile. No error if not active.
+    /// Deactivate a profile.
     Deactivate {
         /// Name of the profile to deactivate.
         name: String,

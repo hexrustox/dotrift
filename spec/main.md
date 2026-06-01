@@ -10,7 +10,9 @@ This document defines the CLI structure, global behaviors, database schema, conf
 
 ### Global Options
 * `-s, --source <DIR>`: Path to the source directory containing `dotrift.toml` and dotfiles. Default: `~/.local/share/dotrift`.
-* `-t, --target <DIR>`: Override the target directory. 
+* `-t, --target <DIR>`: Override the target directory.
+* `-c, --config <FILE>`: Override the global config file path. Default: `$XDG_CONFIG_HOME/dotrift/config.toml`.
+* `-v, --verbose`: Enable verbose logging.
 
 **Target Directory Precedence:**
 1. `-t` CLI argument (if provided)
@@ -35,7 +37,7 @@ When an obstruction is encountered during filesystem operations, the user is pro
 
 ### Global Configuration
 
-Loaded from `$XDG_CONFIG_HOME/dotrift/config.toml` (fallback: `$XDG_DATA_HOME/dotrift/config.toml`). This file is optional; missing files are treated as empty (all defaults apply). Invalid or malformed TOML is an error. Partial configs merge with defaults.
+Loaded from `$XDG_CONFIG_HOME/dotrift/config.toml`. This file is optional; missing files are treated as empty (all defaults apply). Invalid or malformed TOML is an error. Partial configs merge with defaults.
 
 ```toml
 overwrite-identical = false
@@ -510,6 +512,20 @@ Shows a side-by-side diff between a managed target file and its corresponding so
 
 ---
 
+## `init` Command
+
+Initializes the source directory with a default `dotrift.toml`.
+
+**Usage:** `dotrift init`
+
+### Execution Pipeline
+
+1. **Resolve Source Directory:** Use the source directory determined by global options.
+2. **Check Existing Config:** Error if `dotrift.toml` already exists in the source directory.
+3. **Create Config:** Write a default `dotrift.toml` to the source directory, creating parent directories as needed.
+
+---
+
 ## `profile` Command
 
 Manages template profiles.
@@ -519,7 +535,7 @@ Manages template profiles.
 **Subcommands:**
 - `list`: Show all profiles from `dotrift_data.toml`, mark active ones.
 - `activate <name>`: Activate a profile. Re-activating an already-active profile updates its timestamp to now (moves it to last in precedence).
-- `deactivate <name>`: Deactivate a profile. No error if not active.
+- `deactivate <name>`: Deactivate a profile. Error if not active.
 - `show`: Print the resolved variable context as a two-column key-value table.
 
 ### Execution Pipeline

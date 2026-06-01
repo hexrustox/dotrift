@@ -237,6 +237,52 @@ fn test_unapply_no_prune_keeps_dirs() {
 }
 
 #[test]
+fn test_unapply_only_portal_matched() {
+    let config_initial = r#"
+[portal]
+"a.txt" = "a.txt"
+"b.txt" = "b.txt"
+"#;
+    let config_changed = r#"
+[portal]
+"a.txt" = "a.txt"
+"#;
+    let (_temp_dir, source_dir, target_dir, db_path) = setup_test(config_initial);
+    apply::run(
+        flags(&source_dir, &target_dir),
+        &db_path,
+        ApplyFlags {
+            dry_run: false,
+            clean_up: false,
+            prune_empty_dirs: false,
+        },
+    )
+    .unwrap();
+
+    assert!(target_dir.join("a.txt").exists());
+    assert!(target_dir.join("b.txt").exists());
+
+    fs::write(source_dir.join("dotrift.toml"), config_changed).unwrap();
+
+    unapply::run(
+        flags(&source_dir, &target_dir),
+        &db_path,
+        UnapplyFlags {
+            dry_run: false,
+            prune_empty_dirs: false,
+        },
+    )
+    .unwrap();
+
+    assert!(!target_dir.join("a.txt").exists());
+    assert!(target_dir.join("b.txt").exists());
+
+    let db = dotrift::db::Db::init(&db_path).unwrap();
+    assert!(db.get_entry(&target_dir.join("a.txt")).unwrap().is_none());
+    assert!(db.get_entry(&target_dir.join("b.txt")).unwrap().is_some());
+}
+
+#[test]
 #[ignore]
 fn test_unapply_dry_run() {
     let config = r#"

@@ -231,13 +231,17 @@ impl Db {
     }
 
     pub fn deactivate_profile(&self, name: &str) -> Result<()> {
-        self.conn
+        let rows = self
+            .conn
             .execute(
                 &format!("DELETE FROM {} WHERE name = ?1", PROFILES_TABLE),
                 params![name],
             )
             .map_err(|e| miette!(e))
             .wrap_err_with(|| format!("failed to deactivate profile `{name}`"))?;
+        if rows == 0 {
+            miette::bail!("profile `{name}` is not active");
+        }
         Ok(())
     }
 
@@ -416,7 +420,7 @@ mod tests {
     #[test_case(
         |_: &Db| {},
         |db: &Db| {
-            db.deactivate_profile("nope").unwrap();
+            assert!(db.deactivate_profile("nope").is_err());
             assert!(db.get_active_profiles().unwrap().is_empty());
         };
         "deactivate_nonexistent"

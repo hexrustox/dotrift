@@ -67,7 +67,11 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
     let config_override = global_flags.config()?;
     let verbose = global_flags.verbose;
 
-    let config = Config::read(&source_dir)?;
+    let db = Db::init(db_path)?;
+    let mut template_ctx = TemplateContext::build(&source_dir, &db)?;
+    let (config, variables) =
+        Config::read_templated(&source_dir, template_ctx.variables, &template_ctx.functions)?;
+    template_ctx.variables = variables;
 
     let target_dir = resolve_target(&source_dir, target_override, &config)?;
 
@@ -78,15 +82,14 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
 
     apply_rules(&target_dir, &mut portal_entries, &config.rule)?;
 
-    let db = Db::init(db_path)?;
-
     let remove_count = if flags.clean_up {
         clean_up(
-            Some(&portal_entries),
+            &portal_entries,
             &db,
             flags.dry_run,
             flags.prune_empty_dirs,
             verbose,
+            false,
         )?
     } else {
         0
@@ -118,7 +121,6 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
     }
 
     let overwrite_identical = GlobalConfig::read(config_override)?.overwrite_identical;
-    let template_ctx = TemplateContext::build(&source_dir, &db)?;
     traverse_tree(
         Path::new("/"),
         &tree,
@@ -134,10 +136,8 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
 pub fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore> {
     let mut builder = GitignoreBuilder::new(target_dir);
 
-    #[allow(unused_variables)]
-    let result = builder.add_line(None, "dotrift.toml");
-    #[cfg(test)]
-    result.unwrap_or_else(|_| panic!("failed to add dotrift.toml ignore"));
+    let _ = builder.add_line(None, "dotrift.toml");
+    let _ = builder.add_line(None, "dotrift_data.toml");
 
     for pattern in patterns {
         builder
@@ -157,7 +157,7 @@ pub fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore>
         .wrap_err("failed to compile ignore patterns")
 }
 
-fn resolve_portals(
+pub fn resolve_portals(
     source_dir: &Path,
     target_dir: &Path,
     portals: &HashMap<String, PathBuf>,

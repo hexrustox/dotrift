@@ -11,6 +11,8 @@ use miette::{Context, Result, miette};
 use serde::Deserialize;
 
 use crate::path::config_path;
+use crate::templater::function::BuiltinFunctions;
+use templater::{Template, Value};
 
 #[derive(Deserialize, Default)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
@@ -27,6 +29,28 @@ impl Config {
         let path = config_path(source_dir);
         let s = crate::read_file_err!(fs::read_to_string(&path), &path)?;
         crate::parse_err!(toml::from_str(&s), &path)
+    }
+
+    pub fn read_templated(
+        source_dir: &Path,
+        mut variables: HashMap<String, Value>,
+        functions: &BuiltinFunctions,
+    ) -> Result<(Self, HashMap<String, Value>)> {
+        let path = config_path(source_dir);
+        let s = crate::read_file_err!(fs::read_to_string(&path), &path)?;
+
+        let tmpl = crate::parse_template_err!(Template::from_bytes(s.into_bytes()), &path)?;
+        let mut rendered = Vec::new();
+        variables = crate::render_template_err!(
+            tmpl.render(&mut rendered, variables.clone(), functions),
+            &path
+        )?;
+        let rendered_str = String::from_utf8_lossy(&rendered);
+
+        Ok((
+            crate::parse_err!(toml::from_str(&rendered_str), &path)?,
+            variables,
+        ))
     }
 }
 
