@@ -30,6 +30,36 @@ struct DiffPair {
     tag: DiffTag,
 }
 
+impl DiffPair {
+    fn pair_lines(
+        &self,
+        old_fi: &mut FileIndex,
+        new_fi: &mut FileIndex,
+        buf: &mut Vec<u8>,
+    ) -> (Line<'static>, Line<'static>) {
+        let old_content = old_fi.read_content(self.old_idx, buf);
+        let new_content = new_fi.read_content(self.new_idx, buf);
+
+        let old_line = match (self.tag, self.old_idx) {
+            (DiffTag::Delete | DiffTag::Change, Some(_)) => {
+                styled_cell('-', old_content, Color::Red)
+            }
+            (DiffTag::Equal, Some(_)) => Line::from(format!(" {}", &old_content)),
+            _ => Line::from(""),
+        };
+
+        let new_line = match (self.tag, self.new_idx) {
+            (DiffTag::Insert | DiffTag::Change, Some(_)) => {
+                styled_cell('+', new_content, Color::Green)
+            }
+            (DiffTag::Equal, Some(_)) => Line::from(format!(" {}", &new_content)),
+            _ => Line::from(""),
+        };
+
+        (old_line, new_line)
+    }
+}
+
 struct FileIndex {
     file: BufReader<File>,
     offsets: Vec<u64>,
@@ -54,15 +84,27 @@ impl FileIndex {
         if idx >= self.lines_count() {
             return Ok(());
         }
-        if self.read_seq != Some(idx.saturating_sub(1)) {
+        if self.read_seq != Some(idx) {
             self.file.seek(SeekFrom::Start(self.offsets[idx]))?;
         }
         self.file.read_until(b'\n', buf)?;
-        self.read_seq = Some(idx);
+        self.read_seq = Some(idx + 1);
         if buf.ends_with(b"\n") {
             buf.pop();
         }
         Ok(())
+    }
+
+    fn read_content(&mut self, idx: Option<usize>, buf: &mut Vec<u8>) -> String {
+        match idx {
+            Some(i) => {
+                if self.read_line(i, buf).is_err() {
+                    buf.clear();
+                }
+                String::from_utf8_lossy(buf).into_owned()
+            }
+            None => String::new(),
+        }
     }
 }
 
@@ -210,42 +252,6 @@ fn styled_cell(prefix: char, content: String, color: Color) -> Line<'static> {
     ])
 }
 
-fn read_content(fi: &mut FileIndex, idx: Option<usize>, buf: &mut Vec<u8>) -> String {
-    match idx {
-        Some(i) => {
-            if fi.read_line(i, buf).is_err() {
-                buf.clear();
-            }
-            String::from_utf8_lossy(buf).into_owned()
-        }
-        None => String::new(),
-    }
-}
-
-fn pair_lines(
-    pair: &DiffPair,
-    old_fi: &mut FileIndex,
-    new_fi: &mut FileIndex,
-    buf: &mut Vec<u8>,
-) -> (Line<'static>, Line<'static>) {
-    let old_content = read_content(old_fi, pair.old_idx, buf);
-    let new_content = read_content(new_fi, pair.new_idx, buf);
-
-    let old_line = match (pair.tag, pair.old_idx) {
-        (DiffTag::Delete | DiffTag::Change, Some(_)) => styled_cell('-', old_content, Color::Red),
-        (DiffTag::Equal, Some(_)) => Line::from(format!(" {}", &old_content)),
-        _ => Line::from(""),
-    };
-
-    let new_line = match (pair.tag, pair.new_idx) {
-        (DiffTag::Insert | DiffTag::Change, Some(_)) => styled_cell('+', new_content, Color::Green),
-        (DiffTag::Equal, Some(_)) => Line::from(format!(" {}", &new_content)),
-        _ => Line::from(""),
-    };
-
-    (old_line, new_line)
-}
-
 impl PagerMode for Diff {
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         let [content_area, footer_area] = {
@@ -283,8 +289,7 @@ impl PagerMode for Diff {
             let pair = &self.pairs[pair_idx];
             let row_y = content_area.y + row as u16;
 
-            let (old_line, new_line) =
-                pair_lines(pair, &mut self.old, &mut self.new, &mut self.buf);
+            let (old_line, new_line) = pair.pair_lines(&mut self.old, &mut self.new, &mut self.buf);
 
             let old_rect = Rect::new(old_area.x, row_y, old_area.width, 1);
             frame.render_widget(old_line, old_rect);
