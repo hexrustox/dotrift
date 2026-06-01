@@ -19,29 +19,28 @@ pub fn toml_quote(s: &str) -> String {
     format!("\"{}\"", escaped)
 }
 
-pub fn annotate_portal_key(content: &mut String, key: &str, annotation: &str) -> bool {
+fn is_table_header(line: &str, name: &str) -> bool {
+    line.trim()
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .is_some_and(|inner| inner.trim() == name)
+}
+
+pub fn annotate_portal_key(content: &mut String, key: &str, annotation: &str) {
     let quoted = toml_quote(key);
     let mut in_portal = false;
     let mut found = false;
     let mut insert_at = 0;
+    let mut offset = 0;
 
-    let bytes = content.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        let line_start = i;
-        while i < bytes.len() && bytes[i] != b'\n' {
-            i += 1;
-        }
-        let line = &content[line_start..i];
-        if i < bytes.len() {
-            i += 1;
-        }
+    for line in content.lines() {
+        let line_end = offset + line.len() + content[offset + line.len()..].starts_with('\n') as usize;
 
         if !in_portal {
-            if line.trim() == "[portal]" {
+            if is_table_header(line.trim(), "portal") {
                 in_portal = true;
             }
-        } else if line.trim().starts_with('[') && line.trim() != "[portal]" {
+        } else if line.trim().starts_with('[') && !is_table_header(line.trim(), "portal") {
             break;
         } else {
             let trimmed = line.trim();
@@ -52,18 +51,17 @@ pub fn annotate_portal_key(content: &mut String, key: &str, annotation: &str) ->
                 let lhs = trimmed[..eq].trim();
                 if lhs == key || lhs == quoted {
                     found = true;
-                    insert_at = line_start;
+                    insert_at = offset;
                     break;
                 }
             }
         }
+
+        offset = line_end;
     }
 
     if found {
         content.insert_str(insert_at, &format!("{}\n", annotation));
-        true
-    } else {
-        false
     }
 }
 
@@ -86,7 +84,10 @@ pub fn apply_config_changes(
         new_content.push('\n');
     }
 
-    if !new_content.contains("[portal]") {
+    if !new_content
+        .lines()
+        .any(|l| is_table_header(l.trim(), "portal"))
+    {
         new_content.push_str("[portal]\n");
     }
 
@@ -173,21 +174,18 @@ pub fn prepare_config(
 }
 
 pub fn portal_insertion_point(content: &str) -> usize {
-    let bytes = content.as_bytes();
     let mut in_portal = false;
     let mut insert_at = 0;
-    let mut i = 0;
+    let mut offset = 0;
 
-    while i < bytes.len() {
-        let line_start = i;
-        while i < bytes.len() && bytes[i] != b'\n' {
-            i += 1;
-        }
-        let line_end = if i < bytes.len() { i + 1 } else { i };
-        let trimmed = content[line_start..i].trim();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let line_content_end = offset + line.len();
+        let has_newline = content[line_content_end..].starts_with('\n');
+        let line_end = line_content_end + has_newline as usize;
 
         if !in_portal {
-            if trimmed == "[portal]" {
+            if is_table_header(trimmed, "portal") {
                 in_portal = true;
                 insert_at = line_end;
             }
@@ -197,7 +195,7 @@ pub fn portal_insertion_point(content: &str) -> usize {
             insert_at = line_end;
         }
 
-        i = line_end;
+        offset = line_end;
     }
 
     insert_at

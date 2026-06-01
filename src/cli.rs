@@ -179,7 +179,7 @@ pub enum StatusSubcommand {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Initialized the source directory.
+    /// Initialize the source directory.
     Init,
 
     /// Evaluate `dotrift.toml` and apply the defined state to the target filesystem.
