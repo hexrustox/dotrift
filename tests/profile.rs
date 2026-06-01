@@ -24,84 +24,69 @@ fn flags(source_dir: &std::path::Path) -> GlobalFlags {
 #[ignore]
 fn test_profile_list_empty() {
     let (_tmp, _source_dir, db_path) = setup_profile("");
-    let _ = profile::list(&flags(&_source_dir), &db_path);
+    profile::list(&flags(&_source_dir), &db_path).unwrap_err();
 }
 
 #[test]
 #[ignore]
 fn test_profile_list_no_active() {
     let data = r#"
-[profile.work]
-email = "work@example.com"
+[profile.a]
 
-[profile.personal]
-email = "personal@example.com"
+[profile.b]
 "#;
     let (_tmp, source_dir, db_path) = setup_profile(data);
-    let _ = profile::list(&flags(&source_dir), &db_path);
+    profile::list(&flags(&source_dir), &db_path).unwrap();
 }
 
 #[test]
 #[ignore]
 fn test_profile_list_active() {
     let data = r#"
-[profile.work]
-email = "work@example.com"
+[profile.a]
 
-[profile.personal]
-email = "personal@example.com"
+[profile.b]
+
+[profile.c]
 "#;
     let (_tmp, source_dir, db_path) = setup_profile(data);
-    let _ = profile::activate(&flags(&source_dir), &db_path, "work");
-    let _ = profile::list(&flags(&source_dir), &db_path);
+    profile::activate(&flags(&source_dir), &db_path, "a").unwrap();
+    profile::list(&flags(&source_dir), &db_path).unwrap();
 }
 
 #[test]
 #[ignore]
 fn test_profile_activate_valid() {
     let data = r#"
-[profile.work]
-email = "work@example.com"
+[profile.a]
 "#;
     let (_tmp, source_dir, db_path) = setup_profile(data);
-    let _ = profile::activate(&flags(&source_dir), &db_path, "work");
+    profile::activate(&flags(&source_dir), &db_path, "a").unwrap();
 }
 
 #[test]
 #[ignore]
 fn test_profile_activate_invalid() {
-    let data = r#"
-[profile.work]
-email = "work@example.com"
-"#;
-    let (_tmp, source_dir, db_path) = setup_profile(data);
-    let _ = profile::activate(&flags(&source_dir), &db_path, "nope");
+    let (_tmp, source_dir, db_path) = setup_profile("");
+    profile::activate(&flags(&source_dir), &db_path, "nope").unwrap_err();
 }
 
 #[test]
 #[ignore]
 fn test_profile_deactivate() {
     let data = r#"
-[profile.work]
-email = "work@example.com"
+[profile.a]
 "#;
     let (_tmp, source_dir, db_path) = setup_profile(data);
-    let _ = profile::activate(&flags(&source_dir), &db_path, "work");
-    let _ = profile::deactivate(&db_path, "work");
+    profile::activate(&flags(&source_dir), &db_path, "a").unwrap();
+    profile::deactivate(&db_path, "a").unwrap();
 }
 
 #[test]
 #[ignore]
 fn test_profile_deactivate_nonexistent() {
     let (_tmp, _source_dir, db_path) = setup_profile("");
-    let _ = profile::deactivate(&db_path, "nope");
-}
-
-#[test]
-#[ignore]
-fn test_profile_show_empty() {
-    let (_tmp, _source_dir, db_path) = setup_profile("");
-    let _ = profile::show(&flags(&_source_dir), &db_path);
+    profile::deactivate(&db_path, "nope").unwrap_err();
 }
 
 #[test]
@@ -113,7 +98,7 @@ name = "Alice"
 age = 30
 "#;
     let (_tmp, source_dir, db_path) = setup_profile(data);
-    let _ = profile::show(&flags(&source_dir), &db_path);
+    profile::show(&flags(&source_dir), &db_path).unwrap();
 }
 
 #[test]
@@ -132,7 +117,7 @@ editor = "vim"
 gh_user = "me"
 "#;
     let (_tmp, source_dir, db_path) = setup_profile(data);
-    let _ = profile::activate(&flags(&source_dir), &db_path, "work");
-    let _ = profile::activate(&flags(&source_dir), &db_path, "personal");
-    let _ = profile::show(&flags(&source_dir), &db_path);
+    profile::activate(&flags(&source_dir), &db_path, "work").unwrap();
+    profile::activate(&flags(&source_dir), &db_path, "personal").unwrap();
+    profile::show(&flags(&source_dir), &db_path).unwrap();
 }

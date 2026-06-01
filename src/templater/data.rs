@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs,
+    path::Path,
+};
 
 use miette::{Context, Result, miette};
 use serde::Deserialize;
@@ -10,7 +14,7 @@ use crate::path::data_path;
 #[serde(default, deny_unknown_fields)]
 pub struct TemplateData {
     pub variable: HashMap<String, Value>,
-    pub profile: HashMap<String, HashMap<String, Value>>,
+    pub profile: BTreeMap<String, HashMap<String, Value>>,
 }
 
 impl TemplateData {

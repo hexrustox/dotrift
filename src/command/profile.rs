@@ -1,4 +1,5 @@
-use std::{collections::BTreeMap, path::Path};
+use std::collections::{BTreeMap, HashSet};
+use std::path::Path;
 
 use miette::{Result, bail};
 use templater::value::Value;
@@ -17,14 +18,15 @@ pub fn list(global: &GlobalFlags, db_path: &Path) -> Result<()> {
     }
 
     let db = Db::init(db_path)?;
-    let active_profiles: Vec<String> = db
+    let active_profiles: HashSet<String> = db
         .get_active_profiles()?
         .into_iter()
         .map(|p| p.name)
         .collect();
 
-    for profile in active_profiles {
-        if data.profile.contains_key(&profile) {
+    for profile in data.profile.keys() {
+        let active = active_profiles.contains(profile);
+        if active {
             println!("{profile} (active)");
         } else {
             println!("{profile}");
