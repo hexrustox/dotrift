@@ -239,7 +239,17 @@ pub fn is_ignored(matcher: &Gitignore, path: &Path) -> bool {
 }
 
 pub fn walk_all(path: &Path) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
-    WalkDir::new(path).into_iter().flatten()
+    WalkDir::new(path).into_iter().filter_map(|e| match e {
+        Ok(entry) => Some(entry),
+        Err(err) => {
+            if let Some(path) = err.path() {
+                output::print_warn(format!("inaccessible `{}`, skipping", path.display()));
+            } else {
+                output::print_warn(format!("{}, skipping", err));
+            }
+            None
+        }
+    })
 }
 
 pub fn walk_files(path: &Path) -> impl Iterator<Item = walkdir::DirEntry> + '_ {

@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fs::{self, remove_file, symlink_metadata},
+    fs::{self, symlink_metadata},
     io::{BufWriter, Write},
     os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
@@ -417,7 +417,7 @@ fn deploy_file(
 
     match entry.deploy_type {
         DeployType::Symlink => {
-            let _ = remove_file(target);
+            let _ = fs::remove_file(target);
             crate::symlink_err!(
                 unix_fs::symlink(&entry.source, target),
                 target,
