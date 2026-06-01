@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use templater::{FuncError, Value, ValueType, function::FunctionRegistry};
 
@@ -146,6 +146,183 @@ impl BuiltinFunctions {
             Ok(Value::Str(s.trim().to_string()))
         });
 
+        register_fn!(f, "split", 2, |args| {
+            let s = cast!(&args[0], Str, 0);
+            let sep = cast!(&args[1], Str, 1);
+            Ok(Value::List(
+                s.split(sep.as_str())
+                    .map(|p| Value::Str(p.to_string()))
+                    .collect(),
+            ))
+        });
+
+        register_fn!(f, "starts_with", 2, |args| {
+            let s = cast!(&args[0], Str, 0);
+            let prefix = cast!(&args[1], Str, 1);
+            Ok(Value::Bool(s.starts_with(prefix.as_str())))
+        });
+
+        register_fn!(f, "ends_with", 2, |args| {
+            let s = cast!(&args[0], Str, 0);
+            let suffix = cast!(&args[1], Str, 1);
+            Ok(Value::Bool(s.ends_with(suffix.as_str())))
+        });
+
+        register_fn!(f, "eq", 2, |args| Ok(Value::Bool(args[0] == args[1])));
+
+        register_fn!(f, "ne", 2, |args| Ok(Value::Bool(args[0] != args[1])));
+
+        register_fn!(f, "gt", 2, |args| {
+            let a = cast!(&args[0], Int, 0);
+            let b = cast!(&args[1], Int, 1);
+            Ok(Value::Bool(a > b))
+        });
+
+        register_fn!(f, "gte", 2, |args| {
+            let a = cast!(&args[0], Int, 0);
+            let b = cast!(&args[1], Int, 1);
+            Ok(Value::Bool(a >= b))
+        });
+
+        register_fn!(f, "lt", 2, |args| {
+            let a = cast!(&args[0], Int, 0);
+            let b = cast!(&args[1], Int, 1);
+            Ok(Value::Bool(a < b))
+        });
+
+        register_fn!(f, "lte", 2, |args| {
+            let a = cast!(&args[0], Int, 0);
+            let b = cast!(&args[1], Int, 1);
+            Ok(Value::Bool(a <= b))
+        });
+
+        f.insert(
+            "add".into(),
+            Box::new(|args| {
+                if args.len() < 2 {
+                    return Err(FuncError::WrongArgCount {
+                        name: "add".into(),
+                        expected: "2+".into(),
+                        got: args.len(),
+                    });
+                }
+                let mut sum = 0i64;
+                for arg in args {
+                    let Value::Int(n) = arg else {
+                        return Err(FuncError::TypeMismatch {
+                            arg: None,
+                            expected: "Int",
+                            got: arg.type_name(),
+                        });
+                    };
+                    sum += n;
+                }
+                Ok(Value::Int(sum))
+            }),
+        );
+
+        register_fn!(f, "sub", 2, |args| {
+            let a = cast!(&args[0], Int, 0);
+            let b = cast!(&args[1], Int, 1);
+            Ok(Value::Int(a - b))
+        });
+
+        f.insert(
+            "mul".into(),
+            Box::new(|args| {
+                if args.len() < 2 {
+                    return Err(FuncError::WrongArgCount {
+                        name: "mul".into(),
+                        expected: "2+".into(),
+                        got: args.len(),
+                    });
+                }
+                let mut product = 1i64;
+                for arg in args {
+                    let Value::Int(n) = arg else {
+                        return Err(FuncError::TypeMismatch {
+                            arg: None,
+                            expected: "Int",
+                            got: arg.type_name(),
+                        });
+                    };
+                    product *= n;
+                }
+                Ok(Value::Int(product))
+            }),
+        );
+
+        register_fn!(f, "div", 2, |args| {
+            let a = cast!(&args[0], Int, 0);
+            let b = cast!(&args[1], Int, 1);
+            if *b == 0 {
+                return Err(FuncError::Custom("division by zero".into()));
+            }
+            Ok(Value::Int(a / b))
+        });
+
+        register_fn!(f, "neg", 1, |args| {
+            let a = cast!(&args[0], Int, 0);
+            Ok(Value::Int(-a))
+        });
+
+        f.insert(
+            "and".into(),
+            Box::new(|args| {
+                if args.len() < 2 {
+                    return Err(FuncError::WrongArgCount {
+                        name: "and".into(),
+                        expected: "2+".into(),
+                        got: args.len(),
+                    });
+                }
+                for arg in args {
+                    let Value::Bool(b) = arg else {
+                        return Err(FuncError::TypeMismatch {
+                            arg: None,
+                            expected: "Bool",
+                            got: arg.type_name(),
+                        });
+                    };
+                    if !b {
+                        return Ok(Value::Bool(false));
+                    }
+                }
+                Ok(Value::Bool(true))
+            }),
+        );
+
+        f.insert(
+            "or".into(),
+            Box::new(|args| {
+                if args.len() < 2 {
+                    return Err(FuncError::WrongArgCount {
+                        name: "or".into(),
+                        expected: "2+".into(),
+                        got: args.len(),
+                    });
+                }
+                for arg in args {
+                    let Value::Bool(b) = arg else {
+                        return Err(FuncError::TypeMismatch {
+                            arg: None,
+                            expected: "Bool",
+                            got: arg.type_name(),
+                        });
+                    };
+                    if *b {
+                        return Ok(Value::Bool(true));
+                    }
+                }
+                Ok(Value::Bool(false))
+            }),
+        );
+
+        register_fn!(f, "not", 1, |args| {
+            let b = cast!(&args[0], Bool, 0);
+            Ok(Value::Bool(!b))
+        });
+
         f.insert(
             "coalesce".into(),
             Box::new(|args| {
@@ -165,6 +342,48 @@ impl BuiltinFunctions {
             }),
         );
 
+        register_fn!(f, "to_str", 1, |args| {
+            fn val_str(v: &Value) -> String {
+                match v {
+                    Value::Str(s) => s.clone(),
+                    Value::Int(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    Value::List(l) => {
+                        let items: Vec<String> = l.iter().map(val_str).collect();
+                        format!("[{}]", items.join(", "))
+                    }
+                    Value::Map(m) => {
+                        let items: Vec<String> = m
+                            .iter()
+                            .map(|(k, v)| format!("{k}: {}", val_str(v)))
+                            .collect();
+                        format!("{{{}}}", items.join(", "))
+                    }
+                }
+            }
+            Ok(Value::Str(val_str(&args[0])))
+        });
+
+        register_fn!(f, "to_int", 1, |args| {
+            match &args[0] {
+                Value::Int(n) => Ok(Value::Int(*n)),
+                Value::Bool(b) => Ok(Value::Int(if *b { 1 } else { 0 })),
+                Value::Str(s) => s
+                    .parse::<i64>()
+                    .map(Value::Int)
+                    .map_err(|_| FuncError::Custom(format!("cannot convert \"{s}\" to Int"))),
+                _ => Err(FuncError::TypeMismatch {
+                    arg: Some(0),
+                    expected: "Int|Bool|String",
+                    got: args[0].type_name(),
+                }),
+            }
+        });
+
+        register_fn!(f, "is_truthy", 1, |args| {
+            Ok(Value::Bool(truthy(&args[0])))
+        });
+
         register_fn!(f, "length", 1, |args| {
             match &args[0] {
                 Value::List(l) => Ok(Value::Int(l.len() as i64)),
@@ -178,39 +397,71 @@ impl BuiltinFunctions {
             }
         });
 
-        f.insert(
-            "contains".into(),
-            Box::new(|args| {
-                if args.len() != 2 {
-                    return Err(FuncError::WrongArgCount {
-                        name: "contains".into(),
-                        expected: "2".into(),
-                        got: args.len(),
+        register_fn!(f, "contains", 2, |args| {
+            let found = match &args[0] {
+                Value::Str(s) => s.contains(cast!(&args[1], Str, 1)),
+                Value::List(l) => l.contains(&args[1]),
+                Value::Map(m) => {
+                    let k = cast!(&args[1], Str, 1);
+                    m.contains_key(k)
+                }
+                _ => {
+                    return Err(FuncError::TypeMismatch {
+                        arg: Some(0),
+                        expected: "String|List|Map",
+                        got: args[0].type_name(),
                     });
                 }
-                let found = match &args[0] {
-                    Value::List(l) => l.contains(&args[1]),
-                    Value::Map(m) => {
-                        let Value::Str(k) = &args[1] else {
-                            return Err(FuncError::TypeMismatch {
-                                arg: Some(1),
-                                expected: "String",
-                                got: args[1].type_name(),
-                            });
-                        };
-                        m.contains_key(k)
-                    }
-                    _ => {
-                        return Err(FuncError::TypeMismatch {
-                            arg: Some(0),
-                            expected: "List|Map",
-                            got: args[0].type_name(),
-                        });
-                    }
-                };
-                Ok(Value::Bool(found))
-            }),
-        );
+            };
+            Ok(Value::Bool(found))
+        });
+
+        register_fn!(f, "first", 1, |args| {
+            let list = cast!(&args[0], List, 0);
+            list.first()
+                .cloned()
+                .ok_or_else(|| FuncError::Custom("first: empty list".into()))
+        });
+
+        register_fn!(f, "last", 1, |args| {
+            let list = cast!(&args[0], List, 0);
+            list.last()
+                .cloned()
+                .ok_or_else(|| FuncError::Custom("last: empty list".into()))
+        });
+
+        register_fn!(f, "keys", 1, |args| {
+            let map = cast!(&args[0], Map, 0);
+            Ok(Value::List(
+                map.keys().map(|k| Value::Str(k.clone())).collect(),
+            ))
+        });
+
+        register_fn!(f, "values", 1, |args| {
+            let map = cast!(&args[0], Map, 0);
+            Ok(Value::List(map.values().cloned().collect()))
+        });
+
+        register_fn!(f, "enumerate", 1, |args| {
+            let list = cast!(&args[0], List, 0);
+            let result: Vec<Value> = list
+                .iter()
+                .enumerate()
+                .map(|(i, v)| {
+                    let mut map = match v {
+                        Value::Map(m) => m.clone(),
+                        _ => {
+                            let mut m = BTreeMap::new();
+                            m.insert("value".to_string(), v.clone());
+                            m
+                        }
+                    };
+                    map.insert("index".to_string(), Value::Int(i as i64));
+                    Value::Map(map)
+                })
+                .collect();
+            Ok(Value::List(result))
+        });
 
         Self { functions: f }
     }
