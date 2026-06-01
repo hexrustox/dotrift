@@ -61,7 +61,13 @@ pub fn clear(file: Option<PathBuf>, db_path: &Path) -> Result<()> {
 mod tests {
     use std::path::PathBuf;
 
-    use crate::{cli::ApplyFlags, command::util::tests::setup_test};
+    use crate::{
+        cli::{ApplyFlags, GlobalFlags},
+        command::{
+            apply,
+            util::{assert_captured_output, tests::setup_test},
+        },
+    };
     use tempfile::TempDir;
 
     use super::*;
@@ -69,8 +75,8 @@ mod tests {
     fn setup_status() -> (TempDir, PathBuf, PathBuf, PathBuf) {
         let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, "", "", true);
         let db_path = temp_dir.path().join("db");
-        crate::command::apply::run(
-            crate::cli::GlobalFlags::new(
+        apply::run(
+            GlobalFlags::new(
                 Some(source_dir.to_path_buf()),
                 Some(target_dir.to_path_buf()),
                 None,
@@ -90,14 +96,14 @@ mod tests {
     fn test_status_list_single() {
         let (tmp, _source_dir, target_dir, db_path) = setup_status();
         list(Some(target_dir.join("a.txt")), &db_path).unwrap();
-        crate::command::util::assert_captured_output("status_list_single", tmp.path());
+        assert_captured_output("status_list_single", tmp.path());
     }
 
     #[test]
     fn test_status_list_all() {
         let (tmp, _source_dir, _target_dir, db_path) = setup_status();
         list(None, &db_path).unwrap();
-        crate::command::util::assert_captured_output("status_list_all", tmp.path());
+        assert_captured_output("status_list_all", tmp.path());
     }
 
     #[test]
@@ -113,6 +119,6 @@ mod tests {
     fn test_status_clear_all() {
         let (tmp, _source_dir, _target_dir, db_path) = setup_status();
         clear(None, &db_path).unwrap();
-        crate::command::util::assert_captured_output("status_clear_all", tmp.path());
+        assert_captured_output("status_clear_all", tmp.path());
     }
 }

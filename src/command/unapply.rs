@@ -46,6 +46,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: UnapplyFlags) -> mi
 #[cfg(test)]
 mod tests {
     use crate::cli::UnapplyFlags;
+    use crate::command::apply;
     use crate::command::util::assert_captured_output;
 
     use super::*;
@@ -58,8 +59,8 @@ mod tests {
             r#""*" = { type = "copy" }"#,
             true,
         );
-        crate::command::apply::run(
-            crate::cli::GlobalFlags::new(
+        apply::run(
+            GlobalFlags::new(
                 Some(source_dir.to_path_buf()),
                 Some(target_dir.to_path_buf()),
                 None,

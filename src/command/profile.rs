@@ -89,7 +89,7 @@ pub fn show(global: &GlobalFlags, db_path: &Path) -> Result<()> {
 mod tests {
     use std::path::PathBuf;
 
-    use crate::cli::GlobalFlags;
+    use crate::{cli::GlobalFlags, command::util::assert_captured_output, output::test_capture};
     use tempfile::TempDir;
 
     use super::*;
@@ -124,7 +124,7 @@ mod tests {
 "#;
         let (tmp, source_dir, db_path) = setup_profile(data);
         list(&flags(&source_dir), &db_path).unwrap();
-        crate::command::util::assert_captured_output("profile_list_no_active", tmp.path());
+        assert_captured_output("profile_list_no_active", tmp.path());
     }
 
     #[test]
@@ -138,9 +138,9 @@ mod tests {
 "#;
         let (tmp, source_dir, db_path) = setup_profile(data);
         activate(&flags(&source_dir), &db_path, "a").unwrap();
-        crate::output::test_capture::take_all();
+        test_capture::take_all();
         list(&flags(&source_dir), &db_path).unwrap();
-        crate::command::util::assert_captured_output("profile_list_active", tmp.path());
+        assert_captured_output("profile_list_active", tmp.path());
     }
 
     #[test]
@@ -150,7 +150,7 @@ mod tests {
 "#;
         let (tmp, source_dir, db_path) = setup_profile(data);
         activate(&flags(&source_dir), &db_path, "a").unwrap();
-        crate::command::util::assert_captured_output("profile_activate_valid", tmp.path());
+        assert_captured_output("profile_activate_valid", tmp.path());
     }
 
     #[test]
@@ -166,9 +166,9 @@ mod tests {
 "#;
         let (tmp, source_dir, db_path) = setup_profile(data);
         activate(&flags(&source_dir), &db_path, "a").unwrap();
-        crate::output::test_capture::take_all();
+        test_capture::take_all();
         deactivate(&db_path, "a").unwrap();
-        crate::command::util::assert_captured_output("profile_deactivate", tmp.path());
+        assert_captured_output("profile_deactivate", tmp.path());
     }
 
     #[test]
@@ -186,7 +186,7 @@ age = 30
 "#;
         let (tmp, source_dir, db_path) = setup_profile(data);
         show(&flags(&source_dir), &db_path).unwrap();
-        crate::command::util::assert_captured_output("profile_show_base_only", tmp.path());
+        assert_captured_output("profile_show_base_only", tmp.path());
     }
 
     #[test]
@@ -206,8 +206,8 @@ gh_user = "me"
         let (tmp, source_dir, db_path) = setup_profile(data);
         activate(&flags(&source_dir), &db_path, "work").unwrap();
         activate(&flags(&source_dir), &db_path, "personal").unwrap();
-        crate::output::test_capture::take_all();
+        test_capture::take_all();
         show(&flags(&source_dir), &db_path).unwrap();
-        crate::command::util::assert_captured_output("profile_show_with_profiles", tmp.path());
+        assert_captured_output("profile_show_with_profiles", tmp.path());
     }
 }
