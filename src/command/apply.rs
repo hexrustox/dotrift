@@ -59,10 +59,12 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
     let verbose = global_flags.verbose;
 
     let db = Db::init(db_path)?;
-    let mut template_ctx = TemplateContext::build(&source_dir, &db)?;
-    let (config, variables) =
-        Config::read_templated(&source_dir, template_ctx.variables, &template_ctx.functions)?;
-    template_ctx.variables = variables;
+    let template_ctx = TemplateContext::build(&source_dir, &db)?;
+    let config = Config::read_templated(
+        &source_dir,
+        &template_ctx.variables,
+        &template_ctx.functions,
+    )?;
 
     let target_dir = resolve_target(&source_dir, target_override, &config)?;
 
@@ -118,7 +120,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
         &db,
         overwrite_identical,
         verbose,
-        template_ctx,
+        &template_ctx,
     )?;
 
     Ok(())
@@ -250,15 +252,15 @@ fn traverse_tree(
     db: &Db,
     overwrite_identical: bool,
     verbose: bool,
-    mut template_ctx: TemplateContext,
-) -> Result<TemplateContext> {
+    template_ctx: &TemplateContext,
+) -> Result<()> {
     match node {
         Node::Dir(children) => {
             if deploy_dir(target, db, verbose)? {
-                return Ok(template_ctx);
+                return Ok(());
             }
             for (name, child) in children {
-                template_ctx = traverse_tree(
+                traverse_tree(
                     &target.join(name),
                     child,
                     db,
@@ -269,7 +271,7 @@ fn traverse_tree(
             }
         }
         Node::File(entry) => {
-            template_ctx = deploy_file(
+            deploy_file(
                 target,
                 entry,
                 db,
@@ -283,7 +285,7 @@ fn traverse_tree(
             unreachable!()
         }
     }
-    Ok(template_ctx)
+    Ok(())
 }
 
 fn abort_deploy(at: &Path) -> Report {
@@ -357,8 +359,8 @@ fn deploy_file(
     db: &Db,
     overwrite_identical: bool,
     verbose: bool,
-    mut template_ctx: TemplateContext,
-) -> Result<TemplateContext> {
+    template_ctx: &TemplateContext,
+) -> Result<()> {
     let mut source_hash = None;
     let mut target_hash = None;
 
@@ -366,7 +368,7 @@ fn deploy_file(
         if target.path_is_dir() {
             let choice = prompt_collision(Some(&entry.source), target, false, true);
             match choice {
-                CollisionOptions::Skip => return Ok(template_ctx),
+                CollisionOptions::Skip => return Ok(()),
                 CollisionOptions::Overwrite => {
                     crate::remove_dir_err!(fs::remove_dir_all(target), target)?;
                     if verbose {
@@ -391,7 +393,7 @@ fn deploy_file(
                 if overwrite_identical {
                     update_db(target, entry, db, target_hash)?;
                 }
-                return Ok(template_ctx);
+                return Ok(());
             }
 
             #[cfg(test)]
@@ -402,7 +404,7 @@ fn deploy_file(
             if !managed {
                 let choice = prompt_collision(Some(&entry.source), target, false, false);
                 match choice {
-                    CollisionOptions::Skip => return Ok(template_ctx),
+                    CollisionOptions::Skip => return Ok(()),
                     CollisionOptions::Overwrite => {}
                     CollisionOptions::Quit => {
                         return Err(abort_deploy(target));
@@ -441,8 +443,12 @@ fn deploy_file(
             let tmpl = parse_template_err!(templater::Template::from_mmap(mmap), &src)?;
             let out = create_file_err!(fs::File::create(target), target)?;
             let mut writer = BufWriter::new(out);
-            template_ctx.variables = render_template_err!(
-                tmpl.render(&mut writer, template_ctx.variables, &template_ctx.functions),
+            render_template_err!(
+                tmpl.render(
+                    &mut writer,
+                    &template_ctx.variables,
+                    &template_ctx.functions
+                ),
                 &src
             )?;
             write_file_err!(writer.flush(), target)?;
@@ -467,7 +473,7 @@ fn deploy_file(
     }
 
     update_db(target, entry, db, source_hash)?;
-    Ok(template_ctx)
+    Ok(())
 }
 
 fn update_db(target: &Path, entry: &PortalEntry, db: &Db, source_hash: Option<u64>) -> Result<()> {

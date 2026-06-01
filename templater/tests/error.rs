@@ -35,7 +35,7 @@ fn test_error(template: &str) -> miette::Result<()> {
     let mut buf = Vec::new();
     Template::from_bytes(template.as_bytes().to_vec())?.render(
         &mut buf,
-        HashMap::from_iter([("key".to_string(), Value::Str("val".to_string()))]),
+        &HashMap::from_iter([("key".to_string(), Value::Str("val".to_string()))]),
         &Functions,
     )?;
     Ok(())

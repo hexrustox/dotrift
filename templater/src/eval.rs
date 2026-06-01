@@ -10,13 +10,13 @@ use crate::function::FunctionRegistry;
 use crate::value::Value;
 
 pub struct EvalContext<'a> {
-    variables: HashMap<String, Value>,
+    variables: &'a HashMap<String, Value>,
     scopes: Vec<HashMap<String, Value>>,
     functions: &'a dyn FunctionRegistry,
 }
 
 impl<'a> EvalContext<'a> {
-    pub fn new(variables: HashMap<String, Value>, functions: &'a dyn FunctionRegistry) -> Self {
+    pub fn new(variables: &'a HashMap<String, Value>, functions: &'a dyn FunctionRegistry) -> Self {
         Self {
             variables,
             scopes: Vec::new(),
@@ -24,12 +24,10 @@ impl<'a> EvalContext<'a> {
         }
     }
 
-    fn push_scope(&mut self, values: Vec<(String, Value)>) {
+    fn push_scope(&mut self, name: String, value: Value) {
         self.scopes.push(HashMap::new());
         if let Some(scope) = self.scopes.last_mut() {
-            for (name, value) in values.into_iter() {
-                scope.insert(name, value);
-            }
+            scope.insert(name, value);
         }
     }
 
@@ -44,10 +42,6 @@ impl<'a> EvalContext<'a> {
             }
         }
         self.variables.get(name)
-    }
-
-    pub fn destruct(self) -> HashMap<String, Value> {
-        self.variables
     }
 }
 
@@ -123,7 +117,7 @@ fn eval_node<W: io::Write>(
             match val {
                 Value::List(items) => {
                     for item in items {
-                        ctx.push_scope(vec![(var.clone(), item)]);
+                        ctx.push_scope(var.clone(), item);
                         eval_nodes(body, source, writer, ctx)?;
                         ctx.pop_scope();
                     }
@@ -308,7 +302,7 @@ mod tests {
     fn test_render(template: &str) -> String {
         let tmpl = Template::from_bytes(template.to_owned().into_bytes()).unwrap();
         let mut buf = Vec::new();
-        tmpl.render(&mut buf, vars(), &Functions).unwrap();
+        tmpl.render(&mut buf, &vars(), &Functions).unwrap();
         String::from_utf8(buf).unwrap()
     }
 
@@ -332,7 +326,7 @@ mod tests {
             &parse(&scan(&source).unwrap(), &source).unwrap(),
             &source,
             &mut buf,
-            &mut EvalContext::new(vars(), &Functions),
+            &mut EvalContext::new(&vars(), &Functions),
         )
         .unwrap_err();
         e.downcast::<Error>().unwrap().destruct()

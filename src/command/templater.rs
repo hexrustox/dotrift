@@ -77,7 +77,7 @@ pub fn run(global: GlobalFlags, db_path: &Path, flags: TemplaterFlags) -> Result
         }
         let file = create_file_err!(fs::File::create(out_path), out_path)?;
         let mut writer = BufWriter::new(file);
-        tmpl.render(&mut writer, variables, &BuiltinFunctions::new())
+        tmpl.render(&mut writer, &variables, &BuiltinFunctions::new())
             .wrap_err("failed to render template")?;
         write_file_err!(writer.flush(), out_path)?;
     } else {
@@ -86,7 +86,7 @@ pub fn run(global: GlobalFlags, db_path: &Path, flags: TemplaterFlags) -> Result
             inner: stdout.lock(),
             last: None,
         };
-        tmpl.render(&mut writer, variables, &BuiltinFunctions::new())
+        tmpl.render(&mut writer, &variables, &BuiltinFunctions::new())
             .wrap_err("failed to render template")?;
         if writer.last != Some(b'\n') {
             writer

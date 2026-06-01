@@ -145,7 +145,7 @@ pub fn run(
     let data = TemplateData::read(&source_dir)?;
     let variables = data.resolve_variables(&db)?;
     let functions = BuiltinFunctions::new();
-    let (config, _) = Config::read_templated(&source_dir, variables, &functions)?;
+    let config = Config::read_templated(&source_dir, &variables, &functions)?;
     let target_override = global_flags.target()?;
     let target_dir = resolve_target(&source_dir, target_override, &config)?;
 

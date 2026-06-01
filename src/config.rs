@@ -33,24 +33,18 @@ impl Config {
 
     pub fn read_templated(
         source_dir: &Path,
-        mut variables: HashMap<String, Value>,
+        variables: &HashMap<String, Value>,
         functions: &BuiltinFunctions,
-    ) -> Result<(Self, HashMap<String, Value>)> {
+    ) -> Result<Self> {
         let path = config_path(source_dir);
         let s = crate::read_file_err!(fs::read_to_string(&path), &path)?;
 
         let tmpl = crate::parse_template_err!(Template::from_bytes(s.into_bytes()), &path)?;
         let mut rendered = Vec::new();
-        variables = crate::render_template_err!(
-            tmpl.render(&mut rendered, variables.clone(), functions),
-            &path
-        )?;
+        crate::render_template_err!(tmpl.render(&mut rendered, variables, functions), &path)?;
         let rendered_str = String::from_utf8_lossy(&rendered);
 
-        Ok((
-            crate::parse_err!(toml::from_str(&rendered_str), &path)?,
-            variables,
-        ))
+        Ok(crate::parse_err!(toml::from_str(&rendered_str), &path)?)
     }
 }
 

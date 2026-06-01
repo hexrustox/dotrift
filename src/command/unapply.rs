@@ -20,7 +20,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: UnapplyFlags) -> mi
     let data = TemplateData::read(&source_dir)?;
     let variables = data.resolve_variables(&db)?;
     let functions = BuiltinFunctions::new();
-    let (config, _) = Config::read_templated(&source_dir, variables, &functions)
+    let config = Config::read_templated(&source_dir, &variables, &functions)
         .wrap_err("failed to read config")?;
     let target_dir = resolve_target(&source_dir, target_override, &config)?;
 
