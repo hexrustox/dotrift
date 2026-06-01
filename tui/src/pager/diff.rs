@@ -154,7 +154,8 @@ impl Diff {
         let old_file = File::open(old)?;
         let new_file = File::open(new)?;
 
-        // SAFETY: The file descriptors are valid and remain open for the lifetime of the Mmap
+        // SAFETY: This process has exclusive access to the file — opened read-only,
+        // no concurrent writer modifies or truncates it while mapped.
         let old_map = unsafe { Mmap::map(&old_file)? };
         let new_map = unsafe { Mmap::map(&new_file)? };
 

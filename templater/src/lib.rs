@@ -87,7 +87,9 @@ fn parse(source: &[u8]) -> Result<Vec<Node>> {
 
 fn annotate<T>(source: &[u8], result: Result<T>) -> Result<T> {
     if let Err(mut report) = result {
-        let error = report.downcast_mut::<Error>().unwrap();
+        let error = report
+            .downcast_mut::<Error>()
+            .expect("expected templater::error::Error");
         let (at, len) = error.get_at();
         let (src, adj) = source_context(at, len, source);
         error.set_at(adj, len);

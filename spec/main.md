@@ -607,22 +607,16 @@ Evaluates a dotrift template standalone and writes the rendered output to stdout
 
 * **Missing template source:** Error if neither `--string` nor `--file` is provided.
 * **Ambiguous template source:** Error if both `--string` and `--file` are provided.
+* **Input-output conflict:** Error if `--file` and `--output` resolve to the same path.
 * **Mutually exclusive flags:** Error if both `--no-data` and `--data-path` are provided.
 * **Template errors:** Parse and render errors are fatal, reported with source annotations.
 * **`--var` parse errors:** Fatal.
 * **DB errors:** Fatal.
 
-### Variable Precedence
-
-From lowest to highest priority:
-
-1. `[variable]` from `dotrift_data.toml` (if `--no-data` is not set)
-2. Active profiles from the database (if `--no-data` is not set, in activation order — last-activated wins)
-3. `--var` CLI arguments (highest priority, overwrites any conflicting keys)
-
 ### Execution Pipeline
 
 1. **Resolve template source:** If `--string`, use the inline string directly. If `--file`, read the file from disk.
+   *Error:* If `--output` resolves to the same path as `--file` (via `canonicalize`), bail before any I/O.
 
 2. **Resolve variables** (unless `--no-data`):
    - Load `dotrift_data.toml` from `--data-path` if provided, or from the source directory. Missing file is treated as empty (no variables from file).
