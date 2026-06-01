@@ -1,0 +1,9 @@
+---
+source: src/command/util.rs
+expression: "strip_str(crate::output::test_capture::take_all())"
+---
+[REMOVE] @/target/a.txt
+[REMOVE] @/target/b.txt
+[REMOVE] @/target/subdir/c.txt
+[REMOVE] @/target/subdir/d.txt
+[SUMMARY] 4 removals

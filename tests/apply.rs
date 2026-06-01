@@ -221,68 +221,6 @@ fn test_portal_subdir_mapping() {
     assert!(!target_dir.join("b.txt").exists());
 }
 
-#[test]
-#[ignore]
-fn test_dry_run_print() {
-    let config = r#"
-[portal]
-"" = ""
-
-[rule]
-"subdir/*" = { type = "copy" }
-"#;
-    let (_temp_dir, source_dir, target_dir, db_path) = setup_test(config);
-
-    apply::run(
-        flags(&source_dir, &target_dir),
-        &db_path,
-        ApplyFlags {
-            dry_run: true,
-            clean_up: false,
-            prune_empty_dirs: false,
-        },
-    )
-    .unwrap();
-}
-
-#[test]
-#[ignore]
-fn test_clean_up_dry_run_print() {
-    let config = r#"
-[portal]
-"" = ""
-"#;
-    let (_temp_dir, source_dir, target_dir, db_path) = setup_test(config);
-
-    apply::run(
-        flags(&source_dir, &target_dir),
-        &db_path,
-        ApplyFlags {
-            dry_run: false,
-            clean_up: false,
-            prune_empty_dirs: false,
-        },
-    )
-    .unwrap();
-
-    let config = r#"
-[portal]
-"*.txt" = ""
-"#;
-    fs::write(source_dir.join("dotrift.toml"), config).unwrap();
-
-    apply::run(
-        flags(&source_dir, &target_dir),
-        &db_path,
-        ApplyFlags {
-            dry_run: true,
-            clean_up: true,
-            prune_empty_dirs: false,
-        },
-    )
-    .unwrap();
-}
-
 #[ignore]
 #[test]
 fn test_prompt() {

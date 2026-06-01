@@ -506,7 +506,10 @@ fn update_db(target: &Path, entry: &PortalEntry, db: &Db, source_hash: Option<u6
 
 #[cfg(test)]
 mod tests {
-    use crate::command::{prompt::tests::PROMPT_SELECTION, util::tests::setup_test};
+    use crate::command::{
+        prompt::tests::PROMPT_SELECTION,
+        util::{assert_captured_output, tests::setup_test},
+    };
 
     use super::*;
     use std::{cell::RefCell, fs};
@@ -1377,5 +1380,56 @@ name = "world""#).unwrap();
         )
         .unwrap();
         assert_eq!(target_dir.join("file").exists(), dry_run);
+    }
+
+    #[test]
+    fn test_dry_run_print_snapshot() {
+        let (temp_dir, source_dir, target_dir) =
+            setup_test(r#""" = """#, "", r#""subdir/*" = { type = "copy" }"#, true);
+        mock_apply(
+            &source_dir,
+            &target_dir,
+            &temp_dir.path().join("db"),
+            ApplyFlags {
+                dry_run: true,
+                clean_up: false,
+                prune_empty_dirs: false,
+            },
+        )
+        .unwrap();
+
+        assert_captured_output("apply_dry_run", temp_dir.path())
+    }
+
+    #[test]
+    fn test_clean_up_dry_run_print_snapshot() {
+        let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, "", "", true);
+        mock_apply(
+            &source_dir,
+            &target_dir,
+            &temp_dir.path().join("db"),
+            ApplyFlags {
+                dry_run: false,
+                clean_up: false,
+                prune_empty_dirs: false,
+            },
+        )
+        .unwrap();
+
+        fs::write(source_dir.join("dotrift.toml"), "").unwrap();
+
+        mock_apply(
+            &source_dir,
+            &target_dir,
+            &temp_dir.path().join("db"),
+            ApplyFlags {
+                dry_run: true,
+                clean_up: true,
+                prune_empty_dirs: false,
+            },
+        )
+        .unwrap();
+
+        assert_captured_output("apply_clean_up_dry_run", temp_dir.path())
     }
 }

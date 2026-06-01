@@ -1,0 +1,14 @@
+---
+source: src/command/util.rs
+expression: "strip_str(crate::output::test_capture::take_all())"
+---
+[CREATE] @
+[CREATE] @
+[CREATE] @
+[CREATE] @/target
+[CREATE] @/target/a.txt -> @/source/a.txt (symlink)
+[CREATE] @/target/b.txt -> @/source/b.txt (symlink)
+[CREATE] @/target/subdir
+[CREATE] @/target/subdir/c.txt -> @/source/subdir/c.txt (file)
+[CREATE] @/target/subdir/d.txt -> @/source/subdir/d.txt (file)
+[SUMMARY] 4 creates

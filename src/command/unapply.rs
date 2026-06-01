@@ -27,8 +27,8 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: UnapplyFlags) -> mi
         }
     }
     let functions = BuiltinFunctions::new();
-    let (config, _) =
-        Config::read_templated(&source_dir, variables, &functions).wrap_err("failed to read config")?;
+    let (config, _) = Config::read_templated(&source_dir, variables, &functions)
+        .wrap_err("failed to read config")?;
     let target_dir = resolve_target(&source_dir, target_override, &config)?;
 
     let ignore_matcher = build_ignore(&config.ignore, &target_dir)?;
@@ -48,4 +48,52 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: UnapplyFlags) -> mi
         output::print_summary(format_args!("{} {}", n, label));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::cli::UnapplyFlags;
+    use crate::command::util::assert_captured_output;
+
+    use super::*;
+
+    #[test]
+    fn test_unapply_dry_run_print_snapshot() {
+        let (temp_dir, source_dir, target_dir) = crate::command::util::tests::setup_test(
+            r#""*" = """#,
+            "",
+            r#""*" = { type = "copy" }"#,
+            true,
+        );
+        crate::command::apply::run(
+            crate::cli::GlobalFlags::new(
+                Some(source_dir.to_path_buf()),
+                Some(target_dir.to_path_buf()),
+                None,
+            ),
+            &temp_dir.path().join("db"),
+            crate::cli::ApplyFlags {
+                dry_run: false,
+                clean_up: false,
+                prune_empty_dirs: false,
+            },
+        )
+        .unwrap();
+
+        run(
+            crate::cli::GlobalFlags::new(
+                Some(source_dir.to_path_buf()),
+                Some(target_dir.to_path_buf()),
+                None,
+            ),
+            &temp_dir.path().join("db"),
+            UnapplyFlags {
+                dry_run: true,
+                prune_empty_dirs: false,
+            },
+        )
+        .unwrap();
+
+        assert_captured_output("unapply_dry_run", temp_dir.path());
+    }
 }

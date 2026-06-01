@@ -1,3 +1,4 @@
+use crate::eoutput;
 use std::path::Path;
 
 use crossterm::style::Stylize;
@@ -22,11 +23,11 @@ pub fn portal_str(target: &Path, source: &Path, deploy_type: DeployType) -> Stri
 }
 
 pub fn print_dry_create_dir(path: &Path) {
-    eprintln!("{} {}", "[CREATE]".green().bold(), path.display());
+    eoutput!("{} {}", "[CREATE]".green().bold(), path.display());
 }
 
 pub fn print_dry_create_file(target: &Path, source: &Path, deploy_type: DeployType) {
-    eprintln!(
+    eoutput!(
         "{} {}",
         "[CREATE]".green().bold(),
         portal_str(target, source, deploy_type)
@@ -34,11 +35,11 @@ pub fn print_dry_create_file(target: &Path, source: &Path, deploy_type: DeployTy
 }
 
 pub fn print_dry_remove(path: &Path) {
-    eprintln!("{} {}", "[REMOVE]".red().bold(), path.display());
+    eoutput!("{} {}", "[REMOVE]".red().bold(), path.display());
 }
 
 pub fn print_managed(target: &Path, source: &Path, deploy_type: DeployType) {
-    eprintln!(
+    eoutput!(
         "{} {}",
         "[MANAGED]".green(),
         portal_str(target, source, deploy_type)
@@ -46,23 +47,23 @@ pub fn print_managed(target: &Path, source: &Path, deploy_type: DeployType) {
 }
 
 pub fn print_unmanaged(target: &Path) {
-    eprintln!("{} {}", "[UNMANAGED]".yellow(), target.display());
+    eoutput!("{} {}", "[UNMANAGED]".yellow(), target.display());
 }
 
 pub fn print_warn(msg: impl std::fmt::Display) {
-    eprintln!("{} {}", "[WARN]".yellow().bold(), msg);
+    eoutput!("{} {}", "[WARN]".yellow().bold(), msg);
 }
 
 pub fn print_ok(msg: impl std::fmt::Display) {
-    eprintln!("{} {}", "[OK]".green().bold(), msg);
+    eoutput!("{} {}", "[OK]".green().bold(), msg);
 }
 
 pub fn print_created_dir(path: &Path) {
-    eprintln!("{} {}", "[CREATED]".green().bold(), path.display());
+    eoutput!("{} {}", "[CREATED]".green().bold(), path.display());
 }
 
 pub fn print_created_file(target: &Path, source: &Path, deploy_type: DeployType) {
-    eprintln!(
+    eoutput!(
         "{} {}",
         "[CREATED]".green().bold(),
         portal_str(target, source, deploy_type)
@@ -70,11 +71,11 @@ pub fn print_created_file(target: &Path, source: &Path, deploy_type: DeployType)
 }
 
 pub fn print_removed(path: &Path) {
-    eprintln!("{} {}", "[REMOVED]".red().bold(), path.display());
+    eoutput!("{} {}", "[REMOVED]".red().bold(), path.display());
 }
 
 pub fn print_added(src: &Path, dest: &Path) {
-    eprintln!(
+    eoutput!(
         "{} {} -> {}",
         "[ADDED]".green().bold(),
         src.display(),
@@ -83,5 +84,53 @@ pub fn print_added(src: &Path, dest: &Path) {
 }
 
 pub fn print_summary(msg: impl std::fmt::Display) {
-    eprintln!("{} {}", "[SUMMARY]".bold(), msg);
+    eoutput!("{} {}", "[SUMMARY]".bold(), msg);
+}
+
+#[macro_export]
+macro_rules! output {
+    ($($arg:tt)*) => {{
+        #[cfg(test)]
+        {
+            let msg = format!($($arg)*);
+            $crate::output::test_capture::push(msg);
+        }
+        #[cfg(not(test))]
+        println!($($arg)*);
+    }};
+}
+
+#[macro_export]
+macro_rules! eoutput {
+    ($($arg:tt)*) => {{
+        #[cfg(test)]
+        {
+            let msg = format!($($arg)*);
+            $crate::output::test_capture::push(msg);
+        }
+        #[cfg(not(test))]
+        eprintln!($($arg)*);
+    }};
+}
+
+#[cfg(test)]
+pub mod test_capture {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static OUTPUT: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub fn push(s: String) {
+        OUTPUT.with(|v| v.borrow_mut().push(s));
+    }
+
+    pub fn take_all() -> String {
+        OUTPUT.with(|v| {
+            let mut guard = v.borrow_mut();
+            let result = guard.join("\n");
+            guard.clear();
+            result
+        })
+    }
 }

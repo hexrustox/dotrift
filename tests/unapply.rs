@@ -282,31 +282,3 @@ fn test_unapply_only_portal_matched() {
     assert!(db.get_entry(&target_dir.join("b.txt")).unwrap().is_some());
 }
 
-#[test]
-#[ignore]
-fn test_unapply_dry_run() {
-    let config = r#"
-[portal]
-"" = ""
-"#;
-    let (_temp_dir, source_dir, target_dir, db_path) = setup_test(config);
-    apply::run(
-        flags(&source_dir, &target_dir),
-        &db_path,
-        ApplyFlags {
-            dry_run: false,
-            clean_up: false,
-            prune_empty_dirs: false,
-        },
-    )
-    .unwrap();
-    unapply::run(
-        flags(&source_dir, &target_dir),
-        &db_path,
-        UnapplyFlags {
-            dry_run: true,
-            prune_empty_dirs: false,
-        },
-    )
-    .unwrap();
-}

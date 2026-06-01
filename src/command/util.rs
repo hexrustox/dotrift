@@ -366,8 +366,15 @@ pub fn clean_up(
     for entry in db_entries {
         let path = &entry.target_path;
         let in_portal = portal_entries.contains_key(path);
-        if invert { if !in_portal { continue; } }
-        else      { if in_portal  { continue; } }
+        if invert {
+            if !in_portal {
+                continue;
+            }
+        } else {
+            if in_portal {
+                continue;
+            }
+        }
 
         if path.path_exists() {
             let managed = is_managed_entry(&entry, path, None);
@@ -403,6 +410,29 @@ pub fn clean_up(
     }
 
     Ok(count)
+}
+
+#[cfg(test)]
+pub fn assert_captured_output(label: &str, temp_path: &Path) {
+    use insta::{assert_snapshot, with_settings};
+    use strip_ansi_escapes::strip_str;
+
+    let mut paths = Vec::new();
+    let mut current = temp_path;
+    loop {
+        if current.components().count() > 1 {
+            paths.push(current.to_string_lossy().to_string());
+        }
+        if let Some(p) = current.parent() {
+            current = p;
+        } else {
+            break;
+        }
+    }
+    let filters = paths.iter().map(|p| (p.as_str(), "@"));
+    with_settings!({filters => filters}, {
+        assert_snapshot!(label, strip_str(crate::output::test_capture::take_all()));
+    });
 }
 
 #[cfg(test)]
@@ -1135,15 +1165,7 @@ pub mod tests {
         };
         let empty_portal = HashMap::new();
         let portal_ref = portal_entries.as_ref().unwrap_or(&empty_portal);
-        clean_up(
-            portal_ref,
-            &db,
-            dry_run,
-            prune_empty_dirs,
-            false,
-            false,
-        )
-        .unwrap();
+        clean_up(portal_ref, &db, dry_run, prune_empty_dirs, false, false).unwrap();
         assert(&target_dir, &db);
     }
 }

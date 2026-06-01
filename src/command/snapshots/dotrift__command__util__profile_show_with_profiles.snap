@@ -1,0 +1,8 @@
+---
+source: src/command/util.rs
+expression: "strip_str(crate::output::test_capture::take_all())"
+---
+editor   vim
+email    work@example.com
+gh_user  me
+name     Alice

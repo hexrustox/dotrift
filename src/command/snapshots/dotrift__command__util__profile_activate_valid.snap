@@ -1,0 +1,5 @@
+---
+source: src/command/util.rs
+expression: "strip_str(crate::output::test_capture::take_all())"
+---
+profile `a` activated
