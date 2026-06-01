@@ -1,8 +1,5 @@
-use std::{
-    path::{Path, PathBuf},
-    str::FromStr,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use miette::{Context, Result, miette};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -211,11 +208,7 @@ impl Db {
     }
 
     pub fn activate_profile(&self, name: &str) -> Result<()> {
-        let now_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| miette!(e))
-            .wrap_err("system clock is before epoch")?
-            .as_millis() as i64;
+        let now_ms = crate::time::epoch_ms(None)?;
 
         self.conn
             .execute(

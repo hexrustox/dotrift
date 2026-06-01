@@ -7,7 +7,6 @@ use std::{
     io::{BufReader, ErrorKind, Read},
     os::unix::fs as unix_fs,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
 };
 
 use glob::{MatchOptions, glob_with};
@@ -248,13 +247,8 @@ pub fn walk_files(path: &Path) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
 }
 
 pub fn read_mtime(path: &Path) -> Option<i64> {
-    path.symlink_metadata()
-        .ok()?
-        .modified()
-        .ok()?
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_millis() as i64)
+    let time = path.symlink_metadata().ok()?.modified().ok()?;
+    crate::time::epoch_ms(Some(time)).ok()
 }
 
 pub fn hash_file(path: &Path) -> Result<u64> {

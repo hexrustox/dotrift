@@ -7,3 +7,4 @@ pub mod global_config;
 pub mod output;
 pub mod path;
 pub mod templater;
+pub mod time;
