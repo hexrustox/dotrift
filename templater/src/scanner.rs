@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::error::{Error, ErrorKind};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum TagKind {
+enum TagKind {
     Interp,
     Stmt,
     Comment,
