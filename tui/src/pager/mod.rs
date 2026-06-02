@@ -366,8 +366,19 @@ fn build_compact(parts: &[&str], shrunk: &[bool], shrunk_form: &[&str], capacity
 #[cfg(test)]
 mod tests {
     use super::*;
+    use insta::{assert_snapshot, with_settings};
+    use ratatui::backend::TestBackend;
     use std::path::Path;
     use test_case::test_case;
+
+    pub const TERMINAL_WIDTH: u16 = 100;
+
+    pub fn assert_terminal(path: &Path, snap_name: &str, terminal: Terminal<TestBackend>) {
+        let p = path.to_string_lossy().to_string();
+        with_settings!({filters => vec![(p.as_str(), format!("[{:^p$}]", "TMPDIR", p = p.len().saturating_sub(2)).as_str())]}, {
+            assert_snapshot!(snap_name, terminal.backend());
+        });
+    }
 
     #[test_case("/home/user/projects/dotrift/src/main.rs", 20, Some("/home/user"), "~/p/d/src/main.rs" ; "shrinks multiple components")]
     #[test_case("/home/user", 20, Some("/home/user"), "~" ; "exactly home")]

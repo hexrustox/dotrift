@@ -1,0 +1,9 @@
+---
+source: tui/src/pager/mod.rs
+expression: terminal.backend()
+---
+" keep                                            | keep                                             "
+"-remove                                          |                                                  "
+"                                                 |                                                  "
+"                                                 |                                                  "
+"(1/1) source +0, target -1        [            TMPDIR            ]                            h help"

@@ -1,0 +1,9 @@
+---
+source: tui/src/pager/mod.rs
+expression: terminal.backend()
+---
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
+"(1/1)                             [            TMPDIR            ]                            h help"

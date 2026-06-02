@@ -1,14 +1,14 @@
 ---
-source: tui/src/pager/explorer.rs
+source: tui/src/pager/mod.rs
 expression: terminal.backend()
 ---
-"hello                                            |preview                                           "
-"world                                            |                                                  "
+"[            TMPDIR            ]                 |preview                                           "
+"  a.txt                                          |                                                  "
+"  b.txt                                          |                                                  "
 "                                                 |                                                  "
 "                                                 |                                                  "
 "                                                 |                                                  "
 "                                                 |                                                  "
 "                                                 |                                                  "
 "                                                 |                                                  "
-"                                                 |                                                  "
-"Browser (1/1)                     [            TMPDIR            ]                            h help"
+"Source (1/1)                      [            TMPDIR            ]                            h help"

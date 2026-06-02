@@ -248,27 +248,26 @@ impl PagerMode for Explorer {
         self.preview.render(frame, preview_area);
 
         let status_text = match self.focus {
-            Focus::Browser => match &self.browser {
-                BrowseState::Dir {
-                    entries, cursor, ..
-                } => {
-                    format!("Browser ({}/{})", cursor + 1, entries.len())
-                }
-                BrowseState::File { viewer, .. } => {
-                    let total = viewer.lines_count();
-                    let vp_h = browser_area.height as usize;
-                    format!(
-                        "Browser {}",
-                        scroll_status(viewer.scroll_pos(), total, vp_h)
-                    )
-                }
-                BrowseState::Error { .. } => "Browser".to_string(),
-            },
+            Focus::Browser => {
+                "Target browser".to_string()
+                    + (match &self.browser {
+                        BrowseState::Dir {
+                            entries, cursor, ..
+                        } => format!(" ({}/{})", cursor + 1, entries.len()),
+                        BrowseState::File { viewer, .. } => {
+                            let total = viewer.lines_count();
+                            let vp_h = browser_area.height as usize;
+                            format!(" {}", scroll_status(viewer.scroll_pos(), total, vp_h))
+                        }
+                        BrowseState::Error { .. } => String::new(),
+                    })
+                    .as_str()
+            }
             Focus::Preview => {
                 let total = self.preview.lines_count();
                 let vp_h = preview_area.height as usize;
                 format!(
-                    "Preview {}",
+                    "Source {}",
                     scroll_status(self.preview.scroll_pos(), total, vp_h)
                 )
             }
@@ -410,8 +409,9 @@ impl PagerMode for Explorer {
 mod tests {
     use std::{fs, io::Write};
 
+    use crate::pager::tests::{TERMINAL_WIDTH, assert_terminal};
+
     use super::*;
-    use insta::{assert_snapshot, with_settings};
     use ratatui::{Terminal, backend::TestBackend};
     use tempfile::{NamedTempFile, TempDir};
     use test_case::test_case;
@@ -487,16 +487,12 @@ mod tests {
         let mut explorer = Explorer::new(preview_file.path(), dir.path()).unwrap();
         setup_explorer(&mut explorer);
 
-        let mut terminal = Terminal::new(TestBackend::new(100, 10)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(TERMINAL_WIDTH, 10)).unwrap();
         terminal
             .draw(|f| {
                 explorer.render(f, f.area());
             })
             .unwrap();
-
-        let dir = dir.path().display().to_string();
-        with_settings!({filters => vec![(dir.as_str(), format!("[{:^p$}]", "TMPDIR", p = dir.len().saturating_sub(2)).as_str())]}, {
-            assert_snapshot!(snap_name, terminal.backend());
-        });
+        assert_terminal(dir.path(), snap_name, terminal);
     }
 }

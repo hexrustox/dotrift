@@ -1,5 +1,5 @@
 ---
-source: tui/src/pager/explorer.rs
+source: tui/src/pager/mod.rs
 expression: terminal.backend()
 ---
 "[            TMPDIR            ]                 |preview                                           "
@@ -11,4 +11,4 @@ expression: terminal.backend()
 "  file09                                         |                                                  "
 "  file10                                         |                                                  "
 "> file11                                         |                                                  "
-"Browser (11/30)                   [            TMPDIR            ]                            h help"
+"Target browser (11/30)            [            TMPDIR            ]                            h help"

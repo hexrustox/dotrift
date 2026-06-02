@@ -13,7 +13,7 @@ pub fn render(frame: &mut Frame, area: Rect, left: &str, center: &Path) {
     let width = area.width as usize;
 
     let right = "h help";
-    let center = compact_path(center, width / 3);
+    let center = compact_path(center, width - left.len().max(right.len()) * 2);
 
     let mid = width / 2;
     let center_start = mid.saturating_sub(center.len() / 2);

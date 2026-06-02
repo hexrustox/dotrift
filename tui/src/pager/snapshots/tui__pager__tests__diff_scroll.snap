@@ -1,0 +1,14 @@
+---
+source: tui/src/pager/mod.rs
+expression: terminal.backend()
+---
+" line 6                                          | line 6                                           "
+" line 7                                          | line 7                                           "
+" line 8                                          | line 8                                           "
+" line 9                                          | line 9                                           "
+" line 10                                         | line 10                                          "
+" line 11                                         | line 11                                          "
+" line 12                                         | line 12                                          "
+" line 13                                         | line 13                                          "
+" line 14                                         | line 14                                          "
+"(6/12) source +0, target -0       [            TMPDIR            ]                            h help"

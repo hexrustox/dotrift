@@ -75,9 +75,10 @@ impl PagerMode for View {
 mod tests {
     use std::{fs, io::Write};
 
+    use crate::pager::tests::{TERMINAL_WIDTH, assert_terminal};
+
     use super::*;
 
-    use insta::assert_snapshot;
     use ratatui::{Terminal, backend::TestBackend};
     use tempfile::NamedTempFile;
     use test_case::test_case;
@@ -91,13 +92,13 @@ mod tests {
         fs::write(file.path(), content).unwrap();
 
         let mut view = View::new(file.path()).unwrap();
-        let mut terminal = Terminal::new(TestBackend::new(40, 5)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(TERMINAL_WIDTH, 5)).unwrap();
         terminal
             .draw(|f| {
                 view.render(f, f.area());
             })
             .unwrap();
-        assert_snapshot!(snap_name, terminal.backend());
+        assert_terminal(file.path(), snap_name, terminal);
     }
 
     #[test]
@@ -112,12 +113,12 @@ mod tests {
         let vp_h = 5;
         view.scroll_down(5, vp_h);
 
-        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(TERMINAL_WIDTH, 10)).unwrap();
         terminal
             .draw(|f| {
                 view.render(f, f.area());
             })
             .unwrap();
-        assert_snapshot!("view_scroll", terminal.backend());
+        assert_terminal(file.path(), "view_scroll", terminal);
     }
 }

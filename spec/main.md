@@ -354,7 +354,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
      * **skip:** Do not touch the filesystem. Continue traversal.
      * **overwrite:** Delete the directory recursively, delete DB entries under the directory. Proceed to step 4.
      * **quit:** Immediately terminate the program.
-     * **diff:** Open pager in explorer mode. Left pane: source file content. Right pane: file browser at the target directory.
+     * **diff:** Open pager in explorer mode. Left pane: file browser at the target directory. Right pane: source file content.
 3. **Exists?** Yes → File or symlink on disk:
    a. **Identical Check:** Determine if the target matches what dotrift would write.
        - `symlink`: target is symlink AND link target == `entry.source` → identical.
@@ -375,7 +375,7 @@ Traverse Rose Tree top-down (Pre-order DFS).
         - **skip:** Do not touch the filesystem. Continue traversal.
         - **overwrite:** Delete the disk entity. Proceed to step 4.
         - **quit:** Immediately terminate the program.
-        - **diff:** Open pager in side-by-side mode. Left pane: source file. Right pane: target file on disk.
+        - **diff:** Open pager in side-by-side mode. Left pane: target file on disk. Right pane: source file.
 4. **Write:**
     - `symlink`: unlink target (if exists) → `symlink(entry.source, target)`.
     - `copy`: if `entry.source` is a symlink on disk, create a symlink at target pointing to `read_link(entry.source)`. Otherwise, `fs::copy(source, target)`. After write: if `mode` set AND target is regular file → `chmod`.

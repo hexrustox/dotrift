@@ -302,7 +302,7 @@ impl PagerMode for Diff {
             frame,
             footer_area,
             &format!(
-                "{} (+{} -{})",
+                "{} source +{}, target -{}",
                 scroll_status(self.scroll.get(), self.pairs.len(), visible_h),
                 self.added,
                 self.removed
@@ -336,8 +336,9 @@ impl PagerMode for Diff {
 mod tests {
     use std::{fs, io::Write};
 
+    use crate::pager::tests::{TERMINAL_WIDTH, assert_terminal};
+
     use super::*;
-    use insta::assert_snapshot;
     use ratatui::{Terminal, backend::TestBackend};
     use tempfile::NamedTempFile;
     use test_case::test_case;
@@ -355,13 +356,13 @@ mod tests {
         fs::write(new.path(), new_str).unwrap();
 
         let mut diff = Diff::new(old.path(), new.path()).unwrap();
-        let mut terminal = Terminal::new(TestBackend::new(40, 5)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(TERMINAL_WIDTH, 5)).unwrap();
         terminal
             .draw(|f| {
                 diff.render(f, f.area());
             })
             .unwrap();
-        assert_snapshot!(snap_name, terminal.backend());
+        assert_terminal(old.path(), snap_name, terminal);
     }
 
     #[test]
@@ -379,12 +380,12 @@ mod tests {
         let vp_h = 5;
         diff.scroll_down(5, vp_h);
 
-        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(TERMINAL_WIDTH, 10)).unwrap();
         terminal
             .draw(|f| {
                 diff.render(f, f.area());
             })
             .unwrap();
-        assert_snapshot!("diff_scroll", terminal.backend());
+        assert_terminal(old.path(), "diff_scroll", terminal);
     }
 }

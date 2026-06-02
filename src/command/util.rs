@@ -349,8 +349,10 @@ pub fn clone_file(from: &Path, to: &Path) -> Result<()> {
             from
         )?;
     } else {
-        #[cfg(test)]
-        panic!("{:?} is not a directory", from);
+        return Err(miette!(
+            "cannot clone `{}`: unsupported file type",
+            from.display()
+        ));
     }
 
     Ok(())
