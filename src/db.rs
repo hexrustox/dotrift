@@ -43,7 +43,17 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<DbEntry> {
         )
     })?;
 
-    let hash = hash_str.and_then(|s| u64::from_str_radix(&s, 16).ok());
+    let hash = hash_str
+        .map(|s| {
+            u64::from_str_radix(&s, 16).map_err(|_| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    3,
+                    rusqlite::types::Type::Text,
+                    miette!("invalid hash `{s}` for `{target_str}`").into(),
+                )
+            })
+        })
+        .transpose()?;
     let mtime: Option<i64> = row.get(5)?;
 
     let symlink_target = symlink_target_str.map(PathBuf::from);

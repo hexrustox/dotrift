@@ -214,11 +214,14 @@ fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<(
                 .wrap_err("failed to expand editor command parameters")?;
             (config.command, args)
         }
-        _ => match env::var_os("VISUAL").or(env::var_os("EDITOR")) {
+        _ => match env::var_os("VISUAL")
+            .or(env::var_os("EDITOR"))
+            .filter(|s| !s.is_empty())
+        {
             Some(cmd_os) => {
                 let cmd_str = cmd_os.to_string_lossy();
                 let mut parts = cmd_str.split_whitespace();
-                let cmd = parts.next().unwrap_or("").to_string();
+                let cmd = parts.next().expect("editor command is empty").to_string();
                 let mut args: Vec<String> = parts.map(String::from).collect();
                 args.push(file);
                 (cmd, args)

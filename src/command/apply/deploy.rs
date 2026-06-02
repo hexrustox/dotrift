@@ -213,7 +213,7 @@ pub fn deploy_file(
                 .wrap_err_with(|| format!("failed to resolve `{}`", entry.source.display()))?;
             let file = open_template_err!(fs::File::open(&src), &src)?;
 
-            // SAFETY: This process has exclusive access to the file — opened read-only,
+            // SAFETY: Assume this process has exclusive access to the file — opened read-only,
             // no concurrent writer modifies or truncates it while mapped.
             let mmap = mmap_template_err!(unsafe { Mmap::map(&file) }, &src)?;
 

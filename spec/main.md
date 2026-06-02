@@ -318,7 +318,7 @@ Build a Rose Tree from the HashMap.
 #### `--dry-run` Behavior
 If active, the command executes Phases 1 and 2, then simulates the remaining phases to generate a report, and finally exits without modifying the filesystem or database.
 
-The plan is printed to `stdout` and includes:
+The plan is printed and includes:
 
 1.  **Clean-up Plan (if `--clean-up` is also passed):** The dry run simulates the clean-up phase first. It iterates the database and prints `[REMOVE] <path>` for any entry not found in the Phase 1 portal entries HashMap.
 

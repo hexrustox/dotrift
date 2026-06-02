@@ -25,6 +25,7 @@ pub struct Config {
 }
 
 impl Config {
+    #[cfg(test)]
     pub fn read(source_dir: &Path) -> Result<Self> {
         let path = config_path(source_dir);
         let s = crate::read_file_err!(fs::read_to_string(&path), &path)?;

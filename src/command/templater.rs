@@ -47,7 +47,8 @@ pub fn run(global: GlobalFlags, db_path: &Path, flags: TemplaterFlags) -> Result
     } else {
         let path = flags.file.as_ref().unwrap();
         let file = open_template_err!(fs::File::open(path), path)?;
-        // SAFETY: This process has exclusive access to the file — opened read-only,
+
+        // SAFETY: Assume this process has exclusive access to the file — opened read-only,
         // no concurrent writer modifies or truncates it while mapped.
         let mmap = mmap_template_err!(unsafe { Mmap::map(&file) }, path)?;
         parse_template_err!(Template::from_mmap(mmap), path)?
@@ -106,6 +107,9 @@ pub fn run(global: GlobalFlags, db_path: &Path, flags: TemplaterFlags) -> Result
 fn parse_cli_var(s: &str) -> Option<(String, Value)> {
     let doc = toml::from_str::<toml::Value>(s).ok()?;
     let table = doc.as_table()?;
+    if table.len() > 1 {
+        return None;
+    }
     let (key, value) = table.iter().next()?;
     let value = Value::try_from(value.clone()).ok()?;
     Some((key.to_string(), value))
