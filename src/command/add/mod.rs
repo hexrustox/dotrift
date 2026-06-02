@@ -12,7 +12,7 @@ use crate::{
     cli::{AddFlags, GlobalFlags, OpenEditor},
     command::{
         to_absolute_path,
-        util::{copy_recursive, resolve_target, walk_files, PathExt},
+        util::{PathExt, copy_recursive, resolve_target, walk_files},
     },
     config::Config,
     copy_file_err,
@@ -29,8 +29,8 @@ use self::portal::analyze_portal;
 mod config;
 mod portal;
 
-pub use self::portal::PortalAnalysis;
 pub use self::config::{apply_config_changes, portal_insertion_point, toml_quote};
+pub use self::portal::PortalAnalysis;
 
 pub fn run(
     global_flags: GlobalFlags,

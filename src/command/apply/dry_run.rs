@@ -32,11 +32,11 @@ pub fn print_tree(path: &Path, node: &Node) -> Result<usize> {
 mod tests {
     use std::fs;
 
+    use super::super::tests::mock_apply;
     use crate::{
         cli::ApplyFlags,
         command::util::{assert_captured_output, tests::setup_test},
     };
-    use super::super::tests::mock_apply;
 
     #[test]
     fn test_dry_run_print_snapshot() {

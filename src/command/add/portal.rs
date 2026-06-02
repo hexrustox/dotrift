@@ -9,7 +9,8 @@ use normalize_path::NormalizePath;
 
 use crate::{
     command::{
-        apply::build_ignore, tree,
+        apply::build_ignore,
+        tree,
         util::{GLOB_OPTION, StripPrefixOrSelf, is_glob, resolve_portal_entries},
     },
     config::Config,
@@ -188,11 +189,8 @@ pub fn analyze_portal(
 mod tests {
     use std::{collections::HashMap, fs, path::Path};
 
-    use crate::{
-        command::util::tests::setup_test,
-        config::Config,
-    };
     use super::*;
+    use crate::{command::util::tests::setup_test, config::Config};
     use test_case::test_case;
 
     #[test_case("", "file" => true; "empty")]

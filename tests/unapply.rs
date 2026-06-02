@@ -281,4 +281,3 @@ fn test_unapply_only_portal_matched() {
     assert!(db.get_entry(&target_dir.join("a.txt")).unwrap().is_none());
     assert!(db.get_entry(&target_dir.join("b.txt")).unwrap().is_some());
 }
-

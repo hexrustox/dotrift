@@ -34,7 +34,8 @@ pub fn annotate_portal_key(content: &mut String, key: &str, annotation: &str) {
     let mut offset = 0;
 
     for line in content.lines() {
-        let line_end = offset + line.len() + content[offset + line.len()..].starts_with('\n') as usize;
+        let line_end =
+            offset + line.len() + content[offset + line.len()..].starts_with('\n') as usize;
 
         if !in_portal {
             if is_table_header(line.trim(), "portal") {
