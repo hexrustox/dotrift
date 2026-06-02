@@ -41,7 +41,7 @@ impl HotKey for CollisionOptions {
     }
 }
 
-#[allow(unused)]
+#[allow(unused_variables, unreachable_code)]
 pub fn prompt_collision(
     source: Option<&Path>,
     target: &Path,

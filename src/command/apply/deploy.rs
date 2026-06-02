@@ -65,11 +65,11 @@ pub fn traverse_tree(
     Ok(())
 }
 
-pub fn abort_deploy(at: &Path) -> Report {
+fn abort_deploy(at: &Path) -> Report {
     miette!("aborted at `{}`", at.display())
 }
 
-pub fn deploy_dir(path: &Path, db: &Db, verbose: bool) -> Result<bool> {
+fn deploy_dir(path: &Path, db: &Db, verbose: bool) -> Result<bool> {
     if path.path_exists() {
         if path.path_is_dir() {
             return Ok(false);
@@ -97,7 +97,7 @@ pub fn deploy_dir(path: &Path, db: &Db, verbose: bool) -> Result<bool> {
     Ok(false)
 }
 
-pub fn is_identical(
+fn is_identical(
     target: &Path,
     source: &Path,
     deploy_type: DeployType,
@@ -130,7 +130,7 @@ pub fn is_identical(
     }
 }
 
-pub fn deploy_file(
+fn deploy_file(
     target: &Path,
     entry: &PortalEntry,
     db: &Db,

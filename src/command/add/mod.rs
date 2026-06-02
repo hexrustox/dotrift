@@ -29,8 +29,6 @@ use self::portal::analyze_portal;
 mod config;
 mod portal;
 
-pub use self::portal::PortalAnalysis;
-
 pub fn run(
     global_flags: GlobalFlags,
     path: PathBuf,
@@ -187,7 +185,7 @@ pub fn run(
     Ok(())
 }
 
-#[allow(unused)]
+#[allow(unused_variables, unreachable_code)]
 fn launch_editor(file_path: &Path, config_override: Option<PathBuf>) -> Result<()> {
     #[cfg(test)]
     return Ok(());

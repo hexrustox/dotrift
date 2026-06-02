@@ -99,7 +99,7 @@ pub fn is_glob(pattern: &str) -> bool {
     pattern.contains(['*', '?', '[', ']'])
 }
 
-pub fn strip_prefix_filter_glob(glob_pattern: &str) -> String {
+fn strip_prefix_filter_glob(glob_pattern: &str) -> String {
     let mut prefix = String::with_capacity(glob_pattern.len());
     for component in glob_pattern.split('/') {
         if is_glob(component) {
@@ -234,11 +234,11 @@ where
     Ok(())
 }
 
-pub fn is_ignored(matcher: &Gitignore, path: &Path) -> bool {
+fn is_ignored(matcher: &Gitignore, path: &Path) -> bool {
     matcher.matched_path_or_any_parents(path, false).is_ignore()
 }
 
-pub fn walk_all(path: &Path) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
+fn walk_all(path: &Path) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
     WalkDir::new(path).into_iter().filter_map(|e| match e {
         Ok(entry) => Some(entry),
         Err(err) => {

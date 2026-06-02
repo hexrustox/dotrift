@@ -12,10 +12,14 @@ use std::io;
 use memmap2::Mmap;
 use miette::{Report, Result};
 
-use crate::{ast::Node, error::Error, function::FunctionRegistry};
+use crate::{
+    ast::Node,
+    error::Error,
+    eval::{EvalContext, eval_nodes},
+    function::FunctionRegistry,
+};
 pub use crate::{
     error::FuncError,
-    eval::{EvalContext, eval_nodes},
     value::{Value, ValueType},
 };
 

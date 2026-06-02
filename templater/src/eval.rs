@@ -202,14 +202,14 @@ fn dot_access(val: Value, field: &str, range: Range<usize>) -> Result<Value, Err
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::collections::{BTreeMap, HashMap};
 
     use test_case::test_case;
 
     use crate::{
-        EvalContext, FuncError, Template, Value,
+        FuncError, Template, Value,
         error::{Error, ErrorKind},
-        eval_nodes,
         function::FunctionRegistry,
         parser::parse,
         scanner::scan,

@@ -16,7 +16,7 @@ use crate::{
     config::Config,
 };
 
-pub struct CompiledPortal {
+struct CompiledPortal {
     globs: Vec<Pattern>,
     literals: Vec<PathBuf>,
 }

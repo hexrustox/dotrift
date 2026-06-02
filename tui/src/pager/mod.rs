@@ -207,7 +207,7 @@ impl Scroll {
     }
 }
 
-pub fn scroll_status(scroll_pos: usize, total: usize, viewport_h: usize) -> String {
+fn scroll_status(scroll_pos: usize, total: usize, viewport_h: usize) -> String {
     let max_pos = total.saturating_sub(viewport_h) + 1;
     format!("({}/{})", scroll_pos + 1, max_pos)
 }

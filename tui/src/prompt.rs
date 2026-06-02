@@ -67,20 +67,20 @@ where
         self
     }
 
-    pub fn separator(mut self, s: impl Into<String>) -> Self {
-        self.separator = s.into();
-        self
-    }
+    // pub fn separator(mut self, s: impl Into<String>) -> Self {
+    //     self.separator = s.into();
+    //     self
+    // }
 
-    pub fn anchor(mut self, s: impl Into<String>) -> Self {
-        self.anchor = s.into();
-        self
-    }
+    // pub fn anchor(mut self, s: impl Into<String>) -> Self {
+    //     self.anchor = s.into();
+    //     self
+    // }
 
-    pub fn default(mut self, default: I) -> Self {
-        self.default = Some(default);
-        self
-    }
+    // pub fn default(mut self, default: I) -> Self {
+    //     self.default = Some(default);
+    //     self
+    // }
 
     pub fn help(mut self) -> Self {
         self.help = true;
