@@ -4,7 +4,7 @@ use miette::Context;
 
 use crate::{
     cli::{GlobalFlags, UnapplyFlags},
-    command::apply::{build_ignore, resolve_portals_for_unapply},
+    command::apply::{build_ignore, resolve_portals},
     command::util::{clean_up, resolve_target},
     config::Config,
     db::Db,
@@ -25,8 +25,13 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: UnapplyFlags) -> mi
     let target_dir = resolve_target(&source_dir, target_override, &config)?;
 
     let ignore_matcher = build_ignore(&config.ignore, &target_dir)?;
-    let portal_entries =
-        resolve_portals_for_unapply(&source_dir, &target_dir, &config.portal, &ignore_matcher)?;
+    let portal_entries = resolve_portals(
+        &source_dir,
+        &target_dir,
+        &config.portal,
+        &ignore_matcher,
+        true,
+    )?;
 
     let n = clean_up(
         &portal_entries,

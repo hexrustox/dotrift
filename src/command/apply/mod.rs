@@ -77,7 +77,7 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
     let ignore_matcher = build_ignore(&config.ignore, &target_dir)?;
 
     let mut portal_entries =
-        resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher)?;
+        resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher, false)?;
 
     validate_portal_targets(&portal_entries, &source_dir)?;
 
@@ -158,11 +158,12 @@ pub fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore>
         .wrap_err("failed to compile ignore patterns")
 }
 
-fn resolve_portals(
+pub fn resolve_portals(
     source_dir: &Path,
     target_dir: &Path,
     portals: &HashMap<String, PathBuf>,
     ignore_matcher: &Gitignore,
+    skip_missing: bool,
 ) -> Result<HashMap<PathBuf, PortalEntry>> {
     let mut portal_entries: HashMap<PathBuf, PortalEntry> = HashMap::new();
 
@@ -171,7 +172,7 @@ fn resolve_portals(
         target_dir,
         portals,
         ignore_matcher,
-        false,
+        skip_missing,
         |source_path, target_path, _| {
             insert_portal_entry(&mut portal_entries, target_path, source_path)
         },
@@ -186,20 +187,7 @@ pub fn resolve_portals_for_unapply(
     portals: &HashMap<String, PathBuf>,
     ignore_matcher: &Gitignore,
 ) -> Result<HashMap<PathBuf, PortalEntry>> {
-    let mut portal_entries: HashMap<PathBuf, PortalEntry> = HashMap::new();
-
-    resolve_portal_entries(
-        source_dir,
-        target_dir,
-        portals,
-        ignore_matcher,
-        true,
-        |source_path, target_path, _| {
-            insert_portal_entry(&mut portal_entries, target_path, source_path)
-        },
-    )?;
-
-    Ok(portal_entries)
+    resolve_portals(source_dir, target_dir, portals, ignore_matcher, true)
 }
 
 fn insert_portal_entry(
@@ -339,7 +327,7 @@ mod tests {
         let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
         let portal_entries =
-            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
+            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher, false).unwrap();
         flatten(portal_entries, temp_dir.path())
     }
 
@@ -357,7 +345,7 @@ mod tests {
         let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
         let portal_entries =
-            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
+            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher, false).unwrap();
         validate_portal_targets(&portal_entries, &source_dir).unwrap();
     }
 
@@ -379,7 +367,7 @@ mod tests {
         let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
         let portal_entries =
-            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
+            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher, false).unwrap();
         flatten(portal_entries, temp_dir.path())
     }
 
@@ -438,7 +426,7 @@ mod tests {
         let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
         let mut portal_entries =
-            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
+            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher, false).unwrap();
         apply_rules(&target_dir, &mut portal_entries, &config.rule).unwrap();
         flatten(portal_entries, temp_dir.path())
     }

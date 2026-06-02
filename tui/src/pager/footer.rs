@@ -1,11 +1,6 @@
 use std::path::Path;
 
-use ratatui::{
-    Frame,
-    layout::Rect,
-    style::{Style, Stylize},
-    text::Line,
-};
+use ratatui::{Frame, layout::Rect, style::Style, text::Line};
 
 use super::compact_path;
 
