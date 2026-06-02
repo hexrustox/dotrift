@@ -391,7 +391,7 @@ fn test_editor_missing() {
 #[ignore]
 fn test_editor_collision() {
     let config = r#"[portal]
-"other" = "file"
+other = "file"
 "#;
     let (temp_dir, source_dir, target_dir, _) = setup_test(config);
 

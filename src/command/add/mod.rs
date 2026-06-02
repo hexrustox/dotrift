@@ -29,7 +29,6 @@ use self::portal::analyze_portal;
 mod config;
 mod portal;
 
-pub use self::config::{apply_config_changes, portal_insertion_point, toml_quote};
 pub use self::portal::PortalAnalysis;
 
 pub fn run(
