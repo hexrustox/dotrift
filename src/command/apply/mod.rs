@@ -79,6 +79,8 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
     let mut portal_entries =
         resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher)?;
 
+    validate_portal_targets(&portal_entries, &source_dir)?;
+
     apply_rules(&target_dir, &mut portal_entries, &config.rule)?;
 
     let remove_count = if flags.clean_up {
@@ -156,7 +158,7 @@ pub fn build_ignore(patterns: &[String], target_dir: &Path) -> Result<Gitignore>
         .wrap_err("failed to compile ignore patterns")
 }
 
-pub fn resolve_portals(
+fn resolve_portals(
     source_dir: &Path,
     target_dir: &Path,
     portals: &HashMap<String, PathBuf>,
@@ -171,7 +173,29 @@ pub fn resolve_portals(
         ignore_matcher,
         false,
         |source_path, target_path, _| {
-            insert_portal_entry(&mut portal_entries, target_path, source_path, source_dir)
+            insert_portal_entry(&mut portal_entries, target_path, source_path)
+        },
+    )?;
+
+    Ok(portal_entries)
+}
+
+pub fn resolve_portals_for_unapply(
+    source_dir: &Path,
+    target_dir: &Path,
+    portals: &HashMap<String, PathBuf>,
+    ignore_matcher: &Gitignore,
+) -> Result<HashMap<PathBuf, PortalEntry>> {
+    let mut portal_entries: HashMap<PathBuf, PortalEntry> = HashMap::new();
+
+    resolve_portal_entries(
+        source_dir,
+        target_dir,
+        portals,
+        ignore_matcher,
+        true,
+        |source_path, target_path, _| {
+            insert_portal_entry(&mut portal_entries, target_path, source_path)
         },
     )?;
 
@@ -182,16 +206,7 @@ fn insert_portal_entry(
     portal_entries: &mut HashMap<PathBuf, PortalEntry>,
     target_path: PathBuf,
     source_path: PathBuf,
-    source_dir: &Path,
 ) -> Result<()> {
-    if target_path.starts_with(source_dir) {
-        return Err(miette!(
-            "target path `{}` is inside source directory `{}`",
-            target_path.display(),
-            source_dir.display()
-        ));
-    }
-
     if let Some(existing) = portal_entries.insert(
         target_path.clone(),
         PortalEntry {
@@ -206,6 +221,22 @@ fn insert_portal_entry(
             existing.source.display(),
             source_path.display()
         ));
+    }
+    Ok(())
+}
+
+pub fn validate_portal_targets(
+    portal_entries: &HashMap<PathBuf, PortalEntry>,
+    source_dir: &Path,
+) -> Result<()> {
+    for target_path in portal_entries.keys() {
+        if target_path.starts_with(source_dir) {
+            return Err(miette!(
+                "target path `{}` is inside source directory `{}`",
+                target_path.display(),
+                source_dir.display()
+            ));
+        }
     }
     Ok(())
 }
@@ -314,8 +345,7 @@ mod tests {
 
     #[test_case(r#""file" = "b/file""# => panics "inside source"; "target_inside_source_literal")]
     #[test_case(r#""*" = "b""# => panics "inside source"; "target_inside_source_glob")]
-    #[test_case(r#""file" = "other""# => (); "target_not_inside_source")]
-    fn test_target_not_in_source(portal: &str) {
+    fn test_target_inside_source(portal: &str) {
         let temp_dir = tempfile::tempdir().unwrap();
         let target_dir = temp_dir.path().join("a");
         let source_dir = target_dir.join("b");
@@ -326,7 +356,9 @@ mod tests {
 
         let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
-        resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
+        let portal_entries =
+            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher).unwrap();
+        validate_portal_targets(&portal_entries, &source_dir).unwrap();
     }
 
     #[test_case("" => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "empty")]
