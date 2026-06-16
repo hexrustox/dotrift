@@ -1,12 +1,12 @@
 {
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-25.11";
+    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-26.05";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-parts.url = "github:hercules-ci/flake-parts";
-    nix-capsule.url = "gitlab:codnixus/nix-capsule?ref=v0.5.0";
+    nix-capsule.url = "gitlab:codnixus/nix-capsule?ref=v0.8.0";
   };
 
   outputs =
