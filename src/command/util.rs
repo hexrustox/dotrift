@@ -464,11 +464,21 @@ pub mod tests {
         fs::create_dir(&target_dir).unwrap();
 
         if populate {
-            fs::write(source_dir.join("a.txt"), "").unwrap();
-            fs::write(source_dir.join("b.txt"), "").unwrap();
+            fs::write(source_dir.join("file.txt"), "").unwrap();
+            unix_fs::symlink(source_dir.join("file.txt"), source_dir.join("link.txt")).unwrap();
+            unix_fs::symlink(
+                Path::new("/nonexistent/dotrift_test_target"),
+                source_dir.join("broken.txt"),
+            )
+            .unwrap();
             fs::create_dir(source_dir.join("subdir")).unwrap();
-            fs::write(source_dir.join("subdir").join("c.txt"), "").unwrap();
-            fs::write(source_dir.join("subdir").join("d.txt"), "").unwrap();
+            fs::create_dir(source_dir.join("subdir").join("nested")).unwrap();
+            fs::write(
+                source_dir.join("subdir").join("nested").join("inner.txt"),
+                "",
+            )
+            .unwrap();
+            unix_fs::symlink(source_dir.join("subdir"), source_dir.join("linkdir")).unwrap();
         }
 
         let config = format!("ignore = [{ignore}]\n[portal]\n{portal}\n[rule]\n{rule}");

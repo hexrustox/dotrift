@@ -2,8 +2,9 @@
 source: src/command/util.rs
 expression: "strip_str(crate::output::test_capture::take_all())"
 ---
-@/target/a.txt -> @/source/a.txt (symlink)
-@/target/b.txt -> @/source/b.txt (symlink)
-@/target/subdir/c.txt -> @/source/subdir/c.txt (symlink)
-@/target/subdir/d.txt -> @/source/subdir/d.txt (symlink)
-[SUMMARY] 4 entries
+@/target/broken.txt -> @/source/broken.txt (symlink)
+@/target/file.txt -> @/source/file.txt (symlink)
+@/target/link.txt -> @/source/link.txt (symlink)
+@/target/linkdir -> @/source/linkdir (symlink)
+@/target/subdir/nested/inner.txt -> @/source/subdir/nested/inner.txt (symlink)
+[SUMMARY] 5 entries

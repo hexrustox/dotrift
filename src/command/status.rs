@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn test_status_list_single() {
         let (tmp, _source_dir, target_dir, db_path) = setup_status();
-        list(Some(target_dir.join("a.txt")), &db_path).unwrap();
+        list(Some(target_dir.join("file.txt")), &db_path).unwrap();
         assert_captured_output("status_list_single", tmp.path());
     }
 
@@ -109,10 +109,15 @@ mod tests {
     #[test]
     fn test_status_clear_single() {
         let (_tmp, _source_dir, target_dir, db_path) = setup_status();
-        clear(Some(target_dir.join("a.txt")), &db_path).unwrap();
+        clear(Some(target_dir.join("file.txt")), &db_path).unwrap();
         let db = Db::init(&db_path).unwrap();
-        assert!(db.get_entry(&target_dir.join("a.txt")).unwrap().is_none());
-        assert!(db.get_entry(&target_dir.join("b.txt")).unwrap().is_some());
+        assert!(
+            db.get_entry(&target_dir.join("file.txt"))
+                .unwrap()
+                .is_none()
+        );
+        println!("{:?}", db.get_all_entries());
+        assert_eq!(db.get_all_entries().unwrap().len(), 4);
     }
 
     #[test]

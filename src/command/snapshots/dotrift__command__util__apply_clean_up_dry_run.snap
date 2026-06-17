@@ -2,8 +2,9 @@
 source: src/command/util.rs
 expression: "strip_str(crate::output::test_capture::take_all())"
 ---
-[REMOVE] @/target/a.txt
-[REMOVE] @/target/b.txt
-[REMOVE] @/target/subdir/c.txt
-[REMOVE] @/target/subdir/d.txt
-[SUMMARY] 4 removals
+[REMOVE] @/target/broken.txt
+[REMOVE] @/target/file.txt
+[REMOVE] @/target/link.txt
+[REMOVE] @/target/linkdir
+[REMOVE] @/target/subdir/nested/inner.txt
+[SUMMARY] 5 removals

@@ -2,4 +2,4 @@
 source: src/command/util.rs
 expression: "strip_str(crate::output::test_capture::take_all())"
 ---
-[OK] cleared 4 entries
+[OK] cleared 5 entries

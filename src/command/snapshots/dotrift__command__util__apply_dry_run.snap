@@ -6,9 +6,11 @@ expression: "strip_str(crate::output::test_capture::take_all())"
 [CREATE] @
 [CREATE] @
 [CREATE] @/target
-[CREATE] @/target/a.txt -> @/source/a.txt (symlink)
-[CREATE] @/target/b.txt -> @/source/b.txt (symlink)
+[CREATE] @/target/broken.txt -> @/source/broken.txt (symlink)
+[CREATE] @/target/file.txt -> @/source/file.txt (symlink)
+[CREATE] @/target/link.txt -> @/source/link.txt (symlink)
+[CREATE] @/target/linkdir -> @/source/linkdir (symlink)
 [CREATE] @/target/subdir
-[CREATE] @/target/subdir/c.txt -> @/source/subdir/c.txt (file)
-[CREATE] @/target/subdir/d.txt -> @/source/subdir/d.txt (file)
-[SUMMARY] 4 creates
+[CREATE] @/target/subdir/nested
+[CREATE] @/target/subdir/nested/inner.txt -> @/source/subdir/nested/inner.txt (symlink)
+[SUMMARY] 5 creates

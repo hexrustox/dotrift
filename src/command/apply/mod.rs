@@ -76,8 +76,13 @@ pub fn run(global_flags: GlobalFlags, db_path: &Path, flags: ApplyFlags) -> Resu
 
     let ignore_matcher = build_ignore(&config.ignore, &target_dir)?;
 
-    let mut portal_entries =
-        resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher, false)?;
+    let mut portal_entries = resolve_portals(
+        &source_dir,
+        &target_dir,
+        &config.portal,
+        &ignore_matcher,
+        false,
+    )?;
 
     validate_portal_targets(&portal_entries, &source_dir)?;
 
@@ -303,31 +308,37 @@ mod tests {
     }
 
     #[test_case("" => HashMap::new(); "literal_empty")]
-    #[test_case(r#""a.txt" = "A.txt""# => portal_entries!(("a.txt", "A.txt")); "literal_file")]
-    #[test_case(r#""subdir" = "dir""# => portal_entries!(("subdir/c.txt", "dir/c.txt"), ("subdir/d.txt", "dir/d.txt")); "literal_dir")]
-    #[test_case(r#""" = """# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "literal_root")]
-    #[test_case(r#""./a.txt" = "./b.txt""# => portal_entries!(("a.txt", "b.txt")); "literal_dot_normalized")]
-    #[test_case(r#""subdir/dir/../c.txt" = "dist/../root/c.txt""# => portal_entries!(("subdir/c.txt", "root/c.txt")); "literal_path_traversal")]
-    #[test_case(r#""../../a.txt" = "../../a.txt""# => portal_entries!(("a.txt", "a.txt")); "literal_path_escape_clamped")]
+    #[test_case(r#""file.txt" = "f""# => portal_entries!(("file.txt", "f")); "literal_file")]
+    #[test_case(r#""subdir" = "dir""# => portal_entries!(("subdir/nested/inner.txt", "dir/nested/inner.txt")); "literal_dir")]
+    #[test_case(r#""" = """# => portal_entries!(("file.txt", "file.txt"), ("link.txt", "link.txt"), ("broken.txt", "broken.txt"), ("linkdir", "linkdir"), ("subdir/nested/inner.txt", "subdir/nested/inner.txt")); "literal_root")]
+    #[test_case(r#""./file.txt" = "./link.txt""# => portal_entries!(("file.txt", "link.txt")); "literal_dot_normalized")]
+    #[test_case(r#""subdir/nested/inner.txt" = "dist/../root/inner.txt""# => portal_entries!(("subdir/nested/inner.txt", "root/inner.txt")); "literal_path_traversal")]
+    #[test_case(r#""../../file.txt" = "../../file.txt""# => portal_entries!(("file.txt", "file.txt")); "literal_path_escape_clamped")]
     #[test_case(r#""*.rs" = """# => portal_entries!(); "glob_no_match")]
-    #[test_case(r#""*.txt" = "root""# => portal_entries!(("a.txt", "root/a.txt"), ("b.txt", "root/b.txt")); "glob_shallow_pattern")]
-    #[test_case(r#""**/*" = ".""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "glob_recursive_all")]
-    #[test_case(r#""**/*.txt" = "files""# => portal_entries!(("a.txt", "files/a.txt"), ("b.txt", "files/b.txt"), ("subdir/c.txt", "files/subdir/c.txt"), ("subdir/d.txt", "files/subdir/d.txt")); "glob_recursive_pattern")]
-    #[test_case(r#""**/c.txt" = "out""# => portal_entries!(("subdir/c.txt", "out/subdir/c.txt")); "glob_recursive_prefix")]
-    #[test_case(r#""subdir/**/*.txt" = "out""# => portal_entries!(("subdir/c.txt", "out/c.txt"), ("subdir/d.txt", "out/d.txt")); "glob_recursive_middle")]
-    #[test_case(r#""a.txt" = "A.txt"
-"a.*" = """# => portal_entries!(("a.txt", "a.txt"), ("a.txt", "A.txt")); "multiple_same_source")]
-    #[test_case(r#""a.txt" = "same"
-"b.txt" = "same""# => panics "collision"; "multiple_same_target")]
+    #[test_case(r#""*.txt" = "root""# => portal_entries!(("file.txt", "root/file.txt"), ("link.txt", "root/link.txt"), ("broken.txt", "root/broken.txt")); "glob_shallow_pattern")]
+    #[test_case(r#""**/*" = ".""# => portal_entries!(("file.txt", "file.txt"), ("link.txt", "link.txt"), ("broken.txt", "broken.txt"), ("linkdir", "linkdir"), ("subdir/nested/inner.txt", "subdir/nested/inner.txt"), ("linkdir/nested/inner.txt", "linkdir/nested/inner.txt")); "glob_recursive_all")]
+    #[test_case(r#""**/*.txt" = "files""# => portal_entries!(("file.txt", "files/file.txt"), ("link.txt", "files/link.txt"), ("broken.txt", "files/broken.txt"), ("subdir/nested/inner.txt", "files/subdir/nested/inner.txt"), ("linkdir/nested/inner.txt", "files/linkdir/nested/inner.txt")); "glob_recursive_pattern")]
+    #[test_case(r#""**/inner.txt" = "out""# => portal_entries!(("subdir/nested/inner.txt", "out/subdir/nested/inner.txt"), ("linkdir/nested/inner.txt", "out/linkdir/nested/inner.txt")); "glob_recursive_prefix")]
+    #[test_case(r#""subdir/**/*.txt" = "out""# => portal_entries!(("subdir/nested/inner.txt", "out/nested/inner.txt")); "glob_recursive_middle")]
+    #[test_case(r#""file.txt" = "A.txt"
+"file.*" = """# => portal_entries!(("file.txt", "A.txt"), ("file.txt", "file.txt")); "multiple_same_source")]
+    #[test_case(r#""file.txt" = "same"
+"link.txt" = "same""# => panics "collision"; "multiple_same_target")]
     #[test_case(r#""**/*" = "."
-"a.txt" = "a.txt""# => panics "collision"; "literal_glob_same_target")]
+"file.txt" = "file.txt""# => panics "collision"; "literal_glob_same_target")]
     #[test_case(r#""foo" = "bar""# => panics "does not exist"; "non_existing")]
     fn test_resolve_portals(portal: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = setup_test(portal, "", "", true);
         let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
-        let portal_entries =
-            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher, false).unwrap();
+        let portal_entries = resolve_portals(
+            &source_dir,
+            &target_dir,
+            &config.portal,
+            &ignore_matcher,
+            false,
+        )
+        .unwrap();
         flatten(portal_entries, temp_dir.path())
     }
 
@@ -344,89 +355,119 @@ mod tests {
 
         let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
-        let portal_entries =
-            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher, false).unwrap();
+        let portal_entries = resolve_portals(
+            &source_dir,
+            &target_dir,
+            &config.portal,
+            &ignore_matcher,
+            false,
+        )
+        .unwrap();
         validate_portal_targets(&portal_entries, &source_dir).unwrap();
     }
 
-    #[test_case("" => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "empty")]
-    #[test_case(r#""*.txt""# => portal_entries!(); "glob_all_files")]
+    #[test_case("" => portal_entries!(("file.txt", "file.txt"), ("link.txt", "link.txt"), ("broken.txt", "broken.txt"), ("linkdir", "linkdir"), ("subdir/nested/inner.txt", "subdir/nested/inner.txt")); "empty")]
+    #[test_case(r#""*.txt""# => portal_entries!(("linkdir", "linkdir")); "glob_all_files")]
     #[test_case(r#""**""# => portal_entries!(); "glob_everything")]
-    #[test_case(r#""/*.txt""# => portal_entries!(("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "glob_anchored")]
-    #[test_case(r#""subdir/*""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "glob_dir_contents")]
-    #[test_case(r#""**/c.txt""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/d.txt", "subdir/d.txt")); "glob_file_anywhere")]
-    #[test_case(r#""subdir/**""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "glob_double_star_dir")]
-    #[test_case(r#""subdir/""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "dir_trailing_slash")]
-    #[test_case(r#""*.txt", "!dotrift.toml""# => portal_entries!(("dotrift.toml", "dotrift.toml")); "negate_selective")]
-    #[test_case(r#""!a.txt""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "negate_only")]
-    #[test_case(r#""*.txt", "!a.txt", "!b.txt""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt")); "negate_multiple")]
-    #[test_case(r#""!nonexistent.txt""# => portal_entries!(("a.txt", "a.txt"), ("b.txt", "b.txt"), ("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "negate_nonexistent")]
-    #[test_case(r#""a.txt", "b.txt""# => portal_entries!(("subdir/c.txt", "subdir/c.txt"), ("subdir/d.txt", "subdir/d.txt")); "multiple_literal")]
+    #[test_case(r#""/*.txt""# => portal_entries!(("linkdir", "linkdir"), ("subdir/nested/inner.txt", "subdir/nested/inner.txt")); "glob_anchored")]
+    #[test_case(r#""subdir/*""# => portal_entries!(("file.txt", "file.txt"), ("link.txt", "link.txt"), ("broken.txt", "broken.txt"), ("linkdir", "linkdir")); "glob_dir_contents")]
+    #[test_case(r#""**/c.txt""# => portal_entries!(("file.txt", "file.txt"), ("link.txt", "link.txt"), ("broken.txt", "broken.txt"), ("linkdir", "linkdir"), ("subdir/nested/inner.txt", "subdir/nested/inner.txt")); "glob_file_anywhere")]
+    #[test_case(r#""subdir/**""# => portal_entries!(("file.txt", "file.txt"), ("link.txt", "link.txt"), ("broken.txt", "broken.txt"), ("linkdir", "linkdir")); "glob_double_star_dir")]
+    #[test_case(r#""subdir/""# => portal_entries!(("file.txt", "file.txt"), ("link.txt", "link.txt"), ("broken.txt", "broken.txt"), ("linkdir", "linkdir")); "dir_trailing_slash")]
+    #[test_case(r#""*.txt", "!dotrift.toml""# => portal_entries!(("dotrift.toml", "dotrift.toml"), ("linkdir", "linkdir")); "negate_selective")]
+    #[test_case(r#""!file.txt""# => portal_entries!(("file.txt", "file.txt"), ("link.txt", "link.txt"), ("broken.txt", "broken.txt"), ("linkdir", "linkdir"), ("subdir/nested/inner.txt", "subdir/nested/inner.txt")); "negate_only")]
+    #[test_case(r#""*.txt", "!file.txt", "!link.txt""# => portal_entries!(
+        ("file.txt", "file.txt"),
+        ("link.txt", "link.txt"),
+        ("linkdir", "linkdir")
+    ); "negate_multiple")]
+    #[test_case(r#""!nonexistent.txt""# => portal_entries!(("file.txt", "file.txt"), ("link.txt", "link.txt"), ("broken.txt", "broken.txt"), ("linkdir", "linkdir"), ("subdir/nested/inner.txt", "subdir/nested/inner.txt")); "negate_nonexistent")]
+    #[test_case(r#""file.txt", "link.txt""# => portal_entries!(("broken.txt", "broken.txt"), ("linkdir", "linkdir"), ("subdir/nested/inner.txt", "subdir/nested/inner.txt")); "multiple_literal")]
     fn test_ignore(ignore: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, ignore, "", true);
         let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
-        let portal_entries =
-            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher, false).unwrap();
+        let portal_entries = resolve_portals(
+            &source_dir,
+            &target_dir,
+            &config.portal,
+            &ignore_matcher,
+            false,
+        )
+        .unwrap();
         flatten(portal_entries, temp_dir.path())
     }
 
     #[test_case("" => portal_entries!(
-        ("a.txt",         "a.txt",         Symlink, None),
-        ("b.txt",         "b.txt",         Symlink, None),
-        ("subdir/c.txt",  "subdir/c.txt",  Symlink, None),
-        ("subdir/d.txt",  "subdir/d.txt",  Symlink, None)
+        ("file.txt",                 "file.txt",                 Symlink, None),
+        ("link.txt",                 "link.txt",                 Symlink, None),
+        ("broken.txt",               "broken.txt",               Symlink, None),
+        ("linkdir",                  "linkdir",                  Symlink, None),
+        ("subdir/nested/inner.txt",  "subdir/nested/inner.txt",  Symlink, None)
     ); "empty")]
     #[test_case(r#""*.txt" = { type = "copy" }"# => portal_entries!(
-        ("a.txt",         "a.txt",         Copy,    None),
-        ("b.txt",         "b.txt",         Copy,    None),
-        ("subdir/c.txt",  "subdir/c.txt",  Symlink, None),
-        ("subdir/d.txt",  "subdir/d.txt",  Symlink, None)
+        ("file.txt",                 "file.txt",                 Copy,    None),
+        ("link.txt",                 "link.txt",                 Copy,    None),
+        ("broken.txt",               "broken.txt",               Copy,    None),
+        ("linkdir",                  "linkdir",                  Symlink, None),
+        ("subdir/nested/inner.txt",  "subdir/nested/inner.txt",  Symlink, None)
     ); "selective_type")]
     #[test_case(r#""*.txt" = { mode = "600" }"# => portal_entries!(
-        ("a.txt",         "a.txt",         Symlink, Some(FileMode(0o600))),
-        ("b.txt",         "b.txt",         Symlink, Some(FileMode(0o600))),
-        ("subdir/c.txt",  "subdir/c.txt",  Symlink, None),
-        ("subdir/d.txt",  "subdir/d.txt",  Symlink, None)
+        ("file.txt",                 "file.txt",                 Symlink, Some(FileMode(0o600))),
+        ("link.txt",                 "link.txt",                 Symlink, Some(FileMode(0o600))),
+        ("broken.txt",               "broken.txt",               Symlink, Some(FileMode(0o600))),
+        ("linkdir",                  "linkdir",                  Symlink, None),
+        ("subdir/nested/inner.txt",  "subdir/nested/inner.txt",  Symlink, None)
     ); "rule_mode")]
     #[test_case(r#""*.txt" = { mode = "600" }
-    "a.txt" = { type = "copy" }"# => portal_entries!(
-        ("a.txt",         "a.txt",         Copy,    Some(FileMode(0o600))),
-        ("b.txt",         "b.txt",         Symlink, Some(FileMode(0o600))),
-        ("subdir/c.txt",  "subdir/c.txt",  Symlink, None),
-        ("subdir/d.txt",  "subdir/d.txt",  Symlink, None)
+    "file.txt" = { type = "copy" }"# => portal_entries!(
+        ("file.txt",                 "file.txt",                 Copy,    Some(FileMode(0o600))),
+        ("link.txt",                 "link.txt",                 Symlink, Some(FileMode(0o600))),
+        ("broken.txt",               "broken.txt",               Symlink, Some(FileMode(0o600))),
+        ("linkdir",                  "linkdir",                  Symlink, None),
+        ("subdir/nested/inner.txt",  "subdir/nested/inner.txt",  Symlink, None)
     ); "rule_merge")]
     #[test_case(r#""*.txt" = { type = "symlink", mode = "600" }
-    "a.txt" = { type = "copy", mode = "700" }"# => portal_entries!(
-        ("a.txt",         "a.txt",         Copy,    Some(FileMode(0o700))),
-        ("b.txt",         "b.txt",         Symlink, Some(FileMode(0o600))),
-        ("subdir/c.txt",  "subdir/c.txt",  Symlink, None),
-        ("subdir/d.txt",  "subdir/d.txt",  Symlink, None)
+    "file.txt" = { type = "copy", mode = "700" }"# => portal_entries!(
+        ("file.txt",                 "file.txt",                 Copy,    Some(FileMode(0o700))),
+        ("link.txt",                 "link.txt",                 Symlink, Some(FileMode(0o600))),
+        ("broken.txt",               "broken.txt",               Symlink, Some(FileMode(0o600))),
+        ("linkdir",                  "linkdir",                  Symlink, None),
+        ("subdir/nested/inner.txt",  "subdir/nested/inner.txt",  Symlink, None)
     ); "rule_override")]
-    #[test_case(r#""subdir/*.txt" = { mode = "600" }"# => portal_entries!(
-        ("a.txt",         "a.txt",         Symlink, None),
-        ("b.txt",         "b.txt",         Symlink, None),
-        ("subdir/c.txt",  "subdir/c.txt",  Symlink, Some(FileMode(0o600))),
-        ("subdir/d.txt",  "subdir/d.txt",  Symlink, Some(FileMode(0o600)))
+    #[test_case(r#""subdir/**/*.txt" = { mode = "600" }"# => portal_entries!(
+        ("subdir/nested/inner.txt",  "subdir/nested/inner.txt",  Symlink, Some(FileMode(0o600))),
+        ("file.txt",                 "file.txt",                 Symlink, None),
+        ("link.txt",                 "link.txt",                 Symlink, None),
+        ("broken.txt",               "broken.txt",               Symlink, None),
+        ("linkdir",                  "linkdir",                  Symlink, None)
     ); "subdir_rule")]
     #[test_case(r#""**/*.txt" = { type = "copy" }"# => portal_entries!(
-        ("a.txt",         "a.txt",         Copy, None),
-        ("b.txt",         "b.txt",         Copy, None),
-        ("subdir/c.txt",  "subdir/c.txt",  Copy, None),
-        ("subdir/d.txt",  "subdir/d.txt",  Copy, None)
+        ("file.txt",                 "file.txt",                 Copy, None),
+        ("link.txt",                 "link.txt",                 Copy, None),
+        ("broken.txt",               "broken.txt",               Copy, None),
+        ("linkdir",                  "linkdir",                  Symlink, None),
+        ("subdir/nested/inner.txt",  "subdir/nested/inner.txt",  Copy, None)
     ); "recursive_glob")]
     #[test_case(r#""*.rs" = { type = "copy" }"# => portal_entries!(
-        ("a.txt",         "a.txt",         Symlink, None),
-        ("b.txt",         "b.txt",         Symlink, None),
-        ("subdir/c.txt",  "subdir/c.txt",  Symlink, None),
-        ("subdir/d.txt",  "subdir/d.txt",  Symlink, None)
+        ("file.txt",                 "file.txt",                 Symlink, None),
+        ("link.txt",                 "link.txt",                 Symlink, None),
+        ("broken.txt",               "broken.txt",               Symlink, None),
+        ("linkdir",                  "linkdir",                  Symlink, None),
+        ("subdir/nested/inner.txt",  "subdir/nested/inner.txt",  Symlink, None)
     ); "no_match")]
     fn test_apply_rules(rule: &str) -> HashMap<PathBuf, PortalEntry> {
         let (temp_dir, source_dir, target_dir) = setup_test(r#""" = """#, "", rule, true);
         let config = Config::read(&source_dir).unwrap();
         let ignore_matcher = build_ignore(&config.ignore, &target_dir).unwrap();
-        let mut portal_entries =
-            resolve_portals(&source_dir, &target_dir, &config.portal, &ignore_matcher, false).unwrap();
+        let mut portal_entries = resolve_portals(
+            &source_dir,
+            &target_dir,
+            &config.portal,
+            &ignore_matcher,
+            false,
+        )
+        .unwrap();
         apply_rules(&target_dir, &mut portal_entries, &config.rule).unwrap();
         flatten(portal_entries, temp_dir.path())
     }
