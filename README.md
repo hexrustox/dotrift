@@ -1,0 +1,3 @@
+# dotrift
+
+A declarative, template-aware dotfile manager written in Rust. dotrift maps files from a single source directory to a target directory (typically `$HOME`) using a plain `dotrift.toml` — symlinking some files, copying others, and rendering templates for the rest with a custom-built templating language and a dedicated templater workspace crate. A SQLite-backed state database tracks what dotrift manages, detects external modifications, and surfaces conflicts interactively in a TUI pager before overwriting anything. A profile system layers environment-specific variables over a base `dotrift_data.toml` so the same config can produce different outputs across machines without forking the repo.
