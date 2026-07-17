@@ -78,14 +78,14 @@ CREATE TABLE managed_files (
 
 * `target_path`: Absolute path of the managed file (primary key).
 * `deploy_type`: Enum (`symlink` | `copy` | `tmpl`).
-* `source_path`: Absolute path in `source-dir`. Used to read content for copies, or verify link targets for symlinks.
+* `source_path`: Absolute path in the source directory. Used to read content for copies, or verify link targets for symlinks.
 * `hash`: Hex digest using `xxHash64` of target file content at last apply. NULL for symlinks. Used to detect external modifications to the target (managed check compares target-on-disk hash against DB hash).
 * `symlink_target`: `read_link(source_path)` if source is a symlink and deploy type is `copy`, NULL otherwise. Decouples managed check from current source filesystem state.
 * `mtime`: Modification time of the target file at last apply, stored as milliseconds since Unix epoch. NULL for symlinks. When the on-disk mtime matches this value, the file is considered managed without computing the hash.
 
 ### `active_profiles` Table
 
-Tracks which template profiles are currently active. The activation timestamp determines variable precedence during template evaluation — last-activated (highest `activated_at`) wins on conflict.
+Tracks which template profiles are currently active.
 
 ```sql
 CREATE TABLE IF NOT EXISTS active_profiles (
@@ -99,20 +99,15 @@ CREATE TABLE IF NOT EXISTS active_profiles (
 * `activated_at`: Unix timestamp in milliseconds when the profile was activated. Last-activated (highest timestamp) wins on variable conflict.
 * `name`: Profile name, matches a `[profile.<name>]` section in `dotrift_data.toml`.
 
-The precedence algorithm itself is specified in `spec/dotrift-data-toml.md`
-under Profile Resolution; this table is only its storage.
+The precedence algorithm lives elsewhere; this table is only its storage. (see spec/dotrift-data-toml.md section "Profile Resolution")
 
 ---
 
 ## Managed Check
 
-<a id="managed-check"></a>
-
 The managed check answers "does the on-disk state of a target path match what
 the database last recorded dotrift writing there?" It is the shared logic
-behind the *managed* term defined in `CONTEXT.md` and is consulted by
-`apply` (Phase 3, File Nodes step 3b), `unapply` (Execution step), and
-`status list`.
+behind the *managed* term defined in `CONTEXT.md`.
 
 Given a target path on disk and a database entry keyed by that path:
 

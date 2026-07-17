@@ -1,7 +1,7 @@
 # Global Configuration
 
 Loaded from `$XDG_CONFIG_HOME/dotrift/config.toml` (overridable via the
-global `-c, --config <FILE>` option, see `spec/core.md`). This file is
+global `-c, --config <FILE>` option, see spec/core.md section "Global CLI Structure"). This file is
 optional; a missing file is treated as empty (all defaults apply). Invalid
 or malformed TOML is an error. Partial configs merge with defaults.
 
@@ -21,12 +21,12 @@ args = ["-f"]
 
 * **Type:** bool
 * **Default:** `false`
-* **Description:** Whether to update the DB entry when a target file already matches what dotrift would write. Consulted by `apply` during the Identical Check (see `spec/commands/apply.md`).
+* **Description:** Whether to update the DB entry when a target file already matches what dotrift would write. Consulted by `apply` during the Identical Check (see spec/commands/apply.md section "Identical Check").
 
 ### `[editor-command]`
 
 Optional table. Command to open `dotrift.toml` for the `add` command (see
-`spec/commands/add.md`).
+spec/commands/add.md section "add").
 
 * `command` (string): The executable name or path.
 * `args` (array of strings): Arguments passed to the command. Supports parameter expansion (see below).

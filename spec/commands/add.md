@@ -18,12 +18,10 @@
 
 ## Definitions
 
-* `dest_rel` — the resolved destination path relative to `source-dir`; this is the portal key used by auto-added entries.
+* `dest_rel` — the resolved destination path relative to the source directory; this is the portal key used by auto-added entries.
 * `computed_target` — derived from `<PATH>` by stripping the target directory prefix; if `<PATH>` is not under the target directory, the absolute path is used instead (this triggers the `# WARNING:` comment in step 6).
 
 ## Re-import Mode
-
-<a id="re-import-mode"></a>
 
 When `DESTINATION` is omitted, `add` is in *re-import mode* (term defined in
 `CONTEXT.md`): the destination is derived from the existing database entry
@@ -37,24 +35,24 @@ matches `<PATH>`, otherwise the command errors.
 
 ### Directory PATH
 
-* **Standard mode:** Recursively copy/move directory contents. Apply pipeline to directory as unit. Portal analysis and editor decision work the same as for a single file: `dest_rel` is the directory's destination relative to `source-dir`. Auto-add produces a single literal directory portal entry.
+* **Standard mode:** Recursively copy/move directory contents. Apply pipeline to directory as unit. Portal analysis and editor decision work the same as for a single file: `dest_rel` is the directory's destination relative to the source directory. Auto-add produces a single literal directory portal entry.
 * **Re-import mode:** Walk directory. For each file, apply pipeline individually. The editor opens once for the entire batch. Files not found in the database are skipped with a warning. Each file that needs one gets its own auto-added portal entry.
 
 ### Single file / symlink
 
 1. **Normalize PATH:** Resolve to absolute path.
 2. **Resolve Destination:**
-   - *Standard mode* (DESTINATION provided): If relative, join `source-dir` + DESTINATION. If absolute, use as-is. Normalize. Error if escapes source-dir.
+   - *Standard mode* (DESTINATION provided): If relative, join the source directory path + DESTINATION. If absolute, use as-is. Normalize. Error if escapes the source directory.
    - *Re-import mode* (DESTINATION omitted): Query DB for `target_path` == PATH. Error if the database does not exist or no entry is found. Set destination to `entry.source_path`.
-3. **Collision Check:** Error if the destination path exists on disk — file, directory, or any other type (including an empty directory). If `--force`, remove the obstruction (recursively for directories). (This is *not* the collision prompt; see `spec/prompt.md`.)
+3. **Obstruction Check:** Error if the destination path exists on disk — file, directory, or any other type (including an empty directory). If `--force`, remove the obstruction (recursively for directories). (This is *not* the obstruction prompt; see spec/prompt.md section "Collision Prompt".)
 4. **Clone:**
    - *Standard mode:* If `--copy`, copy. Else, move.
    - *Re-import mode:* Always copy.
-   - Symlink handling during clone follows the `type = "copy"` Source Symlink Behavior (`spec/dotrift-toml.md#source-symlink-behavior`): the symlink itself is copied/moved, preserving its link target. It is never followed.
-5. **Resolve Target Directory:** Determine target directory using full precedence (see `spec/core.md` Target Directory Precedence).
-6. **Analyze Portal Mapping:** Check whether any existing portal key matches `dest_rel`, and whether the auto-added entry would collide with existing entries (see `spec/dotrift-toml.md` `[portal]`):
+   - Symlink handling during clone follows the `type = "copy"` Source Symlink Behavior (see spec/dotrift-toml.md section "Source Symlink Behavior"): the symlink itself is copied/moved, preserving its link target. It is never followed.
+5. **Resolve Target Directory:** Determine target directory using full precedence (see spec/core.md section "Target Directory Precedence").
+6. **Analyze Portal:** Check whether any existing portal key matches `dest_rel`, and whether the auto-added entry would collide with existing entries (see spec/dotrift-toml.md section "[portal]"):
    - **Missing key:** No portal key matches `dest_rel` — a new entry is needed.
-   - **Target collision:** Another portal entry (different key) maps some source file to the same target path as `dest_rel` would. This would cause `apply` to halt with a collision error (see `spec/dotrift-toml.md` Validation & Errors).
+   - **Target collision:** Another portal entry (different key) maps some source file to the same target path as `dest_rel` would. This would cause `apply` to halt with a collision error (see spec/dotrift-toml.md section "Validation & Errors").
 7. **Editor Decision** (based on step 4 — no config modifications yet):
    - `--editor never`: skip (also suppresses auto-add and annotations).
    - `--editor always`: open editor.
@@ -81,7 +79,7 @@ matches `<PATH>`, otherwise the command errors.
      "y" = "b"
      ```
      Write the modified content to a **temporary file**. If no changes are needed (no missing key and no collision), skip this step — the editor opens on the real config directly.
-9. **Open Editor (if decision was yes):** Editor invocation uses the `editor-command` config (see `spec/global-config.md`).
+9. **Open Editor (if decision was yes):** Editor invocation uses the `editor-command` config (see spec/global-config.md section "[editor-command]").
    - If a temp file was prepared: open editor on the temp file. After exit:
      - **File saved:** copy temp to real config.
      - **File not saved:** discard temp (config unchanged).

@@ -1,8 +1,8 @@
 # `profile`
 
 Manages template profiles. The profile format and the resolution algorithm
-are specified in `spec/dotrift-data-toml.md`; the `active_profiles` storage
-schema is in `spec/core.md`.
+are specified elsewhere (see spec/dotrift-data-toml.md section "Profile Resolution"); the `active_profiles` storage
+schema is defined elsewhere (see spec/core.md section "active_profiles Table").
 
 **Usage:** `dotrift profile <SUBCOMMAND> [ARGS]`
 
@@ -46,5 +46,5 @@ schema is in `spec/core.md`.
 
 1. Parse `dotrift_data.toml`.
 2. Query active profiles in activation order.
-3. Merge variables per Profile Resolution (`spec/dotrift-data-toml.md#profile-resolution`): `[variable]` base, then each profile in activation order (last wins).
+3. Merge variables (see spec/dotrift-data-toml.md section "Profile Resolution").
 4. Print as a two-column table (`key` | `value`). If no variables and no active profiles, print nothing.

@@ -12,7 +12,7 @@ Unless otherwise noted:
 
 * **skip:** Skip the operation, continue traversal.
 * **overwrite:** Remove the obstruction and proceed.
-* **diff:** Open the diff pager (see `spec/pager.md`).
+* **diff:** Open the diff pager (see spec/pager.md section "Diff Mode").
 * **quit:** Halt the program.
 
 ---
@@ -28,6 +28,4 @@ choice is offered and the operation is skipped.
 
 The exact filesystem actions attached to each option (e.g. "delete the
 directory recursively", "delete DB entries under the directory") depend on
-the operation in progress and are specified with that operation. Today the
-prompt is used only by `apply` (Phase 3, Directory Nodes and File Nodes);
-see `spec/commands/apply.md`.
+the operation in progress and are specified with that operation.

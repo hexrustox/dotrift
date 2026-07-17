@@ -26,13 +26,11 @@ the template value types String, Int, Bool, List, and Map respectively.
 
 Named profiles with additional or overriding variables. Same value types as
 `[variable]`. Multiple profiles can be active simultaneously. Activation is
-performed by `dotrift profile activate <name>` (see `spec/commands/profile.md`);
+performed by `dotrift profile activate <name>` (see spec/commands/profile.md section "profile");
 the set of currently-active profiles is persisted in the `active_profiles`
-table (see `spec/core.md`).
+table (see spec/core.md section "active_profiles Table").
 
 ## Profile Resolution
-
-<a id="profile-resolution"></a>
 
 When a template is evaluated, the variable context is built by layering
 profiles over the base in activation-timestamp order:

@@ -2,7 +2,7 @@
 
 The `templater` *subcommand* evaluates a dotrift template standalone and
 writes the rendered output to stdout or a file. The template *engine* syntax
-itself is specified in `spec/templater.md` — this file documents only the
+itself is specified elsewhere (see spec/templater.md section "Dotrift Template Syntax") — this file documents only the
 command surface.
 
 **Usage:** `dotrift templater [OPTIONS]`
@@ -25,7 +25,7 @@ command surface.
 
 * **Missing template source:** Error if neither `--string` nor `--file` is provided.
 * **Ambiguous template source:** Error if both `--string` and `--file` are provided.
-* **Input-output conflict:** Error if `--file` and `--output` resolve to the same path. (This check is the single exception to the lexical-only path rule — see `spec/core.md` Path Normalization and ADR-0003.)
+* **Input-output conflict:** Error if `--file` and `--output` resolve to the same path. This is the single documented exception to the path normalization rule (see spec/core.md section "Path Normalization"); rationale in ADR-0003.
 * **Mutually exclusive flags:** Error if both `--no-data` and `--data-path` are provided.
 * **Template errors:** Parse and render errors are fatal, reported with source annotations.
 * **`--var` parse errors:** Fatal.
@@ -36,7 +36,7 @@ command surface.
 ## Execution Pipeline
 
 1. **Resolve template source:** If `--string`, use the inline string directly. If `--file`, read the file from disk.
-2. **Resolve variables** (unless `--no-data`): Load `dotrift_data.toml` from `--data-path` if provided, or from the source directory. Missing file is treated as empty (no variables from file). Query the database for active profiles. Merge in order: `[variable]` → active profiles (by Profile Resolution, `spec/dotrift-data-toml.md#profile-resolution`).
+2. **Resolve variables** (unless `--no-data`): Load `dotrift_data.toml` from `--data-path` if provided, or from the source directory. Missing file is treated as empty (no variables from file). Query the database for active profiles. Merge in order: `[variable]` → active profiles via (see spec/dotrift-data-toml.md section "Profile Resolution").
 3. **Apply `--var` overrides:** Each `KEY=VALUE` argument sets a variable, Overwrites any conflicting key from step 2.
-4. **Evaluate template:** Evaluate the template with the resolved variable context and the same built-in functions available to `apply`. Template syntax follows `spec/templater.md`.
+4. **Evaluate template:** Evaluate the template with the resolved variable context and the same built-in functions available to `apply`. Template syntax defined externally (see spec/templater.md section "Dotrift Template Syntax").
 5. **Output:** Write rendered content to stdout, or to the file specified by `--output` (creating parent directories as needed).

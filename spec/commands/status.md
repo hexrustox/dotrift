@@ -16,9 +16,9 @@ Reports the management status of the target filesystem.
 **`list`:**
 
 1. **Determine Scope:** Specific file or entire DB.
-2. **Evaluate Status:** Check if file exists on disk and matches DB entry, using the shared algorithm at `spec/core.md#managed-check` (managed == on-disk state matches DB-recorded state).
+2. **Evaluate Status:** Check if file exists on disk and matches DB entry, using the shared algorithm (see spec/core.md section "Managed Check").
 3. **Output:** For each entry in scope, evaluate it via the managed check
-   (`spec/core.md#managed-check`) and print with the matching prefix:
+   (see spec/core.md section "Managed Check") and print with the matching prefix:
    * `[MANAGED] target -> source (type)`
    * `[UNMANAGED] target` *(Source path omitted for unmanaged entries.)*
 
