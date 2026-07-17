@@ -25,6 +25,17 @@ When dotrift needs the target directory it consults, in order:
 2. `target-directory` in `dotrift.toml` (if provided)
 3. `$HOME` environment variable (ultimate fallback). *Error if `$HOME` is unset or empty.*
 
+### Cwd-Relative Resolution
+
+Some CLI arguments accept a path that may be relative. Before such a path is
+used as a database key or compared against absolute paths, it is made absolute:
+
+* If the input is already absolute, it is used as-is.
+* If the input is relative, it is concatenated with the process's current
+  working directory to form an absolute path. Only the process's cwd is
+  consulted and symlinks are not followed. The resulting absolute path is then
+  handed to Path Normalization.
+
 ### Path Normalization
 
 All paths are normalized before use: `./` and `../` components resolved, trailing slashes removed. No tilde (`~`) or environment variable (`$VAR`) expansion. No symlink canonicalization (paths kept logical).

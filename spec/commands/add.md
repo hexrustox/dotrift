@@ -40,7 +40,7 @@ matches `<PATH>`, otherwise the command errors.
 
 ### Single file / symlink
 
-1. **Normalize PATH:** Resolve to absolute path.
+1. **Resolve PATH:** (see spec/core.md section "Cwd-Relative Resolution").
 2. **Resolve Destination:**
    - *Standard mode* (DESTINATION provided): If relative, join the source directory path + DESTINATION. If absolute, use as-is. Normalize. Error if escapes the source directory.
    - *Re-import mode* (DESTINATION omitted): Query DB for `target_path` == PATH. Error if the database does not exist or no entry is found. Set destination to `entry.source_path`.
@@ -67,16 +67,16 @@ matches `<PATH>`, otherwise the command errors.
    - **Target collision:** For each unique target path with collisions, list the other colliding portal keys in a `# CONFLICT` comment placed directly above every portal entry (including any newly auto-added entry) that resolves to that target:
      ```toml
      [portal]
-     # CONFLICT b, c
-     "a" = "a"
-     # CONFLICT a, c
-     "b" = "a"
-     # CONFLICT a, b
-     "c" = "a"
      # CONFLICT y
-     "x" = "b"
+     "x" = "a"
      # CONFLICT x
-     "y" = "b"
+     "y" = "a"
+     # CONFLICT b, c
+     "a" = "b"
+     # CONFLICT a, c
+     "b" = "b"
+     # CONFLICT a, b
+     "c" = "b"
      ```
      Write the modified content to a **temporary file**. If no changes are needed (no missing key and no collision), skip this step — the editor opens on the real config directly.
 9. **Open Editor (if decision was yes):** Editor invocation uses the `editor-command` config (see spec/global-config.md section "[editor-command]").
