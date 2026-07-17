@@ -14,6 +14,10 @@ Cargo workspace (Cargo.toml):
   on `[d]iff` collisions.
 - `templater` (member): the standalone template *engine* (scanner/parser/eval).
 
+### Legacy code
+
+Source files under `*/legacy/**/*` are archived from a prior implementation. New code may read them for reference but must never copy from them.
+
 ## Toolchain
 
 - Rust **1.95**, edition 2024, workspace resolver 3.
