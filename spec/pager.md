@@ -120,6 +120,5 @@ Tab, Enter, Esc are no-ops in View and Diff modes.
 - **Large files:** Line-offset index built once (~8 bytes per line). Only visible
   lines read per frame via seek + read. No whole-file memory.
 - **Non-TTY:** The pager returns immediately if stdin is not a terminal.
-  The `[d]iff` option is not offered in the collision prompt when no TTY.
 - **Unicode:** If the locale does not declare UTF-8, ASCII fallback characters are
   used for separators, arrows, and cursor indicators.

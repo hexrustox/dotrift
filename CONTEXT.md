@@ -37,7 +37,7 @@ Present in the `managed_files` database table, regardless of on-disk state. See 
 _Avoid_: (none — distinct from managed)
 
 **Managed**:
-Tracked *and* on-disk state matches the database record per the managed-check in `apply` (step 3b): symlink target matches, or content hash matches on-disk (with mtime fast-path). See also: *tracked*.
+Tracked *and* on-disk state matches the database record per the managed check (`spec/core.md#managed-check`): symlink target matches, or content hash matches on-disk (with mtime fast-path). See also: *tracked*.
 _Avoid_: in-sync
 
 **Identical**:
@@ -57,7 +57,7 @@ Runtime condition where something already exists on disk at a target path dotrif
 _Avoid_: (none — distinct from collision)
 
 **Stripping prefix**:
-Portion of a glob `[portal]` key up to but not including the first path component that contains a wildcard character. Removed from the matched source path before appending to the portal's destination value to form the final target path. Defined formally in `spec/main.md` under Path Stripping Rule.
+Portion of a glob `[portal]` key up to but not including the first path component that contains a wildcard character. Removed from the matched source path before appending to the portal's destination value to form the final target path. Defined formally in `spec/dotrift-toml.md` under Path Stripping Rule.
 
 **Profile**:
 Named overlay layer of template variables defined as `[profile.<name>]` in `dotrift_data.toml`. Multiple profiles can be active simultaneously; precedence by `activated_at` timestamp — see ADR-0001.

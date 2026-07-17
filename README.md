@@ -143,7 +143,7 @@ ignore = ["*.tmp", "secrets/**", "!secrets/allowed.txt"]
 target-directory = "/home/user"
 ```
 
-See `spec/main.md` for complete configuration reference.
+See `spec/dotrift-toml.md` for the configuration reference, and `spec/commands/` for subcommands.
 
 ## Template Data & Profiles
 

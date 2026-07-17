@@ -14,10 +14,6 @@ Cargo workspace (Cargo.toml):
   on `[d]iff` collisions.
 - `templater` (member): the standalone template *engine* (scanner/parser/eval).
 
-Two "templater" namespaces — don't confuse:
-- `templater/` crate: the engine itself.
-- `src/templater/`: dotrift-binary glue — template *data* + *builtin functions*.
-
 ## Toolchain
 
 - Rust **1.95**, edition 2024, workspace resolver 3.
