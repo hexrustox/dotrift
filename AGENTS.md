@@ -17,7 +17,7 @@ Cargo workspace (Cargo.toml):
 
 ### Legacy code
 
-Source files under `*/legacy/**/*` are archived from a prior implementation. New code may read them for reference but must never copy from them.
+Source files under `legacy/` are archived from a prior implementation. New code may read them for reference but must never copy from them.
 
 ## Toolchain
 

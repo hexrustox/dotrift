@@ -1,0 +1,81 @@
+use clap::Parser;
+use cli::{Cli, Commands};
+use dotrift::{
+    cli::{self, ProfileSubcommand, StatusSubcommand},
+    command::{add, apply, diff, init, profile, status, templater, unapply},
+    path::db_path,
+};
+use miette::{Context, MietteHandlerOpts, Result};
+use tui::is_unicode;
+
+fn main() -> Result<()> {
+    miette::set_hook(Box::new(|_| {
+        Box::new(MietteHandlerOpts::new().unicode(is_unicode()).build())
+    }))?;
+
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Init => {
+            init::run(cli.global).wrap_err("failed to initialize source directory")?;
+        }
+        Commands::Apply(flags) => {
+            let db = db_path()?;
+            apply::run(cli.global, &db, flags).wrap_err("failed to apply dotfiles")?;
+        }
+        Commands::Unapply(flags) => {
+            let db = db_path()?;
+            unapply::run(cli.global, &db, flags).wrap_err("failed to unapply dotfiles")?;
+        }
+        Commands::Add {
+            flags,
+            path,
+            destination,
+        } => {
+            let db = db_path()?;
+            add::run(cli.global, path.clone(), destination, flags, &db)
+                .wrap_err_with(|| format!("failed to add `{}`", path.display()))?;
+        }
+        Commands::Diff { path } => {
+            let db = db_path()?;
+            let p = path.clone();
+            diff::run(path, &db)
+                .wrap_err_with(|| format!("failed to print `{}` diff", p.display()))?;
+        }
+        Commands::Status { command } => {
+            let db = db_path()?;
+            match command {
+                StatusSubcommand::List { file } => {
+                    status::list(file, &db).wrap_err("failed to list managed files")?;
+                }
+                StatusSubcommand::Clear { file } => {
+                    status::clear(file, &db).wrap_err("failed to clear managed files")?;
+                }
+            }
+        }
+        Commands::Profile { command } => {
+            let db = db_path()?;
+            match command {
+                ProfileSubcommand::List => {
+                    profile::list(&cli.global, &db).wrap_err("failed to list profiles")?;
+                }
+                ProfileSubcommand::Activate { name } => {
+                    profile::activate(&cli.global, &db, &name)
+                        .wrap_err("failed to activate profile")?;
+                }
+                ProfileSubcommand::Deactivate { name } => {
+                    profile::deactivate(&db, &name).wrap_err("failed to deactivate profile")?;
+                }
+                ProfileSubcommand::Show => {
+                    profile::show(&cli.global, &db).wrap_err("failed to show variables")?;
+                }
+            }
+        }
+        Commands::Templater(flags) => {
+            let db = db_path()?;
+            templater::run(cli.global, &db, flags).wrap_err("failed to evaluate template")?;
+        }
+    }
+
+    Ok(())
+}
