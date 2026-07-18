@@ -151,72 +151,88 @@ mod tests {
     use std::sync::Arc;
 
     use miette::SourceCode;
+    use test_case::test_case;
 
     use super::ByteSource;
+
+    /// Expected fields of a `SpanContents` returned by `ByteSource::read_span`.
+    /// Each `#[test_case]` returns a `Window` built from the call; the test
+    /// body asserts field-by-field for readable failure messages.
+    struct Window {
+        data: Vec<u8>,
+        offset: usize,
+        len: usize,
+        line: usize,
+        column: usize,
+        line_count: usize,
+    }
 
     fn source(bytes: &[u8]) -> ByteSource {
         ByteSource::Owned(Arc::from(bytes))
     }
 
-    #[test]
-    fn read_span_with_zero_context_covers_exactly_the_span() {
-        let src = source(b"hello world");
-        let contents = src.read_span(&(6, 5).into(), 0, 0).unwrap();
-        assert_eq!(contents.data(), b"world");
-        assert_eq!(contents.span().offset(), 6);
-        assert_eq!(contents.span().len(), 5);
-        assert_eq!(contents.line(), 0);
-        assert_eq!(contents.column(), 6);
+    fn read_window(bytes: &[u8], span: (usize, usize), before: usize, after: usize) -> Window {
+        let src = source(bytes);
+        let contents = src.read_span(&span.into(), before, after).unwrap();
+        Window {
+            data: contents.data().to_vec(),
+            offset: contents.span().offset(),
+            len: contents.span().len(),
+            line: contents.line(),
+            column: contents.column(),
+            line_count: contents.line_count(),
+        }
     }
 
-    #[test]
-    fn read_span_includes_context_lines_above_and_below() {
-        let src = source(b"one\ntwo\nthree\nfour");
-        let contents = src.read_span(&(8, 5).into(), 1, 1).unwrap();
-        assert_eq!(contents.data(), b"two\nthree\nfour");
-        assert_eq!(contents.span().offset(), 4);
-        assert_eq!(contents.span().len(), 14);
-        assert_eq!(contents.line(), 1);
-        assert_eq!(contents.column(), 0);
-        assert_eq!(contents.line_count(), 3);
-    }
-
-    #[test]
-    fn read_span_clamps_window_start_at_start_of_source() {
-        let src = source(b"aa\nbb");
-        let contents = src.read_span(&(3, 2).into(), 5, 0).unwrap();
-        assert_eq!(contents.data(), b"aa\nbb");
-        assert_eq!(contents.span().offset(), 0);
-        assert_eq!(contents.line(), 0);
-    }
-
-    #[test]
-    fn read_span_clamps_window_end_at_end_of_source() {
-        let src = source(b"aa\nbb");
-        let contents = src.read_span(&(0, 2).into(), 0, 5).unwrap();
-        assert_eq!(contents.data(), b"aa\nbb");
-        assert_eq!(contents.span().offset(), 0);
-        assert_eq!(contents.span().len(), 5);
-        assert_eq!(contents.line_count(), 2);
+    #[test_case(
+        b"hello world", (6, 5), 0, 0,
+        Window { data: b"world".to_vec(), offset: 6, len: 5, line: 0, column: 6, line_count: 1 } ;
+        "exact span with zero context"
+    )]
+    #[test_case(
+        b"one\ntwo\nthree\nfour", (8, 5), 1, 1,
+        Window { data: b"two\nthree\nfour".to_vec(), offset: 4, len: 14, line: 1, column: 0, line_count: 3 } ;
+        "context window above and below"
+    )]
+    #[test_case(
+        b"aa\nbb", (3, 2), 5, 0,
+        Window { data: b"aa\nbb".to_vec(), offset: 0, len: 5, line: 0, column: 0, line_count: 2 } ;
+        "clamps window start at start of source"
+    )]
+    #[test_case(
+        b"aa\nbb", (0, 2), 0, 5,
+        Window { data: b"aa\nbb".to_vec(), offset: 0, len: 5, line: 0, column: 0, line_count: 2 } ;
+        "clamps window end at end of source"
+    )]
+    #[test_case(
+        b"a\xffb", (1, 1), 0, 0,
+        Window { data: "\u{fffd}".as_bytes().to_vec(), offset: 1, len: 1, line: 0, column: 1, line_count: 1 } ;
+        "decodes invalid utf8 lossy"
+    )]
+    #[test_case(
+        b"", (0, 0), 0, 0,
+        Window { data: b"".to_vec(), offset: 0, len: 0, line: 0, column: 0, line_count: 1 } ;
+        "empty source empty span"
+    )]
+    fn read_span_returns_expected_window(
+        bytes: &[u8],
+        span: (usize, usize),
+        before: usize,
+        after: usize,
+        expected: Window,
+    ) {
+        let actual = read_window(bytes, span, before, after);
+        assert_eq!(actual.data, expected.data);
+        assert_eq!(actual.offset, expected.offset);
+        assert_eq!(actual.len, expected.len);
+        assert_eq!(actual.line, expected.line);
+        assert_eq!(actual.column, expected.column);
+        assert_eq!(actual.line_count, expected.line_count);
     }
 
     #[test]
     fn read_span_out_of_bounds_is_an_error() {
         let src = source(b"short");
         assert!(src.read_span(&(10, 5).into(), 0, 0).is_err());
-    }
-
-    #[test]
-    fn read_span_decodes_invalid_utf8_lossily() {
-        let src = source(b"a\xffb");
-        let contents = src.read_span(&(1, 1).into(), 0, 0).unwrap();
-        assert_eq!(contents.data(), "\u{fffd}".as_bytes());
-    }
-
-    #[test]
-    fn read_span_empty_source_empty_span() {
-        let src = source(b"");
-        let contents = src.read_span(&(0, 0).into(), 0, 0).unwrap();
-        assert_eq!(contents.data(), b"");
     }
 }
