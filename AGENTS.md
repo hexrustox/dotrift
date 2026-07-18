@@ -1,9 +1,10 @@
 # Dotrift Agent Guide
 
 Declarative, template-aware dotfile manager written in Rust. Maps files from a
-source directory to a target directory via `dotrift.toml`. **`spec/*.md` is the
-authoritative behavior contract** — consult it before changing CLI, config, DB
-schema, templater syntax, or pager behavior.
+source directory to a target directory via `dotrift.toml`. **`spec/*.md` (root) and
+`<workspace>/spec/*.md` (per workspace member) are the authoritative behavior
+contract** — consult them before changing CLI, config, DB schema, templater
+syntax, or pager behavior.
 
 ## Workspace layout
 
@@ -61,4 +62,6 @@ Issues live as markdown files under `.scratch/<feature-slug>/` in this repo. See
 
 ### Domain docs
 
-Single-context layout — one root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
+Multi-context layout — `CONTEXT-MAP.md` at root points at `spec/CONTEXT.md` +
+`templater/spec/CONTEXT.md`. ADRs live in `docs/adr/` only (no workspace split).
+See `docs/agents/domain.md`.
