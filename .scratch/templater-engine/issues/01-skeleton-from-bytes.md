@@ -6,12 +6,12 @@
 
 **Status:** ready-for-agent
 
-- [ ] `templater/Cargo.toml` has runtime deps `memmap2`, `miette`, `thiserror`; dev dep `test-case`; `serde` and `toml` removed.
-- [ ] Modules `lib`, `ast`, `error`, `eval`, `function`, `parser`, `scanner`, `value` exist under `templater/src/` and compile (some may be stubs only as large as this slice needs).
-- [ ] Public API exports reachable from `templater::`: `Template`, `Value`, `ValueType`, `FunctionRegistry`, `Error`, `ParseError`, `RenderError`, `FuncError`, `Result`.
-- [ ] `Template::from_bytes(Vec<u8>) -> Result<Template>` constructs a template and stores it via `Source::Owned`.
-- [ ] `Template::render<W: io::Write>(&self, writer: W, variables: &HashMap<String, Value>, functions: &dyn FunctionRegistry) -> Result<()>` flushes the writer on success and emits the source bytes verbatim.
-- [ ] `Error` enum has variants `Parse`, `Render`, `Func`, `Io` with `#[from]` conversions from the sub-enums and `io::Error`.
-- [ ] `ByteSource::Owned(Arc<[u8]>)` implements `miette::SourceCode` via per-span `String::from_utf8_lossy` inside `read_span`.
-- [ ] End-to-end test in `templater/tests/render.rs`: a source byte slice with no tags renders identically to the input.
-- [ ] `cargo build -p templater`, `cargo test -p templater`, `cargo fmt`, `cargo clippy -p templater` pass.
+- [x] `templater/Cargo.toml` has runtime deps `memmap2`, `miette`, `thiserror`; dev dep `test-case`; `serde` and `toml` removed.
+- [x] Modules `lib`, `ast`, `error`, `eval`, `function`, `parser`, `scanner`, `value` exist under `templater/src/` and compile (some may be stubs only as large as this slice needs).
+- [x] Public API exports reachable from `templater::`: `Template`, `Value`, `ValueType`, `FunctionRegistry`, `Error`, `ParseError`, `RenderError`, `FuncError`, `Result`.
+- [x] `Template::from_bytes(Vec<u8>) -> Result<Template>` constructs a template and stores it via `Source::Owned`.
+- [x] `Template::render<W: io::Write>(&self, writer: W, variables: &HashMap<String, Value>, functions: &dyn FunctionRegistry) -> Result<()>` flushes the writer on success and emits the source bytes verbatim.
+- [x] `Error` enum has variants `Parse`, `Render`, `Func`, `Io` with `#[from]` conversions from the sub-enums and `io::Error`.
+- [x] `ByteSource::Owned(Arc<[u8]>)` implements `miette::SourceCode` via per-span `String::from_utf8_lossy` inside `read_span`.
+- [x] End-to-end test in `templater/tests/render.rs`: a source byte slice with no tags renders identically to the input.
+- [x] `cargo build -p templater`, `cargo test -p templater`, `cargo fmt`, `cargo clippy -p templater` pass.

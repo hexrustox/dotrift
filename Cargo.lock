@@ -1444,10 +1444,8 @@ version = "0.1.0"
 dependencies = [
  "memmap2",
  "miette",
- "serde",
  "test-case",
  "thiserror",
- "toml",
 ]
 
 [[package]]
