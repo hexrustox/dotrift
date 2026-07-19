@@ -23,7 +23,6 @@ fn parse_span(e: &ParseError) -> (usize, usize) {
     match e {
         ParseError::EmptyInterpolation { span }
         | ParseError::IntegerOutOfRange { span }
-        | ParseError::PlusPrefixedInteger { span }
         | ParseError::UnclosedString { span }
         | ParseError::UnclosedDelimiter { span }
         | ParseError::UnexpectedToken { span }
@@ -71,8 +70,8 @@ fn integer_out_of_range_negative() {
 #[test]
 fn plus_prefixed_integer() {
     let e = render_err(b"{{ +7 }}").unwrap_parse();
-    assert!(matches!(e, ParseError::PlusPrefixedInteger { .. }));
-    assert_eq!(parse_span(&e), (3, 2));
+    assert!(matches!(e, ParseError::UnexpectedToken { .. }));
+    assert_eq!(parse_span(&e), (3, 1));
 }
 
 #[test]

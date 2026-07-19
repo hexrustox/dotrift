@@ -31,12 +31,6 @@ pub enum ParseError {
         #[label]
         span: SourceSpan,
     },
-    #[error("`+`-prefixed integer literal is not allowed")]
-    #[diagnostic(code(templater::parse::plus_prefixed_integer))]
-    PlusPrefixedInteger {
-        #[label]
-        span: SourceSpan,
-    },
     #[error("unclosed string literal")]
     #[diagnostic(code(templater::parse::unclosed_string))]
     UnclosedString {

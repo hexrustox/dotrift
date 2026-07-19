@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use crate::error::ParseError;
+use crate::lex::is_inner_ws;
 
 /// A scanned region of the source. Ranges are byte offsets.
 #[derive(Debug, PartialEq)]
@@ -153,10 +154,6 @@ fn trim_inner_ws(src: &[u8], body_start: usize, body_end: usize) -> Range<usize>
     start..end
 }
 
-fn is_inner_ws(b: u8) -> bool {
-    b == b' ' || b == b'\t' || b == b'\n'
-}
-
 #[cfg(test)]
 mod tests {
     use test_case::test_case;
@@ -184,7 +181,7 @@ mod tests {
     #[test_case(b"{{ x }}{{ y }}" => vec![interp(0..7, 3..4), interp(7..14, 10..11)]; "two_interps")]
     #[test_case(br#"{{ "}}" }}"# => vec![interp(0..10, 3..7)]; "string_shields_close_delim")]
     #[test_case(br#"{{ "\" }}"# => vec![interp(0..9, 3..6)]; "escaped_quote_in_string")]
-    #[test_case(br#"{{ "a\nb" }}"# => vec![interp(0..12, 3..9)]; "string_with_passthrough_escape")]
+    #[test_case(br#"{{ "a\xb" }}"# => vec![interp(0..12, 3..9)]; "string_with_passthrough_escape")]
     #[test_case(b"{{ \"line1\nline2\" }}" => vec![interp(0..19, 3..16)]; "string_with_raw_newline")]
     #[test_case(b"{ not a tag" => vec![text(0..11)]; "single_brace_passthrough")]
     #[test_case(b"{% if %}" => vec![text(0..8)]; "stmt_delimiters_inert")]

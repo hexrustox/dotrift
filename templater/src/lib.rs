@@ -2,6 +2,7 @@ mod ast;
 mod error;
 mod eval;
 mod function;
+mod lex;
 mod parser;
 mod scanner;
 mod value;

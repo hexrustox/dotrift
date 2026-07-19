@@ -5,6 +5,7 @@ use miette::SourceSpan;
 use crate::{
     ast::{Expr, Node},
     error::ParseError,
+    lex::is_inner_ws,
     scanner::Token,
 };
 
@@ -49,17 +50,6 @@ fn parse_interp_body(
     let kind = match first {
         b'"' => parse_string_literal(bytes, &tag, &body)?,
         b'-' | b'0'..=b'9' => parse_integer_literal(bytes, &body)?,
-        b'+' => {
-            // Span the whole `+digits` run so the error points at the offending
-            // sigil and its operands, not just `+` in isolation.
-            let mut j = 1;
-            while j < bytes.len() && bytes[j].is_ascii_digit() {
-                j += 1;
-            }
-            return Err(ParseError::PlusPrefixedInteger {
-                span: body_span(&body, 0..j),
-            });
-        }
         _ if is_ident_start(first) => parse_ident_or_keyword(bytes, &body)?,
         _ => {
             return Err(ParseError::UnexpectedToken {
@@ -215,10 +205,6 @@ fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-fn is_inner_ws(b: u8) -> bool {
-    b == b' ' || b == b'\t' || b == b'\n'
-}
-
 /// Translates a body-relative `Range` into absolute source-space (used for
 /// AST node byte offsets such as `Expr::Var`).
 fn body_range(body: &Range<usize>, rel: Range<usize>) -> Range<usize> {
@@ -292,7 +278,7 @@ mod tests {
     #[test_case(br#"{{ "" }}"# => expr!(str 4..4); "empty_string_literal")]
     #[test_case(br#"{{ "a\"b" }}"# => expr!(str 4..8); "string_with_escaped_quote")]
     #[test_case(br#"{{ "a\\b" }}"# => expr!(str 4..8); "string_with_escaped_backslash")]
-    #[test_case(br#"{{ "a\nb" }}"# => expr!(str 4..8); "string_with_passthrough_escape")]
+    #[test_case(br#"{{ "a\xb" }}"# => expr!(str 4..8); "string_with_passthrough_escape")]
     #[test_case(b"{{ 42 }}" => expr!(int 42); "int_positive")]
     #[test_case(b"{{ -7 }}" => expr!(int -7); "int_negative")]
     #[test_case(b"{{ 007 }}" => expr!(int 7); "int_leading_zeros")]
@@ -316,7 +302,6 @@ mod tests {
         let span = match e {
             ParseError::EmptyInterpolation { span }
             | ParseError::IntegerOutOfRange { span }
-            | ParseError::PlusPrefixedInteger { span }
             | ParseError::UnclosedString { span }
             | ParseError::UnclosedDelimiter { span }
             | ParseError::UnexpectedToken { span }
@@ -329,7 +314,6 @@ mod tests {
         match e {
             ParseError::EmptyInterpolation { .. } => "empty_interpolation",
             ParseError::IntegerOutOfRange { .. } => "integer_out_of_range",
-            ParseError::PlusPrefixedInteger { .. } => "plus_prefixed",
             ParseError::UnclosedString { .. } => "unclosed_string",
             ParseError::UnclosedDelimiter { .. } => "unclosed_delimiter",
             ParseError::UnexpectedToken { .. } => "unexpected_token",
@@ -338,7 +322,7 @@ mod tests {
     }
 
     #[test_case(b"{{ }}" => "empty_interpolation"; "empty_body")]
-    #[test_case(b"{{ +7 }}" => "plus_prefixed"; "plus_prefixed_integer")]
+    #[test_case(b"{{ +7 }}" => "unexpected_token"; "plus_prefixed_integer")]
     #[test_case(b"{{ 99999999999999999999999 }}" => "integer_out_of_range"; "overflow_positive")]
     #[test_case(b"{{ -99999999999999999999999 }}" => "integer_out_of_range"; "overflow_negative")]
     #[test_case(b"{{ \"hello }}" => "unclosed_string"; "unclosed_string")]
@@ -352,7 +336,7 @@ mod tests {
     #[test_case(b"{{ }}" => (0, 5); "empty_body_span")]
     #[test_case(b"{{   }}" => (0, 7); "empty_body_span_padded")]
     #[test_case(b"{{}}" => (0, 4); "empty_body_span_tight")]
-    #[test_case(b"{{ +7 }}" => (3, 2); "plus_prefixed_span")]
+    #[test_case(b"{{ +7 }}" => (3, 1); "plus_prefixed_span")]
     #[test_case(b"{{ @ }}" => (3, 1); "unexpected_byte_span")]
     #[test_case(b"{{ a b }}" => (5, 1); "trailing_token_span")]
     #[test_case(b"{{ \"hello }}" => (3, 9); "unclosed_string_span")]
