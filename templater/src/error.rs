@@ -1,48 +1,88 @@
 use std::{borrow::Cow, io, sync::Arc};
 
-use miette::{MietteError, MietteSpanContents, SourceCode, SourceSpan, SpanContents};
+use miette::{Diagnostic, MietteError, MietteSpanContents, SourceCode, SourceSpan, SpanContents};
+
+use crate::ValueType;
 
 /// Errors raised while constructing or rendering a [`Template`](crate::Template).
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
+#[error(transparent)]
 pub enum Error {
-    #[error(transparent)]
     Parse(#[from] ParseError),
-    #[error(transparent)]
     Render(#[from] RenderError),
-    #[error(transparent)]
     Func(#[from] FuncError),
-    #[error(transparent)]
     Io(#[from] io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Errors raised during tokenization or parsing, before any content executes.
-#[derive(Debug, thiserror::Error)]
-pub enum ParseError {}
+#[derive(Debug, thiserror::Error, Diagnostic)]
+pub enum ParseError {
+    #[error("empty interpolation")]
+    #[diagnostic(code(templater::parse::empty_interpolation))]
+    EmptyInterpolation {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("integer literal out of i64 range")]
+    #[diagnostic(code(templater::parse::integer_out_of_range))]
+    IntegerOutOfRange {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("`+`-prefixed integer literal is not allowed")]
+    #[diagnostic(code(templater::parse::plus_prefixed_integer))]
+    PlusPrefixedInteger {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("unclosed string literal")]
+    #[diagnostic(code(templater::parse::unclosed_string))]
+    UnclosedString {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("unclosed delimiter")]
+    #[diagnostic(code(templater::parse::unclosed_delimiter))]
+    UnclosedDelimiter {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("unexpected token")]
+    #[diagnostic(code(templater::parse::unexpected_token))]
+    UnexpectedToken {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("unexpected tokens after expression")]
+    #[diagnostic(code(templater::parse::unexpected_tokens_after_expr))]
+    UnexpectedTokensAfterExpr {
+        #[label]
+        span: SourceSpan,
+    },
+}
 
 /// Errors raised only on actually-executed content.
-#[derive(Debug, thiserror::Error)]
-pub enum RenderError {}
+#[derive(Debug, thiserror::Error, Diagnostic)]
+pub enum RenderError {
+    #[error("undefined variable")]
+    #[diagnostic(code(templater::render::undefined_variable))]
+    UndefinedVariable {
+        #[label]
+        span: SourceSpan,
+    },
+}
 
 /// Errors returned by the host's [`FunctionRegistry`](crate::FunctionRegistry).
 #[derive(Debug, thiserror::Error)]
 pub enum FuncError {
     #[error("undefined function `{name}`")]
     Undefined { name: String },
-    #[error("function `{name}` expects {expected} arguments, got {got}")]
-    ArgCount {
-        name: String,
-        expected: String,
-        got: usize,
-    },
-    #[error("function `{name}` argument {arg} has type {got}, expected {expected}")]
-    TypeMismatch {
-        name: String,
-        arg: usize,
-        expected: String,
-        got: String,
-    },
+    #[error("expects {expected} arguments, got {got}")]
+    ArgCount { expected: String, got: usize },
+    #[error("expects type {expected}, got {got}")]
+    TypeMismatch { expected: ValueType, got: ValueType },
 }
 
 /// Source bytes exposed to miette so error spans render byte-accurately.

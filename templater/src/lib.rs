@@ -36,8 +36,8 @@ impl Source {
 impl Template {
     /// Constructs a template from an owned byte buffer.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
-        let tokens = scanner::scan(&bytes);
-        let nodes = parser::parse(tokens)?;
+        let tokens = scanner::scan(&bytes)?;
+        let nodes = parser::parse(tokens, &bytes)?;
         Ok(Self {
             nodes,
             src: Source::Owned(bytes),
@@ -48,10 +48,11 @@ impl Template {
     pub fn render<W: io::Write>(
         &self,
         mut writer: W,
-        _variables: &HashMap<String, Value>,
+        variables: &HashMap<String, Value>,
         _functions: &dyn FunctionRegistry,
     ) -> Result<()> {
-        self.eval_body(&self.nodes, &mut writer)?;
+        let frame = eval::Frame::Var(variables);
+        self.eval_body(&self.nodes, &mut writer, &frame)?;
         writer.flush()?;
         Ok(())
     }
