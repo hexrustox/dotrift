@@ -106,6 +106,20 @@ fn unexpected_tokens_after_expr() {
     assert_eq!(parse_span(&e), (5, 1));
 }
 
+#[test]
+fn left_equal_followed_by_dash() {
+    let e = render_err(b"{{=- x }}").unwrap_parse();
+    assert!(matches!(e, ParseError::UnexpectedToken { .. }));
+    assert_eq!(parse_span(&e), (3, 1));
+}
+
+#[test]
+fn right_dash_after_equal() {
+    let e = render_err(b"{{x =-}}").unwrap_parse();
+    assert!(matches!(e, ParseError::UnexpectedTokensAfterExpr { .. }));
+    assert_eq!(parse_span(&e), (4, 1));
+}
+
 // --- Render errors ------------------------------------------------------
 
 #[test]

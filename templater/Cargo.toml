@@ -10,4 +10,5 @@ miette.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 test-case.workspace = true

@@ -30,6 +30,7 @@ twox-hash = "2.1"
 walkdir = "2"
 
 [dev-dependencies]
+proptest.workspace = true
 strip-ansi-escapes = "0.2.1"
 tempfile.workspace = true
 test-case.workspace = true
@@ -48,6 +49,7 @@ serde = { version = "1", features = ["derive"] }
 similar = "2"
 strum = { version = "0.28", features = ["derive"] }
 tempfile = "3"
+proptest = "1"
 test-case = "3"
 toml = "1"
 toml_edit = "0.25"

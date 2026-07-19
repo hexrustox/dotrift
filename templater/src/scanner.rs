@@ -147,7 +147,6 @@ pub(crate) fn scan(src: &[u8]) -> std::result::Result<Vec<Token>, ParseError> {
                 let body_start = open_pos + 2;
                 let close_end = scan_comment_body(src, body_start, open_pos)?;
                 tokens.push(Token::Barrier);
-                tokens.push(Token::Barrier);
                 text_start = close_end;
             }
             ClusterKind::CloseInterp | ClusterKind::CloseStmt | ClusterKind::CloseComment => {
@@ -407,7 +406,7 @@ fn trim_inner_ws(src: &[u8], body_start: usize, body_end: usize) -> Range<usize>
 
 #[cfg(test)]
 mod tests {
-    use test_case::test_case;
+    use test_case::{test_case, test_matrix};
 
     use super::*;
 
@@ -430,22 +429,6 @@ mod tests {
             right: Modifier::None,
         }
     }
-    fn imod(tag: Range<usize>, body: Range<usize>, left: Modifier, right: Modifier) -> Token {
-        Token::Interp {
-            tag,
-            body,
-            left,
-            right,
-        }
-    }
-    fn smod(tag: Range<usize>, body: Range<usize>, left: Modifier, right: Modifier) -> Token {
-        Token::Stmt {
-            tag,
-            body,
-            left,
-            right,
-        }
-    }
 
     // --- Basic tokenization -------------------------------------------------
 
@@ -466,7 +449,7 @@ mod tests {
     #[test_case(b"{{ \"line1\nline2\" }}" => vec![interp(0..19, 3..16)]; "string_with_raw_newline")]
     #[test_case(b"{ not a tag" => vec![text(0..11)]; "single_brace_passthrough")]
     #[test_case(b"{% if %}" => vec![stmt(0..8, 3..5)]; "stmt_delimiters")]
-    #[test_case(b"{# note #}" => vec![Token::Barrier, Token::Barrier]; "comment_delimiters_stripped")]
+    #[test_case(b"{# note #}" => vec![Token::Barrier]; "comment_delimiters_stripped")]
     fn scan_cases(input: &[u8]) -> Vec<Token> {
         scan(input).unwrap()
     }
@@ -477,125 +460,162 @@ mod tests {
         std::iter::repeat_n(b'\\', n).collect()
     }
 
-    fn build(prefix: &[u8], n: usize, suffix: &[u8]) -> Vec<u8> {
+    fn build(n: usize, suffix: &[u8]) -> Vec<u8> {
         let mut v = backslashes(n);
-        v.extend_from_slice(prefix);
         v.extend_from_slice(suffix);
         v
     }
 
-    #[test]
-    fn escape_rule_table() {
-        struct OpenCase {
-            n: usize,
-            active: bool,
-            expected: Vec<Token>,
-        }
-        let open_cases = [
-            OpenCase {
-                n: 0,
-                active: true,
-                expected: vec![interp(0..5, 2..3)],
-            },
-            OpenCase {
-                n: 1,
-                active: false,
-                expected: vec![text(1..4)],
-            },
-            OpenCase {
-                n: 2,
-                active: true,
-                expected: vec![text(0..1), interp(2..7, 4..5)],
-            },
-            OpenCase {
-                n: 3,
-                active: false,
-                expected: vec![text(2..6)],
-            },
-            OpenCase {
-                n: 4,
-                active: true,
-                expected: vec![text(0..2), interp(4..9, 6..7)],
-            },
-        ];
-        for case in open_cases {
-            let src = if case.active {
-                build(b"{{x}}", case.n, b"")
-            } else {
-                build(b"{{", case.n, b"x")
-            };
-            assert_eq!(scan(&src).unwrap(), case.expected, "open n={}", case.n);
-        }
+    proptest::proptest! {
+        #[test]
+        fn escape_rule_parity(n in 0usize..20) {
+            let src_open = build(n, b"{{");
+            let result_open = scan(&src_open);
 
-        struct CloseCase {
-            n: usize,
-            err: bool,
-            expected: Vec<Token>,
-        }
-        let close_cases = [
-            CloseCase {
-                n: 0,
-                err: true,
-                expected: Vec::new(),
-            },
-            CloseCase {
-                n: 1,
-                err: false,
-                expected: vec![text(1..3)],
-            },
-            CloseCase {
-                n: 2,
-                err: true,
-                expected: Vec::new(),
-            },
-            CloseCase {
-                n: 3,
-                err: false,
-                expected: vec![text(2..5)],
-            },
-            CloseCase {
-                n: 4,
-                err: true,
-                expected: Vec::new(),
-            },
-        ];
-        for case in close_cases {
-            let src = build(b"}}", case.n, b"");
-            let result = scan(&src);
-            if case.err {
+            if n % 2 == 0 {
                 assert!(
-                    matches!(result, Err(ParseError::StrayDelimiter { .. })),
-                    "close n={} should stray",
-                    case.n
+                    matches!(result_open, Err(ParseError::UnclosedDelimiter { .. })),
+                    "close n={} should be unclosed",
+                    n
                 );
             } else {
-                assert_eq!(result.unwrap(), case.expected, "close n={}", case.n);
+                let tokens = result_open.unwrap();
+                assert!(
+                    tokens.iter().all(|t| matches!(t, Token::Text(_))),
+                    "open n={} should be escaped",
+                    n
+                );
+            }
+
+            let src_close = build(n, b"}}");
+            let result_close = scan(&src_close);
+
+            if n % 2 == 0 {
+                assert!(
+                    matches!(result_close, Err(ParseError::StrayDelimiter { .. })),
+                    "close n={} should stray",
+                    n
+                );
+            } else {
+                let tokens = result_close.unwrap();
+                assert!(
+                    tokens.iter().all(|t| matches!(t, Token::Text(_))),
+                    "close n={} should be escaped",
+                    n
+                );
             }
         }
     }
 
     // --- Modifiers ----------------------------------------------------------
 
-    #[test_case(b"{{-x-}}" => imod(0..7, 3..4, Modifier::Dash, Modifier::Dash); "dash_both_tight")]
-    #[test_case(b"{{=x=}}" => imod(0..7, 3..4, Modifier::Equal, Modifier::Equal); "equal_both_tight")]
-    #[test_case(b"{{-x=}}" => imod(0..7, 3..4, Modifier::Dash, Modifier::Equal); "dash_left_equal_right_tight")]
-    #[test_case(b"{{=x-}}" => imod(0..7, 3..4, Modifier::Equal, Modifier::Dash); "equal_left_dash_right_tight")]
-    #[test_case(b"{%-x-%}" => smod(0..7, 3..4, Modifier::Dash, Modifier::Dash); "stmt_dash_both_tight")]
-    #[test_case(b"{{- x -}}" => imod(0..9, 4..5, Modifier::Dash, Modifier::Dash); "dash_both_padded")]
-    #[test_case(b"{{= x =}}" => imod(0..9, 4..5, Modifier::Equal, Modifier::Equal); "equal_both_padded")]
-    #[test_case(b"{{- x =}}" => imod(0..9, 4..5, Modifier::Dash, Modifier::Equal); "dash_left_equal_right_padded")]
-    #[test_case(b"{{= x -}}" => imod(0..9, 4..5, Modifier::Equal, Modifier::Dash); "equal_left_dash_right_padded")]
-    #[test_case(b"{%- x -%}" => smod(0..9, 4..5, Modifier::Dash, Modifier::Dash); "stmt_dash_both_padded")]
-    fn modifier_combos(input: &[u8]) -> Token {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum MatrixVal {
+        OpenInterp,
+        CloseInterp,
+        OpenStmt,
+        CloseStmt,
+        OpenComment,
+        CloseComment,
+        Dash,
+        Equal,
+    }
+
+    impl MatrixVal {
+        fn as_str(&self) -> &'static str {
+            match self {
+                MatrixVal::OpenInterp => "{{",
+                MatrixVal::CloseInterp => "}}",
+                MatrixVal::OpenStmt => "{%",
+                MatrixVal::CloseStmt => "%}",
+                MatrixVal::OpenComment => "{#",
+                MatrixVal::CloseComment => "#}",
+                MatrixVal::Dash => "-",
+                MatrixVal::Equal => "=",
+            }
+        }
+
+        fn modifier(&self) -> Modifier {
+            match self {
+                MatrixVal::Dash => Modifier::Dash,
+                MatrixVal::Equal => Modifier::Equal,
+                _ => Modifier::None,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ExpectedError {
+        UnclosedDelimiter,
+        StrayDelimiter,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Context {
+        None,
+        Prefix,
+        Suffix,
+    }
+
+    #[test_matrix(
+        [
+            (MatrixVal::OpenInterp, MatrixVal::CloseInterp),
+            (MatrixVal::OpenStmt, MatrixVal::CloseStmt),
+        ],
+        [MatrixVal::Dash, MatrixVal::Equal],
+        [MatrixVal::Dash, MatrixVal::Equal],
+        [0, 1]
+    )]
+    fn modifier_combos(
+        (open, close): (MatrixVal, MatrixVal),
+        left: MatrixVal,
+        right: MatrixVal,
+        space_count: usize,
+    ) {
+        let spaces = " ".repeat(space_count);
+        let src = format!(
+            "{open}{left}{spaces}x{spaces}{right}{close}",
+            open = open.as_str(),
+            left = left.as_str(),
+            right = right.as_str(),
+            close = close.as_str(),
+        );
+        let input = src.as_bytes();
+
+        let open_len = open.as_str().len();
+        let close_len = close.as_str().len();
+        let left_len = left.as_str().len();
+        let right_len = right.as_str().len();
+        let tag = 0..(open_len + left_len + space_count + 1 + space_count + right_len + close_len);
+        let body_start = open_len + left_len + space_count;
+        let body = body_start..(body_start + 1);
+
+        let expected = if open == MatrixVal::OpenInterp {
+            Token::Interp {
+                tag,
+                body,
+                left: left.modifier(),
+                right: right.modifier(),
+            }
+        } else {
+            Token::Stmt {
+                tag,
+                body,
+                left: left.modifier(),
+                right: right.modifier(),
+            }
+        };
+
         let mut toks = scan(input).unwrap();
         assert_eq!(toks.len(), 1);
-        toks.pop().unwrap()
+        assert_eq!(toks.pop().unwrap(), expected);
     }
 
     // --- Delimiters inside string literals ----------------------------------
 
     #[test_case(br#"{% "%}" %}"# => stmt(0..10, 3..7); "stmt_string_shields_close")]
     #[test_case(br#"{{ "}}" }}"# => interp(0..10, 3..7); "interp_string_shields_close")]
+    #[test_case(br#"{# \#} #}"# => Token::Barrier; "")]
     fn string_shielding(input: &[u8]) -> Token {
         let mut toks = scan(input).unwrap();
         assert_eq!(toks.len(), 1);
@@ -604,24 +624,52 @@ mod tests {
 
     // --- Errors -------------------------------------------------------------
 
-    #[test_case(b"{{ name" => (0, 2); "unclosed_no_text_after")]
-    #[test_case(b"prefix {{ name" => (7, 2); "unclosed_after_text")]
-    #[test_case(br#"{{ "unclosed"# => (0, 2); "unclosed_with_string_literal")]
-    fn unclosed_returns_open_span(input: &[u8]) -> (usize, usize) {
-        let ParseError::UnclosedDelimiter { span } = scan(input).unwrap_err() else {
-            unreachable!("expected UnclosedDelimiter")
+    #[test_matrix(
+        [
+            (MatrixVal::OpenInterp, MatrixVal::CloseInterp),
+            (MatrixVal::OpenStmt, MatrixVal::CloseStmt),
+            (MatrixVal::OpenComment, MatrixVal::CloseComment),
+        ],
+        [ExpectedError::UnclosedDelimiter, ExpectedError::StrayDelimiter],
+        [Context::None, Context::Prefix, Context::Suffix]
+    )]
+    fn delimiter_error_span(
+        (open, close): (MatrixVal, MatrixVal),
+        error: ExpectedError,
+        context: Context,
+    ) {
+        let delim = match error {
+            ExpectedError::UnclosedDelimiter => open,
+            ExpectedError::StrayDelimiter => close,
         };
-        (span.offset(), span.len())
-    }
 
-    #[test_case(b"}}" => (0, 2); "stray_close")]
-    #[test_case(b"prefix }}" => (7, 2); "stray_close_after_text")]
-    #[test_case(b"\\{{}}" => (3, 2); "escaped_open_unescaped_close")]
-    fn stray_delimiter_span(input: &[u8]) -> (usize, usize) {
-        let ParseError::StrayDelimiter { span } = scan(input).unwrap_err() else {
-            unreachable!("expected StrayDelimiter")
+        let mut input = Vec::new();
+        let prefix: &[u8] = match context {
+            Context::None => b"",
+            Context::Prefix => b"prefix ",
+            Context::Suffix => b"",
         };
-        (span.offset(), span.len())
+        input.extend_from_slice(prefix);
+        input.extend_from_slice(delim.as_str().as_bytes());
+        if matches!(error, ExpectedError::UnclosedDelimiter) {
+            input.extend_from_slice(b" name");
+        }
+        if context == Context::Suffix {
+            input.extend_from_slice(b" suffix");
+        }
+
+        let err = scan(&input).unwrap_err();
+        match (error, err) {
+            (ExpectedError::UnclosedDelimiter, ParseError::UnclosedDelimiter { span })
+            | (ExpectedError::StrayDelimiter, ParseError::StrayDelimiter { span }) => {
+                assert_eq!(span.offset(), prefix.len());
+                assert_eq!(span.len(), 2);
+            }
+            (_, err) => panic!(
+                "expected {error:?} for {:?}, got {err:?}",
+                String::from_utf8_lossy(&input)
+            ),
+        }
     }
 
     #[test_case(b"{#= x #}" => (2, 1); "comment_open_modifier")]
