@@ -5,6 +5,7 @@ mod function;
 mod lex;
 mod parser;
 mod scanner;
+mod util;
 mod value;
 
 use std::{collections::HashMap, io};

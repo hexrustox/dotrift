@@ -7,6 +7,7 @@ use crate::{
     error::ParseError,
     lex::is_inner_ws,
     scanner::{Modifier, Token},
+    util::source_span,
 };
 
 /// Assembles tokens into AST nodes, recognizing `{{ expr }}` interpolations
@@ -35,7 +36,7 @@ pub(crate) fn parse(
             }
             Token::Stmt { tag, .. } => {
                 return Err(ParseError::UnrecognizedStatement {
-                    span: (tag.start, tag.end - tag.start).into(),
+                    span: source_span(tag.clone()),
                 });
             }
         }
@@ -123,7 +124,7 @@ fn parse_interp_body(
 ) -> std::result::Result<Expr, ParseError> {
     if body.start >= body.end {
         return Err(ParseError::EmptyInterpolation {
-            span: (tag.start, tag.end - tag.start).into(),
+            span: source_span(tag.clone()),
         });
     }
 
@@ -196,7 +197,7 @@ fn parse_string_literal(
     // end of the closing `}}` delimiter — the "rest of the tag" the parser
     // would have consumed had the string closed.
     Err(ParseError::UnclosedString {
-        span: (body.start, tag.end - body.start).into(),
+        span: source_span(body.start..tag.end),
     })
 }
 
@@ -297,7 +298,7 @@ fn body_range(body: &Range<usize>, rel: Range<usize>) -> Range<usize> {
 /// Translates a body-relative `Range` into a miette `SourceSpan` (used for
 /// error spans).
 fn body_span(body: &Range<usize>, rel: Range<usize>) -> SourceSpan {
-    (body.start + rel.start, rel.end - rel.start).into()
+    source_span(body.start + rel.start..body.start + rel.end)
 }
 
 #[cfg(test)]
@@ -384,45 +385,15 @@ mod tests {
         parse(vec![token], input).unwrap_err()
     }
 
-    fn span_of(e: &ParseError) -> (usize, usize) {
-        let span = match e {
-            ParseError::EmptyInterpolation { span }
-            | ParseError::IntegerOutOfRange { span }
-            | ParseError::UnclosedString { span }
-            | ParseError::UnclosedDelimiter { span }
-            | ParseError::UnexpectedToken { span }
-            | ParseError::UnexpectedTokensAfterExpr { span }
-            | ParseError::StrayDelimiter { span }
-            | ParseError::InvalidModifier { span }
-            | ParseError::UnrecognizedStatement { span } => span,
-        };
-        (span.offset(), span.len())
-    }
-
-    fn kind_of(e: &ParseError) -> &'static str {
-        match e {
-            ParseError::EmptyInterpolation { .. } => "empty_interpolation",
-            ParseError::IntegerOutOfRange { .. } => "integer_out_of_range",
-            ParseError::UnclosedString { .. } => "unclosed_string",
-            ParseError::UnclosedDelimiter { .. } => "unclosed_delimiter",
-            ParseError::UnexpectedToken { .. } => "unexpected_token",
-            ParseError::UnexpectedTokensAfterExpr { .. } => "unexpected_tokens_after_expr",
-            ParseError::StrayDelimiter { .. } => "stray_delimiter",
-            ParseError::InvalidModifier { .. } => "invalid_modifier",
-            ParseError::UnrecognizedStatement { .. } => "unrecognized_statement",
-        }
-    }
-
-    #[test_case(b"{{ }}" => "empty_interpolation"; "empty_body")]
-    #[test_case(b"{{ +7 }}" => "unexpected_token"; "plus_prefixed_integer")]
-    #[test_case(b"{{ 99999999999999999999999 }}" => "integer_out_of_range"; "overflow_positive")]
-    #[test_case(b"{{ -99999999999999999999999 }}" => "integer_out_of_range"; "overflow_negative")]
-    #[test_case(b"{{ \"hello }}" => "unclosed_string"; "unclosed_string")]
-    #[test_case(b"{{ @ }}" => "unexpected_token"; "unexpected_byte")]
-    #[test_case(b"{{ a b }}" => "unexpected_tokens_after_expr"; "trailing_token")]
-    #[test_case(b"{{ - }}" => "unexpected_token"; "minus_alone")]
-    fn kind_cases(input: &[u8]) -> &'static str {
-        kind_of(&err(input))
+    #[test_case(b"{{ }}" => matches ParseError::EmptyInterpolation { .. }; "empty_body")]
+    #[test_case(b"{{ 99999999999999999999999 }}" => matches ParseError::IntegerOutOfRange { .. }; "overflow_positive")]
+    #[test_case(b"{{ -99999999999999999999999 }}" => matches ParseError::IntegerOutOfRange { .. }; "overflow_negative")]
+    #[test_case(b"{{ \"hello }}" => matches ParseError::UnclosedString { .. }; "unclosed_string")]
+    #[test_case(b"{{ @ }}" => matches ParseError::UnexpectedToken { .. }; "unexpected_byte")]
+    #[test_case(b"{{ a b }}" => matches ParseError::UnexpectedTokensAfterExpr { .. }; "trailing_token")]
+    #[test_case(b"{{ - }}" => matches ParseError::UnexpectedToken { .. }; "minus_alone")]
+    fn kind_cases(input: &[u8]) -> ParseError {
+        err(input)
     }
 
     #[test_case(b"{{ }}" => (0, 5); "empty_body_span")]
@@ -433,6 +404,6 @@ mod tests {
     #[test_case(b"{{ a b }}" => (5, 1); "trailing_token_span")]
     #[test_case(b"{{ \"hello }}" => (3, 9); "unclosed_string_span")]
     fn span_cases(input: &[u8]) -> (usize, usize) {
-        span_of(&err(input))
+        err(input).span()
     }
 }

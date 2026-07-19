@@ -75,6 +75,24 @@ pub enum ParseError {
     },
 }
 
+impl ParseError {
+    /// Returns the `(offset, length)` of the error span in source bytes.
+    pub fn span(&self) -> (usize, usize) {
+        let span = match self {
+            ParseError::EmptyInterpolation { span }
+            | ParseError::IntegerOutOfRange { span }
+            | ParseError::UnclosedString { span }
+            | ParseError::UnclosedDelimiter { span }
+            | ParseError::UnexpectedToken { span }
+            | ParseError::UnexpectedTokensAfterExpr { span }
+            | ParseError::StrayDelimiter { span }
+            | ParseError::InvalidModifier { span }
+            | ParseError::UnrecognizedStatement { span } => span,
+        };
+        (span.offset(), span.len())
+    }
+}
+
 /// Errors raised only on actually-executed content.
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum RenderError {
@@ -84,6 +102,16 @@ pub enum RenderError {
         #[label]
         span: SourceSpan,
     },
+}
+
+impl RenderError {
+    /// Returns the `(offset, length)` of the error span in source bytes.
+    pub fn span(&self) -> (usize, usize) {
+        let span = match self {
+            RenderError::UndefinedVariable { span } => span,
+        };
+        (span.offset(), span.len())
+    }
 }
 
 /// Errors returned by the host's [`FunctionRegistry`](crate::FunctionRegistry).

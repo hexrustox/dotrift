@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use crate::error::ParseError;
 use crate::lex::is_inner_ws;
+use crate::util::source_span;
 
 /// A whitespace-control sigil attached to an interpolation or statement
 /// delimiter. Comments never carry modifiers.
@@ -141,7 +142,7 @@ pub(crate) fn scan(src: &[u8]) -> std::result::Result<Vec<Token>, ParseError> {
                 let open_pos = cluster.core;
                 if src.len() > open_pos + 2 && is_modifier(src[open_pos + 2]) {
                     return Err(ParseError::InvalidModifier {
-                        span: (open_pos + 2, 1).into(),
+                        span: source_span(open_pos + 2..open_pos + 3),
                     });
                 }
                 let body_start = open_pos + 2;
@@ -151,7 +152,7 @@ pub(crate) fn scan(src: &[u8]) -> std::result::Result<Vec<Token>, ParseError> {
             }
             ClusterKind::CloseInterp | ClusterKind::CloseStmt | ClusterKind::CloseComment => {
                 return Err(ParseError::StrayDelimiter {
-                    span: (cluster.core, 2).into(),
+                    span: source_span(cluster.core..cluster.core + 2),
                 });
             }
         }
@@ -189,7 +190,7 @@ fn parse_left_modifier(
     if after_delim < src.len() && is_modifier(src[after_delim]) {
         if kind == ClusterKind::OpenComment {
             return Err(ParseError::InvalidModifier {
-                span: (after_delim, 1).into(),
+                span: source_span(after_delim..after_delim + 1),
             });
         }
         Ok((modifier(src[after_delim]), after_delim + 1))
@@ -325,7 +326,7 @@ fn scan_body(
     }
 
     Err(ParseError::UnclosedDelimiter {
-        span: (open_pos, 2).into(),
+        span: source_span(open_pos..open_pos + 2),
     })
 }
 
@@ -362,7 +363,7 @@ fn scan_comment_body(
             }
             if i > 0 && is_modifier(src[i - 1]) {
                 return Err(ParseError::InvalidModifier {
-                    span: (i - 1, 2).into(),
+                    span: source_span(i - 1..i),
                 });
             }
             return Ok(i + 2);
@@ -370,7 +371,7 @@ fn scan_comment_body(
         i += 1;
     }
     Err(ParseError::UnclosedDelimiter {
-        span: (open_pos, 2).into(),
+        span: source_span(open_pos..open_pos + 2),
     })
 }
 
