@@ -6,27 +6,110 @@ use crate::{
     ast::{Expr, Node},
     error::ParseError,
     lex::is_inner_ws,
-    scanner::Token,
+    scanner::{Modifier, Token},
 };
 
-/// Assembles tokens into AST nodes, recognizing `{{ expr }}` interpolations.
-/// The body of an interpolation is parsed into a single `Expr`; nothing more
-/// (no dot access, no function calls, no lists — ticket 04/05 territory).
+/// Assembles tokens into AST nodes, recognizing `{{ expr }}` interpolations
+/// and applying whitespace-control modifiers to adjacent text ranges.
 pub(crate) fn parse(
     tokens: Vec<Token>,
     source: &[u8],
 ) -> std::result::Result<Vec<Node>, ParseError> {
-    let mut nodes = Vec::new();
+    let mut items: Vec<Item> = Vec::with_capacity(tokens.len());
     for token in tokens {
         match token {
-            Token::Text(range) => nodes.push(Node::Text(range)),
-            Token::Interp { tag, body } => {
+            Token::Text(range) => items.push(Item::Text(range)),
+            Token::Barrier => items.push(Item::Barrier),
+            Token::Interp {
+                tag,
+                body,
+                left,
+                right,
+            } => {
                 let expr = parse_interp_body(source, body, tag)?;
-                nodes.push(Node::Interpolate(expr));
+                items.push(Item::Tag {
+                    left,
+                    right,
+                    node: Node::Interpolate(expr),
+                });
+            }
+            Token::Stmt { tag, .. } => {
+                return Err(ParseError::UnrecognizedStatement {
+                    span: (tag.start, tag.end - tag.start).into(),
+                });
             }
         }
     }
+
+    let mut nodes = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        match item {
+            Item::Text(range) => {
+                let mut r = range.clone();
+                if let Some(Item::Tag { right, .. }) = i.checked_sub(1).and_then(|j| items.get(j)) {
+                    r.start = trim_left(source, &r, *right);
+                }
+                if let Some(Item::Tag { left, .. }) = items.get(i + 1) {
+                    r.end = trim_right(source, &r, *left);
+                }
+                if r.start < r.end {
+                    nodes.push(Node::Text(r));
+                }
+            }
+            Item::Tag { node, .. } => nodes.push(node.clone()),
+            Item::Barrier => {}
+        }
+    }
+
     Ok(nodes)
+}
+
+enum Item {
+    Text(Range<usize>),
+    Tag {
+        left: Modifier,
+        right: Modifier,
+        node: Node,
+    },
+    Barrier,
+}
+
+fn trim_left(src: &[u8], range: &Range<usize>, right: Modifier) -> usize {
+    match right {
+        Modifier::None => range.start,
+        Modifier::Dash => {
+            let mut i = range.start;
+            while i < range.end && (src[i] == b' ' || src[i] == b'\t') {
+                i += 1;
+            }
+            i
+        }
+        Modifier::Equal => match src[range.start..range.end].iter().position(|&b| b == b'\n') {
+            Some(k) => range.start + k + 1,
+            None => range.end,
+        },
+    }
+}
+
+fn trim_right(src: &[u8], range: &Range<usize>, left: Modifier) -> usize {
+    match left {
+        Modifier::None => range.end,
+        Modifier::Dash => {
+            let mut i = range.end;
+            while i > range.start && (src[i - 1] == b' ' || src[i - 1] == b'\t') {
+                i -= 1;
+            }
+            i
+        }
+        Modifier::Equal => match src[range.start..range.end]
+            .iter()
+            .rposition(|&b| b == b'\n')
+        {
+            // Left `=` stops before the newline, so the newline is preserved.
+            Some(k) => range.start + k + 1,
+            None => range.start,
+        },
+    }
 }
 
 /// Parses the trimmed body of a `{{ ... }}` tag into one `Expr`. The body
@@ -251,8 +334,9 @@ mod tests {
         }
     }
 
-    /// Builds the same `Token::Interp { tag, body }` the scanner would
-    /// produce for `input`: `tag = open..close_end`, `body` trimmed.
+    /// Builds the same `Token::Interp { tag, body, left, right }` the scanner
+    /// would produce for `input`: `tag = open..close_end`, `body` trimmed,
+    /// no modifiers.
     fn token_from_input(input: &[u8]) -> Token {
         let open = input.windows(2).position(|w| w == b"{{").unwrap();
         let close = input.windows(2).rposition(|w| w == b"}}").unwrap();
@@ -268,6 +352,8 @@ mod tests {
         Token::Interp {
             tag: open..close_end,
             body: body_start..body_end,
+            left: Modifier::None,
+            right: Modifier::None,
         }
     }
 
@@ -305,7 +391,10 @@ mod tests {
             | ParseError::UnclosedString { span }
             | ParseError::UnclosedDelimiter { span }
             | ParseError::UnexpectedToken { span }
-            | ParseError::UnexpectedTokensAfterExpr { span } => span,
+            | ParseError::UnexpectedTokensAfterExpr { span }
+            | ParseError::StrayDelimiter { span }
+            | ParseError::InvalidModifier { span }
+            | ParseError::UnrecognizedStatement { span } => span,
         };
         (span.offset(), span.len())
     }
@@ -318,6 +407,9 @@ mod tests {
             ParseError::UnclosedDelimiter { .. } => "unclosed_delimiter",
             ParseError::UnexpectedToken { .. } => "unexpected_token",
             ParseError::UnexpectedTokensAfterExpr { .. } => "unexpected_tokens_after_expr",
+            ParseError::StrayDelimiter { .. } => "stray_delimiter",
+            ParseError::InvalidModifier { .. } => "invalid_modifier",
+            ParseError::UnrecognizedStatement { .. } => "unrecognized_statement",
         }
     }
 

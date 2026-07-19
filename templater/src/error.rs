@@ -55,6 +55,24 @@ pub enum ParseError {
         #[label]
         span: SourceSpan,
     },
+    #[error("stray delimiter")]
+    #[diagnostic(code(templater::parse::stray_delimiter))]
+    StrayDelimiter {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("invalid modifier")]
+    #[diagnostic(code(templater::parse::invalid_modifier))]
+    InvalidModifier {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("unrecognized statement")]
+    #[diagnostic(code(templater::parse::unrecognized_statement))]
+    UnrecognizedStatement {
+        #[label]
+        span: SourceSpan,
+    },
 }
 
 /// Errors raised only on actually-executed content.

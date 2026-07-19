@@ -26,7 +26,10 @@ fn parse_span(e: &ParseError) -> (usize, usize) {
         | ParseError::UnclosedString { span }
         | ParseError::UnclosedDelimiter { span }
         | ParseError::UnexpectedToken { span }
-        | ParseError::UnexpectedTokensAfterExpr { span } => (span.offset(), span.len()),
+        | ParseError::UnexpectedTokensAfterExpr { span }
+        | ParseError::StrayDelimiter { span }
+        | ParseError::InvalidModifier { span }
+        | ParseError::UnrecognizedStatement { span } => (span.offset(), span.len()),
     }
 }
 
