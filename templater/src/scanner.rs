@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::error::ParseError;
+use crate::error::{Error, ParseError};
 use crate::lex::is_inner_ws;
 use crate::util::source_span;
 
@@ -89,7 +89,7 @@ impl Cluster {
 /// odd/even backslash escape rule, handles whitespace-control modifiers on
 /// interpolation and statement tags, and strips comments while leaving
 /// barrier markers for downstream `=` trimming.
-pub(crate) fn scan(src: &[u8]) -> std::result::Result<Vec<Token>, ParseError> {
+pub(crate) fn scan(src: &[u8]) -> std::result::Result<Vec<Token>, Error> {
     let mut tokens = Vec::new();
     let mut text_start = 0;
 
@@ -141,9 +141,10 @@ pub(crate) fn scan(src: &[u8]) -> std::result::Result<Vec<Token>, ParseError> {
             ClusterKind::OpenComment => {
                 let open_pos = cluster.core;
                 if src.len() > open_pos + 2 && is_modifier(src[open_pos + 2]) {
-                    return Err(ParseError::InvalidModifier {
-                        span: source_span(open_pos + 2..open_pos + 3),
-                    });
+                    return Err(Error::parse(
+                        ParseError::InvalidModifier,
+                        source_span(open_pos + 2..open_pos + 3),
+                    ));
                 }
                 let body_start = open_pos + 2;
                 let close_end = scan_comment_body(src, body_start, open_pos)?;
@@ -151,9 +152,10 @@ pub(crate) fn scan(src: &[u8]) -> std::result::Result<Vec<Token>, ParseError> {
                 text_start = close_end;
             }
             ClusterKind::CloseInterp | ClusterKind::CloseStmt | ClusterKind::CloseComment => {
-                return Err(ParseError::StrayDelimiter {
-                    span: source_span(cluster.core..cluster.core + 2),
-                });
+                return Err(Error::parse(
+                    ParseError::StrayDelimiter,
+                    source_span(cluster.core..cluster.core + 2),
+                ));
             }
         }
     }
@@ -185,13 +187,14 @@ fn parse_left_modifier(
     src: &[u8],
     cluster: Cluster,
     kind: ClusterKind,
-) -> std::result::Result<(Modifier, usize), ParseError> {
+) -> std::result::Result<(Modifier, usize), Error> {
     let after_delim = cluster.core + 2;
     if after_delim < src.len() && is_modifier(src[after_delim]) {
         if kind == ClusterKind::OpenComment {
-            return Err(ParseError::InvalidModifier {
-                span: source_span(after_delim..after_delim + 1),
-            });
+            return Err(Error::parse(
+                ParseError::InvalidModifier,
+                source_span(after_delim..after_delim + 1),
+            ));
         }
         Ok((modifier(src[after_delim]), after_delim + 1))
     } else {
@@ -279,7 +282,7 @@ fn scan_body(
     body_start: usize,
     open_kind: ClusterKind,
     open_pos: usize,
-) -> std::result::Result<(usize, Modifier), ParseError> {
+) -> std::result::Result<(usize, Modifier), Error> {
     debug_assert!(matches!(
         open_kind,
         ClusterKind::OpenInterp | ClusterKind::OpenStmt
@@ -325,9 +328,10 @@ fn scan_body(
         return Ok((core, right));
     }
 
-    Err(ParseError::UnclosedDelimiter {
-        span: source_span(open_pos..open_pos + 2),
-    })
+    Err(Error::parse(
+        ParseError::UnclosedDelimiter,
+        source_span(open_pos..open_pos + 2),
+    ))
 }
 
 /// Returns the absolute position of the closing `"` for a string literal that
@@ -351,7 +355,7 @@ fn scan_comment_body(
     src: &[u8],
     body_start: usize,
     open_pos: usize,
-) -> std::result::Result<usize, ParseError> {
+) -> std::result::Result<usize, Error> {
     let mut i = body_start;
     while i + 2 <= src.len() {
         if src[i] == b'#' && src[i + 1] == b'}' {
@@ -362,17 +366,19 @@ fn scan_comment_body(
                 continue;
             }
             if i > 0 && is_modifier(src[i - 1]) {
-                return Err(ParseError::InvalidModifier {
-                    span: source_span(i - 1..i),
-                });
+                return Err(Error::parse(
+                    ParseError::InvalidModifier,
+                    source_span(i - 1..i),
+                ));
             }
             return Ok(i + 2);
         }
         i += 1;
     }
-    Err(ParseError::UnclosedDelimiter {
-        span: source_span(open_pos..open_pos + 2),
-    })
+    Err(Error::parse(
+        ParseError::UnclosedDelimiter,
+        source_span(open_pos..open_pos + 2),
+    ))
 }
 
 // -----------------------------------------------------------------------------
@@ -720,27 +726,35 @@ mod tests {
 
         let mut input = Vec::new();
         let prefix: &[u8] = match context {
-            Context::None => b"",
             Context::Prefix => b"prefix ",
-            Context::Suffix => b"",
+            _ => b"",
         };
         input.extend_from_slice(prefix);
         input.extend_from_slice(delim.as_str().as_bytes());
-        if matches!(error, ExpectedError::UnclosedDelimiter) {
-            input.extend_from_slice(b" name");
-        }
         if context == Context::Suffix {
             input.extend_from_slice(b" suffix");
         }
 
         let err = scan(&input).unwrap_err();
-        match (error, err) {
-            (ExpectedError::UnclosedDelimiter, ParseError::UnclosedDelimiter { span })
-            | (ExpectedError::StrayDelimiter, ParseError::StrayDelimiter { span }) => {
+        match (error, &err) {
+            (
+                ExpectedError::UnclosedDelimiter,
+                Error::Parse {
+                    err: ParseError::UnclosedDelimiter,
+                    span,
+                },
+            )
+            | (
+                ExpectedError::StrayDelimiter,
+                Error::Parse {
+                    err: ParseError::StrayDelimiter,
+                    span,
+                },
+            ) => {
                 assert_eq!(span.offset(), prefix.len());
                 assert_eq!(span.len(), 2);
             }
-            (_, err) => panic!(
+            (_, _) => panic!(
                 "expected {error:?} for {:?}, got {err:?}",
                 String::from_utf8_lossy(&input)
             ),

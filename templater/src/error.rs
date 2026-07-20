@@ -6,91 +6,105 @@ use crate::ValueType;
 
 /// Errors raised while constructing or rendering a [`Template`](crate::Template).
 #[derive(Debug, thiserror::Error, Diagnostic)]
-#[error(transparent)]
 pub enum Error {
-    Parse(#[from] ParseError),
-    Render(#[from] RenderError),
-    Func(#[from] FuncError),
+    #[error("{err}")]
+    #[diagnostic(code(templater::parse))]
+    Parse {
+        #[source]
+        err: ParseError,
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("{err}")]
+    #[diagnostic(code(templater::render))]
+    Render {
+        #[source]
+        err: RenderError,
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("{err}")]
+    #[diagnostic(code(templater::func))]
+    Func {
+        #[source]
+        err: FuncError,
+        #[label(primary)]
+        span: SourceSpan,
+    },
+    #[error("{0}")]
+    #[diagnostic(code(templater::io))]
     Io(#[from] io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+impl Error {
+    /// Constructs a parse error annotated with a source span.
+    pub(crate) fn parse(err: ParseError, span: impl Into<SourceSpan>) -> Self {
+        Self::Parse {
+            err,
+            span: span.into(),
+        }
+    }
+
+    /// Constructs a render error annotated with a source span.
+    pub(crate) fn render(err: RenderError, span: impl Into<SourceSpan>) -> Self {
+        Self::Render {
+            err,
+            span: span.into(),
+        }
+    }
+
+    /// Constructs a function error annotated with the call-expression span.
+    #[allow(dead_code)] // Used by the function-call evaluator (ticket 04).
+    pub(crate) fn func(err: FuncError, span: impl Into<SourceSpan>) -> Self {
+        Self::Func {
+            err,
+            span: span.into(),
+        }
+    }
+
+    /// Returns the `(offset, length)` of the primary error span, if any.
+    pub fn span(&self) -> Option<(usize, usize)> {
+        match self {
+            Error::Parse { span, .. } | Error::Render { span, .. } | Error::Func { span, .. } => {
+                Some((span.offset(), span.len()))
+            }
+            Error::Io(_) => None,
+        }
+    }
+}
+
 /// Errors raised during tokenization or parsing, before any content executes.
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error, Diagnostic, PartialEq)]
 pub enum ParseError {
     #[error("empty interpolation")]
     #[diagnostic(code(templater::parse::empty_interpolation))]
-    EmptyInterpolation {
-        #[label]
-        span: SourceSpan,
-    },
+    EmptyInterpolation,
     #[error("integer literal out of i64 range")]
     #[diagnostic(code(templater::parse::integer_out_of_range))]
-    IntegerOutOfRange {
-        #[label]
-        span: SourceSpan,
-    },
+    IntegerOutOfRange,
     #[error("unclosed string literal")]
     #[diagnostic(code(templater::parse::unclosed_string))]
-    UnclosedString {
-        #[label]
-        span: SourceSpan,
-    },
+    UnclosedString,
     #[error("unclosed delimiter")]
     #[diagnostic(code(templater::parse::unclosed_delimiter))]
-    UnclosedDelimiter {
-        #[label]
-        span: SourceSpan,
-    },
+    UnclosedDelimiter,
     #[error("unexpected token")]
     #[diagnostic(code(templater::parse::unexpected_token))]
-    UnexpectedToken {
-        #[label]
-        span: SourceSpan,
-    },
+    UnexpectedToken,
     #[error("unexpected tokens after expression")]
     #[diagnostic(code(templater::parse::unexpected_tokens_after_expr))]
-    UnexpectedTokensAfterExpr {
-        #[label]
-        span: SourceSpan,
-    },
+    UnexpectedTokensAfterExpr,
     #[error("stray delimiter")]
     #[diagnostic(code(templater::parse::stray_delimiter))]
-    StrayDelimiter {
-        #[label]
-        span: SourceSpan,
-    },
+    StrayDelimiter,
     #[error("invalid modifier")]
     #[diagnostic(code(templater::parse::invalid_modifier))]
-    InvalidModifier {
-        #[label]
-        span: SourceSpan,
-    },
+    InvalidModifier,
     #[error("unrecognized statement")]
     #[diagnostic(code(templater::parse::unrecognized_statement))]
-    UnrecognizedStatement {
-        #[label]
-        span: SourceSpan,
-    },
-}
-
-impl ParseError {
-    /// Returns the `(offset, length)` of the error span in source bytes.
-    pub fn span(&self) -> (usize, usize) {
-        let span = match self {
-            ParseError::EmptyInterpolation { span }
-            | ParseError::IntegerOutOfRange { span }
-            | ParseError::UnclosedString { span }
-            | ParseError::UnclosedDelimiter { span }
-            | ParseError::UnexpectedToken { span }
-            | ParseError::UnexpectedTokensAfterExpr { span }
-            | ParseError::StrayDelimiter { span }
-            | ParseError::InvalidModifier { span }
-            | ParseError::UnrecognizedStatement { span } => span,
-        };
-        (span.offset(), span.len())
-    }
+    UnrecognizedStatement,
 }
 
 /// Errors raised only on actually-executed content.
@@ -98,31 +112,31 @@ impl ParseError {
 pub enum RenderError {
     #[error("undefined variable")]
     #[diagnostic(code(templater::render::undefined_variable))]
-    UndefinedVariable {
-        #[label]
-        span: SourceSpan,
-    },
-}
-
-impl RenderError {
-    /// Returns the `(offset, length)` of the error span in source bytes.
-    pub fn span(&self) -> (usize, usize) {
-        let span = match self {
-            RenderError::UndefinedVariable { span } => span,
-        };
-        (span.offset(), span.len())
-    }
+    UndefinedVariable,
 }
 
 /// Errors returned by the host's [`FunctionRegistry`](crate::FunctionRegistry).
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum FuncError {
     #[error("undefined function `{name}`")]
+    #[diagnostic(code(templater::func::undefined))]
     Undefined { name: String },
     #[error("expects {expected} arguments, got {got}")]
-    ArgCount { expected: String, got: usize },
+    #[diagnostic(code(templater::func::arg_count))]
+    ArgCount {
+        expected: String,
+        got: usize,
+        #[label("function called here")]
+        func_span: SourceSpan,
+    },
     #[error("expects type {expected}, got {got}")]
-    TypeMismatch { expected: ValueType, got: ValueType },
+    #[diagnostic(code(templater::func::type_mismatch))]
+    TypeMismatch {
+        expected: ValueType,
+        got: ValueType,
+        #[label("function called here")]
+        func_span: SourceSpan,
+    },
 }
 
 /// Source bytes exposed to miette so error spans render byte-accurately.

@@ -4,7 +4,7 @@ use miette::SourceSpan;
 
 use crate::{
     ast::{Expr, Node},
-    error::ParseError,
+    error::{Error, ParseError},
     lex::is_inner_ws,
     scanner::{Modifier, Token},
     util::source_span,
@@ -12,10 +12,7 @@ use crate::{
 
 /// Assembles tokens into AST nodes, recognizing `{{ expr }}` interpolations
 /// and applying whitespace-control modifiers to adjacent text ranges.
-pub(crate) fn parse(
-    tokens: Vec<Token>,
-    source: &[u8],
-) -> std::result::Result<Vec<Node>, ParseError> {
+pub(crate) fn parse(tokens: Vec<Token>, source: &[u8]) -> std::result::Result<Vec<Node>, Error> {
     let mut items: Vec<Item> = Vec::with_capacity(tokens.len());
     for token in tokens {
         match token {
@@ -35,9 +32,10 @@ pub(crate) fn parse(
                 });
             }
             Token::Stmt { tag, .. } => {
-                return Err(ParseError::UnrecognizedStatement {
-                    span: source_span(tag.clone()),
-                });
+                return Err(Error::parse(
+                    ParseError::UnrecognizedStatement,
+                    source_span(tag.clone()),
+                ));
             }
         }
     }
@@ -121,11 +119,12 @@ fn parse_interp_body(
     source: &[u8],
     body: Range<usize>,
     tag: Range<usize>,
-) -> std::result::Result<Expr, ParseError> {
+) -> std::result::Result<Expr, Error> {
     if body.start >= body.end {
-        return Err(ParseError::EmptyInterpolation {
-            span: source_span(tag.clone()),
-        });
+        return Err(Error::parse(
+            ParseError::EmptyInterpolation,
+            source_span(tag.clone()),
+        ));
     }
 
     let bytes = &source[body.clone()];
@@ -136,9 +135,10 @@ fn parse_interp_body(
         b'-' | b'0'..=b'9' => parse_integer_literal(bytes, &body)?,
         _ if is_ident_start(first) => parse_ident_or_keyword(bytes, &body)?,
         _ => {
-            return Err(ParseError::UnexpectedToken {
-                span: body_span(&body, 0..1),
-            });
+            return Err(Error::parse(
+                ParseError::UnexpectedToken,
+                body_span(&body, 0..1),
+            ));
         }
     };
 
@@ -156,9 +156,10 @@ fn parse_interp_body(
         } else {
             leftover
         };
-        return Err(ParseError::UnexpectedTokensAfterExpr {
-            span: body_span(&body, at..at + 1),
-        });
+        return Err(Error::parse(
+            ParseError::UnexpectedTokensAfterExpr,
+            body_span(&body, at..at + 1),
+        ));
     }
 
     Ok(kind.expr)
@@ -175,7 +176,7 @@ fn parse_string_literal(
     bytes: &[u8],
     tag: &Range<usize>,
     body: &Range<usize>,
-) -> std::result::Result<KindBundle, ParseError> {
+) -> std::result::Result<KindBundle, Error> {
     debug_assert_eq!(bytes[0], b'"');
     let mut i = 1;
     while i < bytes.len() {
@@ -196,15 +197,16 @@ fn parse_string_literal(
     // Unclosed: span from the opening `"` (trimmed body start) through the
     // end of the closing `}}` delimiter — the "rest of the tag" the parser
     // would have consumed had the string closed.
-    Err(ParseError::UnclosedString {
-        span: source_span(body.start..tag.end),
-    })
+    Err(Error::parse(
+        ParseError::UnclosedString,
+        source_span(body.start..tag.end),
+    ))
 }
 
 fn parse_integer_literal(
     bytes: &[u8],
     body: &Range<usize>,
-) -> std::result::Result<KindBundle, ParseError> {
+) -> std::result::Result<KindBundle, Error> {
     let mut i = 0;
     let negative = bytes[0] == b'-';
     if negative {
@@ -217,9 +219,10 @@ fn parse_integer_literal(
 
     if i == digits_start {
         // `-` with no following digits is not a valid integer literal.
-        return Err(ParseError::UnexpectedToken {
-            span: body_span(body, 0..1),
-        });
+        return Err(Error::parse(
+            ParseError::UnexpectedToken,
+            body_span(body, 0..1),
+        ));
     }
 
     let digits = &bytes[digits_start..i];
@@ -231,26 +234,30 @@ fn parse_integer_literal(
         acc = acc
             .checked_mul(10)
             .and_then(|n| n.checked_add((d - b'0') as i128))
-            .ok_or(ParseError::IntegerOutOfRange {
-                span: body_span(body, 0..i),
-            })?;
+            .ok_or(Error::parse(
+                ParseError::IntegerOutOfRange,
+                body_span(body, 0..i),
+            ))?;
     }
 
     let value = if negative {
-        let neg = acc.checked_neg().ok_or(ParseError::IntegerOutOfRange {
-            span: body_span(body, 0..i),
-        })?;
+        let neg = acc.checked_neg().ok_or(Error::parse(
+            ParseError::IntegerOutOfRange,
+            body_span(body, 0..i),
+        ))?;
         if neg < i64::MIN as i128 {
-            return Err(ParseError::IntegerOutOfRange {
-                span: body_span(body, 0..i),
-            });
+            return Err(Error::parse(
+                ParseError::IntegerOutOfRange,
+                body_span(body, 0..i),
+            ));
         }
         neg as i64
     } else {
         if acc > i64::MAX as i128 {
-            return Err(ParseError::IntegerOutOfRange {
-                span: body_span(body, 0..i),
-            });
+            return Err(Error::parse(
+                ParseError::IntegerOutOfRange,
+                body_span(body, 0..i),
+            ));
         }
         acc as i64
     };
@@ -264,7 +271,7 @@ fn parse_integer_literal(
 fn parse_ident_or_keyword(
     bytes: &[u8],
     body: &Range<usize>,
-) -> std::result::Result<KindBundle, ParseError> {
+) -> std::result::Result<KindBundle, Error> {
     let mut i = 0;
     while i < bytes.len() && is_ident_byte(bytes[i]) {
         i += 1;
@@ -380,20 +387,24 @@ mod tests {
 
     // --- Parse errors -------------------------------------------------------
 
-    fn err(input: &[u8]) -> ParseError {
+    fn err(input: &[u8]) -> (ParseError, (usize, usize)) {
         let token = token_from_input(input);
-        parse(vec![token], input).unwrap_err()
+        let e = parse(vec![token], input).unwrap_err();
+        let Error::Parse { err, span } = e else {
+            panic!("expected parse error, got {e:?}");
+        };
+        (err, (span.offset(), span.len()))
     }
 
-    #[test_case(b"{{ }}" => matches ParseError::EmptyInterpolation { .. }; "empty_body")]
-    #[test_case(b"{{ 99999999999999999999999 }}" => matches ParseError::IntegerOutOfRange { .. }; "overflow_positive")]
-    #[test_case(b"{{ -99999999999999999999999 }}" => matches ParseError::IntegerOutOfRange { .. }; "overflow_negative")]
-    #[test_case(b"{{ \"hello }}" => matches ParseError::UnclosedString { .. }; "unclosed_string")]
-    #[test_case(b"{{ @ }}" => matches ParseError::UnexpectedToken { .. }; "unexpected_byte")]
-    #[test_case(b"{{ a b }}" => matches ParseError::UnexpectedTokensAfterExpr { .. }; "trailing_token")]
-    #[test_case(b"{{ - }}" => matches ParseError::UnexpectedToken { .. }; "minus_alone")]
+    #[test_case(b"{{ }}" => matches ParseError::EmptyInterpolation; "empty_body")]
+    #[test_case(b"{{ 99999999999999999999999 }}" => matches ParseError::IntegerOutOfRange; "overflow_positive")]
+    #[test_case(b"{{ -99999999999999999999999 }}" => matches ParseError::IntegerOutOfRange; "overflow_negative")]
+    #[test_case(b"{{ \"hello }}" => matches ParseError::UnclosedString; "unclosed_string")]
+    #[test_case(b"{{ @ }}" => matches ParseError::UnexpectedToken; "unexpected_byte")]
+    #[test_case(b"{{ a b }}" => matches ParseError::UnexpectedTokensAfterExpr; "trailing_token")]
+    #[test_case(b"{{ - }}" => matches ParseError::UnexpectedToken; "minus_alone")]
     fn kind_cases(input: &[u8]) -> ParseError {
-        err(input)
+        err(input).0
     }
 
     #[test_case(b"{{ }}" => (0, 5); "empty_body_span")]
@@ -404,6 +415,6 @@ mod tests {
     #[test_case(b"{{ a b }}" => (5, 1); "trailing_token_span")]
     #[test_case(b"{{ \"hello }}" => (3, 9); "unclosed_string_span")]
     fn span_cases(input: &[u8]) -> (usize, usize) {
-        err(input).span()
+        err(input).1
     }
 }

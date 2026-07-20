@@ -5,7 +5,7 @@ use miette::SourceSpan;
 use crate::{
     Template, Value,
     ast::{Expr, Node},
-    error::{RenderError, Result},
+    error::{Error, RenderError, Result},
 };
 
 /// A binding layer in the scope stack walked by variable resolution. This
@@ -80,10 +80,10 @@ fn eval(expr: &Expr, src: &[u8], frame: &Frame<'_>) -> Result<Value> {
             match lookup(name, frame) {
                 Some(v) => v.into_owned(),
                 None => {
-                    return Err(RenderError::UndefinedVariable {
-                        span: SourceSpan::from((range.start, range.end - range.start)),
-                    }
-                    .into());
+                    return Err(Error::render(
+                        RenderError::UndefinedVariable,
+                        SourceSpan::from((range.start, range.end - range.start)),
+                    ));
                 }
             }
         }
