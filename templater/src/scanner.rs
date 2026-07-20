@@ -431,85 +431,6 @@ mod tests {
         }
     }
 
-    // --- Basic tokenization -------------------------------------------------
-
-    #[test_case(b"" => Vec::<Token>::new(); "empty")]
-    #[test_case(b"hello" => vec![text(0..5)]; "plain_text")]
-    #[test_case(b"{{ x }}" => vec![interp(0..7, 3..4)]; "interp_padded")]
-    #[test_case(b"{{x}}" => vec![interp(0..5, 2..3)]; "interp_tight")]
-    #[test_case(b"{{   x   }}" => vec![interp(0..11, 5..6)]; "interp_heavy_padding")]
-    #[test_case(b"{{}}" => vec![interp(0..4, 2..2)]; "interp_empty")]
-    #[test_case(b"{{  }}" => vec![interp(0..6, 4..4)]; "interp_whitespace_only")]
-    #[test_case(b"{{\nx\n}}" => vec![interp(0..7, 3..4)]; "interp_newline_in_body")]
-    #[test_case(b"{{\tx}}" => vec![interp(0..6, 3..4)]; "interp_tab_in_body")]
-    #[test_case(b"a{{ x }}b" => vec![text(0..1), interp(1..8, 4..5), text(8..9)]; "interp_between_text")]
-    #[test_case(b"{{ x }}{{ y }}" => vec![interp(0..7, 3..4), interp(7..14, 10..11)]; "two_interps")]
-    #[test_case(br#"{{ "}}" }}"# => vec![interp(0..10, 3..7)]; "string_shields_close_delim")]
-    #[test_case(br#"{{ "\" }}"# => vec![interp(0..9, 3..6)]; "escaped_quote_in_string")]
-    #[test_case(br#"{{ "a\xb" }}"# => vec![interp(0..12, 3..9)]; "string_with_passthrough_escape")]
-    #[test_case(b"{{ \"line1\nline2\" }}" => vec![interp(0..19, 3..16)]; "string_with_raw_newline")]
-    #[test_case(b"{ not a tag" => vec![text(0..11)]; "single_brace_passthrough")]
-    #[test_case(b"{% if %}" => vec![stmt(0..8, 3..5)]; "stmt_delimiters")]
-    #[test_case(b"{# note #}" => vec![Token::Barrier]; "comment_delimiters_stripped")]
-    fn scan_cases(input: &[u8]) -> Vec<Token> {
-        scan(input).unwrap()
-    }
-
-    // --- Escape rule table --------------------------------------------------
-
-    fn backslashes(n: usize) -> Vec<u8> {
-        std::iter::repeat_n(b'\\', n).collect()
-    }
-
-    fn build(n: usize, suffix: &[u8]) -> Vec<u8> {
-        let mut v = backslashes(n);
-        v.extend_from_slice(suffix);
-        v
-    }
-
-    proptest::proptest! {
-        #[test]
-        fn escape_rule_parity(n in 0usize..20) {
-            let src_open = build(n, b"{{");
-            let result_open = scan(&src_open);
-
-            if n % 2 == 0 {
-                assert!(
-                    matches!(result_open, Err(ParseError::UnclosedDelimiter { .. })),
-                    "close n={} should be unclosed",
-                    n
-                );
-            } else {
-                let tokens = result_open.unwrap();
-                assert!(
-                    tokens.iter().all(|t| matches!(t, Token::Text(_))),
-                    "open n={} should be escaped",
-                    n
-                );
-            }
-
-            let src_close = build(n, b"}}");
-            let result_close = scan(&src_close);
-
-            if n % 2 == 0 {
-                assert!(
-                    matches!(result_close, Err(ParseError::StrayDelimiter { .. })),
-                    "close n={} should stray",
-                    n
-                );
-            } else {
-                let tokens = result_close.unwrap();
-                assert!(
-                    tokens.iter().all(|t| matches!(t, Token::Text(_))),
-                    "close n={} should be escaped",
-                    n
-                );
-            }
-        }
-    }
-
-    // --- Modifiers ----------------------------------------------------------
-
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum MatrixVal {
         OpenInterp,
@@ -544,6 +465,159 @@ mod tests {
             }
         }
     }
+
+    // --- Basic tokenization -------------------------------------------------
+
+    #[test_case(b"" => Vec::<Token>::new(); "empty")]
+    #[test_case(b"hello" => vec![text(0..5)]; "plain_text")]
+    #[test_case(b"{{ x }}" => vec![interp(0..7, 3..4)]; "interp_padded")]
+    #[test_case(b"{{x}}" => vec![interp(0..5, 2..3)]; "interp_tight")]
+    #[test_case(b"{{   x   }}" => vec![interp(0..11, 5..6)]; "interp_heavy_padding")]
+    #[test_case(b"{{}}" => vec![interp(0..4, 2..2)]; "interp_empty")]
+    #[test_case(b"{{  }}" => vec![interp(0..6, 4..4)]; "interp_whitespace_only")]
+    #[test_case(b"{{\nx\n}}" => vec![interp(0..7, 3..4)]; "interp_newline_in_body")]
+    #[test_case(b"{{\tx}}" => vec![interp(0..6, 3..4)]; "interp_tab_in_body")]
+    #[test_case(b"a{{ x }}b" => vec![text(0..1), interp(1..8, 4..5), text(8..9)]; "interp_between_text")]
+    #[test_case(b"{{ x }}{{ y }}" => vec![interp(0..7, 3..4), interp(7..14, 10..11)]; "two_interps")]
+    #[test_case(br#"{{ "}}" }}"# => vec![interp(0..10, 3..7)]; "string_shields_close_delim")]
+    #[test_case(br#"{{ "\" }}"# => vec![interp(0..9, 3..6)]; "escaped_quote_in_string")]
+    #[test_case(br#"{{ "a\xb" }}"# => vec![interp(0..12, 3..9)]; "string_with_passthrough_escape")]
+    #[test_case(b"{{ \"line1\nline2\" }}" => vec![interp(0..19, 3..16)]; "string_with_raw_newline")]
+    #[test_case(b"{ not a tag" => vec![text(0..11)]; "single_brace_passthrough")]
+    #[test_case(b"{% if %}" => vec![stmt(0..8, 3..5)]; "stmt_delimiters")]
+    #[test_case(b"{# note #}" => vec![Token::Barrier]; "comment_delimiters_stripped")]
+    fn scan_cases(input: &[u8]) -> Vec<Token> {
+        scan(input).unwrap()
+    }
+
+    // --- Escape rule table --------------------------------------------------
+
+    fn backslashes(n: usize) -> Vec<u8> {
+        std::iter::repeat_n(b'\\', n).collect()
+    }
+
+    fn matching_delim(delim: MatrixVal) -> MatrixVal {
+        match delim {
+            MatrixVal::OpenInterp => MatrixVal::CloseInterp,
+            MatrixVal::CloseInterp => MatrixVal::OpenInterp,
+            MatrixVal::OpenStmt => MatrixVal::CloseStmt,
+            MatrixVal::CloseStmt => MatrixVal::OpenStmt,
+            MatrixVal::OpenComment => MatrixVal::CloseComment,
+            MatrixVal::CloseComment => MatrixVal::OpenComment,
+            _ => panic!("not a delimiter: {delim:?}"),
+        }
+    }
+
+    fn count_backslash_bytes(src: &[u8]) -> usize {
+        src.iter().filter(|&&b| b == b'\\').count()
+    }
+
+    fn trailing_backslashes(src: &[u8]) -> usize {
+        src.iter().rev().take_while(|&&b| b == b'\\').count()
+    }
+
+    /// Counts literal backslashes represented by a token stream, accounting
+    /// for the escape rule's consumption of half of an even run that precedes
+    /// an active closing delimiter.
+    fn literal_backslash_count(tokens: &[Token], src: &[u8]) -> usize {
+        tokens
+            .iter()
+            .map(|t| match t {
+                Token::Text(r) => count_backslash_bytes(&src[r.clone()]),
+                Token::Interp { body, .. } | Token::Stmt { body, .. } => {
+                    // In these test sources the body is only a (possibly empty)
+                    // run of backslashes immediately before the closing
+                    // delimiter; half of an even run are consumed as escapes.
+                    let body_src = &src[body.clone()];
+                    let trailing = trailing_backslashes(body_src);
+                    (body_src.len() - trailing) + trailing / 2
+                }
+                Token::Barrier => 0,
+            })
+            .sum()
+    }
+
+    fn expected_literal_backslashes(delim: MatrixVal, n: usize) -> usize {
+        match delim {
+            // An active closing comment delimiter swallows the preceding
+            // backslashes inside the comment, so they never become text.
+            MatrixVal::CloseComment if n.is_multiple_of(2) => 0,
+            _ => n / 2,
+        }
+    }
+
+    #[test_matrix(
+        [
+            MatrixVal::OpenInterp,
+            MatrixVal::CloseInterp,
+            MatrixVal::OpenStmt,
+            MatrixVal::CloseStmt,
+            MatrixVal::OpenComment,
+            MatrixVal::CloseComment,
+        ]
+    )]
+    fn escape_rule_parity(delim: MatrixVal) {
+        let prefix = b"A";
+        for n in 0..=20 {
+            let mut src = Vec::new();
+            src.extend_from_slice(prefix);
+
+            let is_open = matches!(
+                delim,
+                MatrixVal::OpenInterp | MatrixVal::OpenStmt | MatrixVal::OpenComment
+            );
+
+            if is_open {
+                src.extend(backslashes(n));
+                src.extend_from_slice(delim.as_str().as_bytes());
+                if n.is_multiple_of(2) {
+                    src.extend_from_slice(matching_delim(delim).as_str().as_bytes());
+                }
+            } else {
+                if n.is_multiple_of(2) {
+                    src.extend_from_slice(matching_delim(delim).as_str().as_bytes());
+                }
+                src.extend(backslashes(n));
+                src.extend_from_slice(delim.as_str().as_bytes());
+            }
+
+            let tokens = scan(&src).unwrap();
+
+            if n.is_multiple_of(2) {
+                assert_eq!(
+                    tokens.len(),
+                    2,
+                    "active delimiter should produce [text, tag]"
+                );
+                assert!(matches!(tokens[0], Token::Text(_)));
+                match delim {
+                    MatrixVal::OpenInterp | MatrixVal::CloseInterp => {
+                        assert!(matches!(tokens[1], Token::Interp { .. }));
+                    }
+                    MatrixVal::OpenStmt | MatrixVal::CloseStmt => {
+                        assert!(matches!(tokens[1], Token::Stmt { .. }));
+                    }
+                    MatrixVal::OpenComment | MatrixVal::CloseComment => {
+                        assert_eq!(tokens[1], Token::Barrier);
+                    }
+                    _ => unreachable!(),
+                }
+            } else {
+                assert!(
+                    tokens.iter().all(|t| matches!(t, Token::Text(_))),
+                    "escaped delimiter should render as plain text"
+                );
+            }
+
+            assert_eq!(
+                literal_backslash_count(&tokens, &src),
+                expected_literal_backslashes(delim, n),
+                "literal backslash count mismatch for {delim:?} n={n}"
+            );
+        }
+    }
+
+    // --- Modifiers ----------------------------------------------------------
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum ExpectedError {
@@ -671,13 +745,5 @@ mod tests {
                 String::from_utf8_lossy(&input)
             ),
         }
-    }
-
-    #[test_case(b"{#= x #}" => (2, 1); "comment_open_modifier")]
-    fn comment_modifier_span(input: &[u8]) -> (usize, usize) {
-        let ParseError::InvalidModifier { span } = scan(input).unwrap_err() else {
-            unreachable!("expected InvalidModifier")
-        };
-        (span.offset(), span.len())
     }
 }

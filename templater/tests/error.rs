@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use common::MockRegistry;
 use templater::{Error, ParseError, RenderError, Template};
+use test_case::test_case;
 
 pub fn parse_err(source: &[u8]) -> ParseError {
     match Template::from_bytes(source.to_vec()) {
@@ -13,129 +14,104 @@ pub fn parse_err(source: &[u8]) -> ParseError {
     }
 }
 
+/// A stable stand-in for `ParseError` equality checks in `#[test_case]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParseErrorKind {
+    EmptyInterpolation,
+    IntegerOutOfRange,
+    UnclosedString,
+    UnclosedDelimiter,
+    UnexpectedToken,
+    UnexpectedTokensAfterExpr,
+    StrayDelimiter,
+    InvalidModifier,
+    UnrecognizedStatement,
+}
+
+impl From<&ParseError> for ParseErrorKind {
+    fn from(e: &ParseError) -> Self {
+        match e {
+            ParseError::EmptyInterpolation { .. } => Self::EmptyInterpolation,
+            ParseError::IntegerOutOfRange { .. } => Self::IntegerOutOfRange,
+            ParseError::UnclosedString { .. } => Self::UnclosedString,
+            ParseError::UnclosedDelimiter { .. } => Self::UnclosedDelimiter,
+            ParseError::UnexpectedToken { .. } => Self::UnexpectedToken,
+            ParseError::UnexpectedTokensAfterExpr { .. } => Self::UnexpectedTokensAfterExpr,
+            ParseError::StrayDelimiter { .. } => Self::StrayDelimiter,
+            ParseError::InvalidModifier { .. } => Self::InvalidModifier,
+            ParseError::UnrecognizedStatement { .. } => Self::UnrecognizedStatement,
+        }
+    }
+}
+
 // --- Scanner errors -------------------------------------------------------
 
-#[test]
-fn stray_closing_delimiter() {
-    let e = parse_err(b"}}");
-    assert!(matches!(e, ParseError::StrayDelimiter { .. }));
-    assert_eq!(e.span(), (0, 2));
-}
-
-#[test]
-fn escaped_open_with_unescaped_close_errors() {
-    let e = parse_err(b"\\{{}}");
-    assert!(matches!(e, ParseError::StrayDelimiter { .. }));
-    assert_eq!(e.span(), (3, 2));
-}
-
-#[test]
-fn statement_tag_is_unrecognized() {
-    let e = parse_err(b"{% if %}");
-    assert!(matches!(e, ParseError::UnrecognizedStatement { .. }));
-    assert_eq!(e.span(), (0, 8));
-}
-
-#[test]
-fn modifier_on_comment_open_errors() {
-    let e = parse_err(b"{#= x #}");
-    assert!(matches!(e, ParseError::InvalidModifier { .. }));
-    assert_eq!(e.span(), (2, 1));
-}
-
-#[test]
-fn modifier_on_comment_close_errors() {
-    let e = parse_err(b"{# x =#}");
-    assert!(matches!(e, ParseError::InvalidModifier { .. }));
-    assert_eq!(e.span(), (5, 1));
+#[test_case(b"}}" => (ParseErrorKind::StrayDelimiter, (0, 2)) ; "stray_closing_delimiter")]
+#[test_case(b"\\{{}}" => (ParseErrorKind::StrayDelimiter, (3, 2)) ; "escaped_open_with_unescaped_close")]
+#[test_case(b"{#= x #}" => (ParseErrorKind::InvalidModifier, (2, 1)) ; "modifier_on_comment_open")]
+#[test_case(b"{# x =#}" => (ParseErrorKind::InvalidModifier, (5, 1)) ; "modifier_on_comment_close")]
+fn scanner_error_cases(source: &[u8]) -> (ParseErrorKind, (usize, usize)) {
+    let e = parse_err(source);
+    (ParseErrorKind::from(&e), e.span())
 }
 
 // --- Parse errors --------------------------------------------------------
 
-#[test]
-fn empty_interpolation_no_padding() {
-    let e = parse_err(b"{{}}");
-    assert!(matches!(e, ParseError::EmptyInterpolation { .. }));
-    assert_eq!(e.span(), (0, 4));
+#[test_case(b"{{}}" => (ParseErrorKind::EmptyInterpolation, (0, 4)) ; "empty_interpolation_no_padding")]
+#[test_case(b"{{   }}" => (ParseErrorKind::EmptyInterpolation, (0, 7)) ; "empty_interpolation_with_padding")]
+// Span covers the integer digits only.
+#[test_case(b"{{ 99999999999999999999999 }}" => (ParseErrorKind::IntegerOutOfRange, (3, 23)) ; "integer_out_of_range_positive")]
+#[test_case(b"{{ -99999999999999999999999 }}" => (ParseErrorKind::IntegerOutOfRange, (3, 24)) ; "integer_out_of_range_negative")]
+#[test_case(b"{{ +7 }}" => (ParseErrorKind::UnexpectedToken, (3, 1)) ; "plus_prefixed_integer")]
+// Span covers the opening `"` through end of source.
+#[test_case(b"{{ \"hello }}" => (ParseErrorKind::UnclosedString, (3, 9)) ; "unclosed_string_literal")]
+#[test_case(b"{{ name" => (ParseErrorKind::UnclosedDelimiter, (0, 2)) ; "unclosed_delimiter")]
+#[test_case(b"{{ @ }}" => (ParseErrorKind::UnexpectedToken, (3, 1)) ; "unexpected_token_at_sign")]
+#[test_case(b"{{ a b }}" => (ParseErrorKind::UnexpectedTokensAfterExpr, (5, 1)) ; "unexpected_tokens_after_expr")]
+#[test_case(b"{{=- x }}" => (ParseErrorKind::UnexpectedToken, (3, 1)) ; "left_equal_followed_by_dash")]
+#[test_case(b"{{x =-}}" => (ParseErrorKind::UnexpectedTokensAfterExpr, (4, 1)) ; "right_dash_after_equal")]
+#[test_case(b"{% %}" => (ParseErrorKind::UnrecognizedStatement, (0, 5)) ; "empty_statement_no_padding")]
+#[test_case(b"{%   %}" => (ParseErrorKind::UnrecognizedStatement, (0, 7)) ; "empty_statement_with_padding")]
+#[test_case(b"{% if %}" => (ParseErrorKind::UnrecognizedStatement, (0, 8)) ; "statement_tag_is_unrecognized")]
+#[test_case(b"{% endif %}" => (ParseErrorKind::UnrecognizedStatement, (0, 11)) ; "endif_is_unrecognized")]
+#[test_case(b"{% endfor %}" => (ParseErrorKind::UnrecognizedStatement, (0, 12)) ; "endfor_is_unrecognized")]
+#[test_case(b"{% if x" => (ParseErrorKind::UnclosedDelimiter, (0, 2)) ; "unclosed_statement")]
+#[test_case(b"{# c" => (ParseErrorKind::UnclosedDelimiter, (0, 2)) ; "unclosed_comment")]
+#[test_case(b"{{ - }}" => (ParseErrorKind::UnexpectedToken, (3, 1)) ; "minus_alone")]
+#[test_case(b"{{ 1st }}" => (ParseErrorKind::UnexpectedTokensAfterExpr, (4, 1)) ; "digit_starting_identifier")]
+#[test_case(b"{{ .x }}" => (ParseErrorKind::UnexpectedToken, (3, 1)) ; "leading_dot")]
+#[test_case(b"{{ \"a\" b }}" => (ParseErrorKind::UnexpectedTokensAfterExpr, (7, 1)) ; "trailing_token_after_string")]
+fn parse_error_cases(source: &[u8]) -> (ParseErrorKind, (usize, usize)) {
+    let e = parse_err(source);
+    (ParseErrorKind::from(&e), e.span())
 }
 
-#[test]
-fn empty_interpolation_with_padding() {
-    let e = parse_err(b"{{   }}");
-    assert!(matches!(e, ParseError::EmptyInterpolation { .. }));
-    assert_eq!(e.span(), (0, 7));
-}
+// --- Spec mismatch: reserved keywords as identifiers --------------------
+//
+// The spec says `if`, `elif`, `else`, `for`, `in`, and `end` are reserved
+// keywords and cannot be used as variable names. Today the parser treats
+// `{{ if }}` as a variable reference, so it is *not* a parse error. This
+// test documents the current behavior; it will fail once the parser is
+// updated to reject keywords as identifiers.
 
 #[test]
-fn integer_out_of_range_positive() {
-    let e = parse_err(b"{{ 99999999999999999999999 }}");
-    assert!(matches!(e, ParseError::IntegerOutOfRange { .. }));
-    // span covers the integer digits only
-    assert_eq!(e.span(), (3, 23));
-}
-
-#[test]
-fn integer_out_of_range_negative() {
-    let e = parse_err(b"{{ -99999999999999999999999 }}");
-    assert!(matches!(e, ParseError::IntegerOutOfRange { .. }));
-    assert_eq!(e.span(), (3, 24));
-}
-
-#[test]
-fn plus_prefixed_integer() {
-    let e = parse_err(b"{{ +7 }}");
-    assert!(matches!(e, ParseError::UnexpectedToken { .. }));
-    assert_eq!(e.span(), (3, 1));
-}
-
-#[test]
-fn unclosed_string_literal() {
-    let e = parse_err(b"{{ \"hello }}");
-    assert!(matches!(e, ParseError::UnclosedString { .. }));
-    // span covers the opening `"` through end of source
-    assert_eq!(e.span(), (3, 9));
-}
-
-#[test]
-fn unclosed_delimiter() {
-    let e = parse_err(b"{{ name");
-    assert!(matches!(e, ParseError::UnclosedDelimiter { .. }));
-    assert_eq!(e.span(), (0, 2));
-}
-
-#[test]
-fn unexpected_token_at_sign() {
-    let e = parse_err(b"{{ @ }}");
-    assert!(matches!(e, ParseError::UnexpectedToken { .. }));
-    assert_eq!(e.span(), (3, 1));
-}
-
-#[test]
-fn unexpected_tokens_after_expr() {
-    let e = parse_err(b"{{ a b }}");
-    assert!(matches!(e, ParseError::UnexpectedTokensAfterExpr { .. }));
-    assert_eq!(e.span(), (5, 1));
-}
-
-#[test]
-fn left_equal_followed_by_dash() {
-    let e = parse_err(b"{{=- x }}");
-    assert!(matches!(e, ParseError::UnexpectedToken { .. }));
-    assert_eq!(e.span(), (3, 1));
-}
-
-#[test]
-fn right_dash_after_equal() {
-    let e = parse_err(b"{{x =-}}");
-    assert!(matches!(e, ParseError::UnexpectedTokensAfterExpr { .. }));
-    assert_eq!(e.span(), (4, 1));
+fn keyword_as_identifier_is_currently_accepted() {
+    let template = Template::from_bytes(b"{{ if }}".to_vec()).expect("parse failed");
+    let mut out = Vec::new();
+    let e = template
+        .render(&mut out, &HashMap::new(), &MockRegistry)
+        .unwrap_err();
+    let Error::Render(RenderError::UndefinedVariable { .. }) = e else {
+        panic!("expected undefined variable because `if` is parsed as a variable, got: {e:?}");
+    };
 }
 
 // --- Render errors ------------------------------------------------------
 
-#[test]
-fn undefined_variable_carries_name_span() {
-    let template = Template::from_bytes(b"hi {{ nope }}!".to_vec()).expect("parse failed");
+#[test_case(b"hi {{ nope }}!" => (6, 4) ; "mid_source")]
+#[test_case(b"{{ missing }}" => (3, 7) ; "at_start_of_source")]
+fn undefined_variable_carries_name_span(source: &[u8]) -> (usize, usize) {
+    let template = Template::from_bytes(source.to_vec()).expect("parse failed");
     let mut out = Vec::new();
     let e = template
         .render(&mut out, &HashMap::new(), &MockRegistry)
@@ -144,5 +120,5 @@ fn undefined_variable_carries_name_span() {
         panic!("expected render error, got: {e:?}");
     };
     assert!(matches!(r, RenderError::UndefinedVariable { .. }));
-    assert_eq!(r.span(), (6, 4));
+    r.span()
 }

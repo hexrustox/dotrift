@@ -3,150 +3,25 @@ mod common;
 use std::{collections::HashMap, io};
 
 use common::MockRegistry;
-use templater::{FunctionRegistry, Template, Value};
+use templater::{Template, Value};
+use test_case::test_case;
 
-pub fn render(
-    source: &[u8],
-    variables: &HashMap<String, Value>,
-    functions: &dyn FunctionRegistry,
-) -> Vec<u8> {
+/// Renders `source` with no variables.
+pub fn render(source: &[u8]) -> Vec<u8> {
+    render_vars(source, &HashMap::new())
+}
+
+/// Renders `source` with the supplied variables.
+pub fn render_vars(source: &[u8], variables: &HashMap<String, Value>) -> Vec<u8> {
     let template = Template::from_bytes(source.to_vec()).expect("parse failed");
     let mut out = Vec::new();
     template
-        .render(&mut out, variables, functions)
+        .render(&mut out, variables, &MockRegistry)
         .expect("render failed");
     out
 }
 
-#[test]
-fn plain_text_renders_verbatim() {
-    let source = b"hello, world\nthis is plain text";
-    let out = render(source, &HashMap::new(), &MockRegistry);
-    assert_eq!(out, source);
-}
-
-#[test]
-fn non_utf8_bytes_render_verbatim() {
-    let source = b"bin\x80ary\xff\xfedata\x00here";
-    let out = render(source, &HashMap::new(), &MockRegistry);
-    assert_eq!(out, source);
-}
-
-#[test]
-fn empty_source_renders_empty() {
-    let out = render(b"", &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"");
-}
-
-// --- Interpolation: literals ---------------------------------------------
-
-#[test]
-fn interpolate_string_literal() {
-    let out = render(br#"{{ "literal" }}"#, &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"literal");
-}
-
-#[test]
-fn interpolate_string_literal_no_padding() {
-    let out = render(br#"{{"literal"}}"#, &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"literal");
-}
-
-#[test]
-fn interpolate_string_literal_arbitrary_padding() {
-    let out = render(br#"{{   "literal"   }}"#, &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"literal");
-}
-
-#[test]
-fn interpolate_string_literal_escape_quote() {
-    let out = render(br#"{{ "a\"b" }}"#, &HashMap::new(), &MockRegistry);
-    assert_eq!(out, br#"a"b"#);
-}
-
-#[test]
-fn interpolate_string_literal_escape_backslash() {
-    let out = render(br#"{{ "a\\b" }}"#, &HashMap::new(), &MockRegistry);
-    assert_eq!(out, br#"a\b"#);
-}
-
-#[test]
-fn interpolate_string_literal_other_escape_passes_through_verbatim() {
-    // `\X` for any X not `"` or `\` renders both bytes verbatim.
-    let out = render(br#"{{ "a\xb" }}"#, &HashMap::new(), &MockRegistry);
-    assert_eq!(out, br#"a\xb"#);
-}
-
-#[test]
-fn interpolate_string_literal_preserves_raw_newline() {
-    let out = render(b"{{ \"line1\nline2\" }}", &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"line1\nline2");
-}
-
-#[test]
-fn interpolate_string_literal_shields_closing_delim() {
-    // `}}` inside a closed string literal does not close the tag.
-    let out = render(br#"{{ "}}" }}"#, &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"}}");
-}
-
-#[test]
-fn interpolate_string_literal_preserves_non_ascii_bytes() {
-    // String literals walk bytes directly into the writer — no char cast —
-    // so non-ASCII byte sequences (here: the UTF-8 encoding of `é`) survive
-    // intact even though they aren't valid standalone UTF-8 codepoints.
-    let out = render(b"{{ \"caf\xc3\xa9\" }}", &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"caf\xc3\xa9");
-}
-
-#[test]
-fn interpolate_int_positive() {
-    let out = render(b"{{ 42 }}", &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"42");
-}
-
-#[test]
-fn interpolate_int_negative() {
-    let out = render(b"{{ -7 }}", &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"-7");
-}
-
-#[test]
-fn interpolate_int_leading_zeros() {
-    let out = render(b"{{ 007 }}", &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"7");
-}
-
-#[test]
-fn interpolate_int_min_i64() {
-    let out = render(
-        b"{{ -9223372036854775808 }}",
-        &HashMap::new(),
-        &MockRegistry,
-    );
-    assert_eq!(out, b"-9223372036854775808");
-}
-
-#[test]
-fn interpolate_int_max_i64() {
-    let out = render(b"{{ 9223372036854775807 }}", &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"9223372036854775807");
-}
-
-#[test]
-fn interpolate_bool_true() {
-    let out = render(b"{{ true }}", &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"true");
-}
-
-#[test]
-fn interpolate_bool_false() {
-    let out = render(b"{{ false }}", &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"false");
-}
-
-// --- Interpolation: variables -------------------------------------------
-
+/// A variable scope shared by several test cases.
 fn var_scope() -> HashMap<String, Value> {
     HashMap::from([
         ("name".to_string(), Value::Str("world".to_string())),
@@ -157,59 +32,138 @@ fn var_scope() -> HashMap<String, Value> {
     ])
 }
 
+// --- Plain text ----------------------------------------------------------
+
 #[test]
-fn interpolate_string_var() {
-    let out = render(b"{{ name }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"world");
+fn plain_text_renders_verbatim() {
+    let source = b"hello, world\nthis is plain text";
+    assert_eq!(render(source), source);
 }
 
 #[test]
-fn interpolate_int_var() {
-    let out = render(b"{{ count }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"42");
+fn non_utf8_bytes_render_verbatim() {
+    let source = b"bin\x80ary\xff\xfedata\x00here";
+    assert_eq!(render(source), source);
 }
 
 #[test]
-fn interpolate_negative_int_var() {
-    let out = render(b"{{ neg }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"-5");
+fn empty_source_renders_empty() {
+    assert_eq!(render(b""), b"");
 }
 
-#[test]
-fn interpolate_bool_var_true() {
-    let out = render(b"{{ flag }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"true");
+// --- Interpolation: literals ---------------------------------------------
+
+#[test_case(br#"{{ "literal" }}"# => b"literal".to_vec() ; "padded")]
+#[test_case(br#"{{"literal"}}"# => b"literal".to_vec() ; "no_padding")]
+#[test_case(br#"{{   "literal"   }}"# => b"literal".to_vec() ; "arbitrary_padding")]
+#[test_case(br#"{{ "a\"b" }}"# => br#"a"b"#.to_vec() ; "escape_quote")]
+#[test_case(br#"{{ "a\\b" }}"# => br#"a\b"#.to_vec() ; "escape_backslash")]
+// `\X` for any X not `"` or `\` renders both bytes verbatim.
+#[test_case(br#"{{ "a\xb" }}"# => br#"a\xb"#.to_vec() ; "other_escape_passes_through")]
+// Raw newlines inside string literals are preserved.
+#[test_case(b"{{ \"line1\nline2\" }}" => b"line1\nline2".to_vec() ; "preserves_raw_newline")]
+// `}}` inside a closed string literal does not close the tag.
+#[test_case(br#"{{ "}}" }}"# => b"}}".to_vec() ; "shields_closing_delim")]
+// String literals walk bytes directly into the writer — no char cast —
+// so non-ASCII byte sequences (here: the UTF-8 encoding of `é`) survive
+// intact even though they aren't valid standalone UTF-8 codepoints.
+#[test_case(b"{{ \"caf\xc3\xa9\" }}" => b"caf\xc3\xa9".to_vec() ; "preserves_non_ascii_bytes")]
+fn interpolate_string_literal(source: &[u8]) -> Vec<u8> {
+    render(source)
 }
 
-#[test]
-fn interpolate_bool_var_false() {
-    let out = render(b"{{ off }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"false");
+#[test_case(b"{{ 42 }}" => b"42".to_vec() ; "positive")]
+#[test_case(b"{{ -7 }}" => b"-7".to_vec() ; "negative")]
+#[test_case(b"{{ 007 }}" => b"7".to_vec() ; "leading_zeros")]
+#[test_case(b"{{ -0 }}" => b"0".to_vec() ; "negative_zero")]
+#[test_case(b"{{ -9223372036854775808 }}" => b"-9223372036854775808".to_vec() ; "min_i64")]
+#[test_case(b"{{ 9223372036854775807 }}" => b"9223372036854775807".to_vec() ; "max_i64")]
+fn interpolate_int_literal(source: &[u8]) -> Vec<u8> {
+    render(source)
 }
 
-#[test]
-fn interpolate_mixed_with_text() {
-    let out = render(b"hello {{ name }}!", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"hello world!");
+#[test_case(b"{{ true }}" => b"true".to_vec() ; "bool_true")]
+#[test_case(b"{{ false }}" => b"false".to_vec() ; "bool_false")]
+fn interpolate_bool_literal(source: &[u8]) -> Vec<u8> {
+    render(source)
 }
 
-#[test]
-fn interpolate_multiple_in_sequence() {
-    let out = render(
-        b"{{ count }} and {{ neg }} and {{ flag }}",
-        &var_scope(),
-        &MockRegistry,
-    );
-    assert_eq!(out, b"42 and -5 and true");
+// --- Interpolation: variables -------------------------------------------
+
+#[test_case(b"{{ name }}" => b"world".to_vec() ; "string")]
+#[test_case(b"{{ count }}" => b"42".to_vec() ; "int")]
+#[test_case(b"{{ neg }}" => b"-5".to_vec() ; "negative_int")]
+#[test_case(b"{{ flag }}" => b"true".to_vec() ; "bool_true")]
+#[test_case(b"{{ off }}" => b"false".to_vec() ; "bool_false")]
+#[test_case(b"hello {{ name }}!" => b"hello world!".to_vec() ; "mixed_with_text")]
+#[test_case(b"{{ count }} and {{ neg }} and {{ flag }}" => b"42 and -5 and true".to_vec() ; "multiple_in_sequence")]
+#[test_case(b"prefix {{   name   }} suffix" => b"prefix world suffix".to_vec() ; "drops_padding")]
+fn interpolate_var(source: &[u8]) -> Vec<u8> {
+    render_vars(source, &var_scope())
 }
 
-#[test]
-fn interpolate_var_drops_surrounding_padding() {
-    let out = render(b"prefix {{   name   }} suffix", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"prefix world suffix");
+// --- Scanner: escape rules ------------------------------------------------
+
+#[test_case(b"before \\{{ after" => b"before {{ after".to_vec() ; "escaped_open_renders_literal_braces")]
+#[test_case(b"\\{{\\}}" => b"{{}}".to_vec() ; "escaped_open_and_close")]
+#[test_case(b"\\\\{{ name }}" => b"\\world".to_vec() ; "two_backslashes_keep_tag_active")]
+#[test_case(b"\\\\\\{{" => b"\\{{".to_vec() ; "three_backslashes_escape_tag")]
+#[test_case(b"\\\\\\\\{{ name }}" => b"\\\\world".to_vec() ; "four_backslashes_keep_tag_active")]
+#[test_case(b"\\{{ name \\}}" => b"{{ name }}".to_vec() ; "escaped_interp_pair_renders_literal")]
+#[test_case(b"\\{% name \\%}" => b"{% name %}".to_vec() ; "escaped_stmt_pair_renders_literal")]
+#[test_case(b"\\{# c \\#}" => b"{# c #}".to_vec() ; "escaped_comment_pair_renders_literal")]
+#[test_case(b"\\{%\\%}" => b"{%%}".to_vec() ; "escaped_empty_stmt_pair")]
+#[test_case(b"\\{#\\#}" => b"{##}".to_vec() ; "escaped_empty_comment_pair")]
+fn escaped_delimiters_render_literal(source: &[u8]) -> Vec<u8> {
+    render_vars(source, &var_scope())
 }
 
-// ---Flush behavior -------------------------------------------------------
+// --- Scanner: comments ----------------------------------------------------
+
+#[test_case(b"{# secret #}visible" => b"visible".to_vec() ; "stripped")]
+#[test_case(b"before {# c #} after" => b"before  after".to_vec() ; "splits_plain_text")]
+#[test_case(b"{#\n#}" => b"".to_vec() ; "multiline_stripped")]
+// Escaped `#}` inside a comment is treated as literal text and stripped along
+// with the comment; the comment continues until the next unescaped `#}`.
+#[test_case(b"{# foo \\#} bar #}" => b"".to_vec() ; "escaped_close_is_stripped")]
+#[test_case(b"visible{# c #}" => b"visible".to_vec() ; "at_eof")]
+#[test_case(b"{# c #}\nvisible" => b"\nvisible".to_vec() ; "at_sof_preserves_newline")]
+fn comment_is_stripped(source: &[u8]) -> Vec<u8> {
+    render(source)
+}
+
+// --- Scanner: dash whitespace modifier ------------------------------------
+
+#[test_case(b"  {{- name }}" => b"world".to_vec() ; "left_trims_spaces")]
+#[test_case(b"{{ name -}}  " => b"world".to_vec() ; "right_trims_spaces")]
+#[test_case(b"\t{{- name }}" => b"world".to_vec() ; "left_trims_tab")]
+#[test_case(b"{{ name -}}\t" => b"world".to_vec() ; "right_trims_tab")]
+#[test_case(b"before\n  {{- name }}" => b"before\nworld".to_vec() ; "preserves_newline_left")]
+#[test_case(b"before\n\t{{- name }}" => b"before\nworld".to_vec() ; "preserves_newline_then_tab")]
+fn dash_trims_adjacent_spaces_and_tabs(source: &[u8]) -> Vec<u8> {
+    render_vars(source, &var_scope())
+}
+
+// --- Scanner: equal whitespace modifier -----------------------------------
+
+#[test_case(b"prefix {{= name }}" => b"world".to_vec() ; "left_eats_to_line_start")]
+#[test_case(b"{{ name =}}suffix\nnext" => b"worldnext".to_vec() ; "right_eats_through_newline")]
+#[test_case(b"{{ name =}} mid {{= name }}" => b"worldworld".to_vec() ; "tags_share_line_delete_between")]
+#[test_case(b"{{ name =}} {# c #} {{= name }}" => b"worldworld".to_vec() ; "respects_comment_barrier")]
+#[test_case(b"keep\nremove {{= name }}" => b"keep\nworld".to_vec() ; "stops_before_newline_left")]
+// `\r` is not a line terminator, so left `=` stops at the real `\n` and the
+// `\r` and the `\n` both survive.
+#[test_case(b"a\r\nkeep {{= name }}" => b"a\r\nworld".to_vec() ; "eats_cr_as_plain_text")]
+#[test_case(b"{{ name =}} keep {{ name }}" => b"worldworld".to_vec() ; "right_stops_before_next_tag")]
+#[test_case(b"{{ name }} keep {{= name }}" => b"worldworld".to_vec() ; "left_stops_after_prev_close_tag")]
+#[test_case(b"prefix {{= name =}}suffix\nnext" => b"worldnext".to_vec() ; "left_and_right_combined_eat_suffix_line")]
+#[test_case(b"{{ name =}}\t\nnext" => b"worldnext".to_vec() ; "right_eats_tabs_and_newline")]
+#[test_case(b"prefix\t{{= name }}" => b"world".to_vec() ; "left_eats_tab_before_tag")]
+fn equal_modifier_eats_plain_text_and_whitespace(source: &[u8]) -> Vec<u8> {
+    render_vars(source, &var_scope())
+}
+
+// --- Flush behavior -------------------------------------------------------
 
 /// A writer that records its bytes and how often it was flushed.
 #[derive(Default)]
@@ -239,114 +193,4 @@ fn render_flushes_writer_on_success() {
         .expect("render failed");
     assert_eq!(writer.flushes, 1);
     assert_eq!(writer.bytes, b"abc");
-}
-
-// --- Scanner: escape rules ------------------------------------------------
-
-#[test]
-fn escaped_interp_open_renders_literal_braces() {
-    let out = render(b"before \\{{ after", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"before {{ after");
-}
-
-#[test]
-fn escaped_interp_open_and_close_renders_literal_braces() {
-    let out = render(b"\\{{\\}}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"{{}}");
-}
-
-#[test]
-fn two_backslashes_render_one_and_keep_tag_active() {
-    let out = render(b"\\\\{{ name }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"\\world");
-}
-
-#[test]
-fn three_backslashes_render_one_and_escape_tag() {
-    let out = render(b"\\\\\\{{", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"\\{{");
-}
-
-#[test]
-fn four_backslashes_render_two_and_keep_tag_active() {
-    let out = render(b"\\\\\\\\{{ name }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"\\\\world");
-}
-
-// --- Scanner: comments ----------------------------------------------------
-
-#[test]
-fn comment_is_stripped() {
-    let out = render(b"{# secret #}visible", &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"visible");
-}
-
-#[test]
-fn comment_splits_plain_text() {
-    let out = render(b"before {# c #} after", &HashMap::new(), &MockRegistry);
-    assert_eq!(out, b"before  after");
-}
-
-// --- Scanner: dash whitespace modifier ------------------------------------
-
-#[test]
-fn left_dash_trims_adjacent_spaces() {
-    let out = render(b"  {{- name }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"world");
-}
-
-#[test]
-fn right_dash_trims_adjacent_spaces() {
-    let out = render(b"{{ name -}}  ", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"world");
-}
-
-#[test]
-fn dash_does_not_trim_newline() {
-    let out = render(b"before\n  {{- name }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"before\nworld");
-}
-
-// --- Scanner: equal whitespace modifier -----------------------------------
-
-#[test]
-fn left_equal_eats_to_line_start() {
-    let out = render(b"prefix {{= name }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"world");
-}
-
-#[test]
-fn right_equal_eats_through_newline() {
-    let out = render(b"{{ name =}}suffix\nnext", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"worldnext");
-}
-
-#[test]
-fn equal_tags_share_a_line_delete_between() {
-    let out = render(b"{{ name =}} mid {{= name }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"worldworld");
-}
-
-#[test]
-fn equal_respects_comment_barrier() {
-    let out = render(
-        b"{{ name =}} {# c #} {{= name }}",
-        &var_scope(),
-        &MockRegistry,
-    );
-    assert_eq!(out, b"worldworld");
-}
-
-#[test]
-fn equal_stops_before_newline_left() {
-    let out = render(b"keep\nremove {{= name }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"keep\nworld");
-}
-
-#[test]
-fn equal_eats_cr_as_plain_text() {
-    // \r is not a line terminator, so left `=` stops at the real \n and the
-    // \r and the \n both survive.
-    let out = render(b"a\r\nkeep {{= name }}", &var_scope(), &MockRegistry);
-    assert_eq!(out, b"a\r\nworld");
 }
