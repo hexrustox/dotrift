@@ -476,6 +476,7 @@ mod tests {
     #[test_case(b"{{}}" => vec![interp(0..4, 2..2)]; "interp_empty")]
     #[test_case(b"{{  }}" => vec![interp(0..6, 4..4)]; "interp_whitespace_only")]
     #[test_case(b"{{\nx\n}}" => vec![interp(0..7, 3..4)]; "interp_newline_in_body")]
+    #[test_case(b"{{\rx}}" => vec![interp(0..6, 2..4)]; "interp_cr_in_body")]
     #[test_case(b"{{\tx}}" => vec![interp(0..6, 3..4)]; "interp_tab_in_body")]
     #[test_case(b"a{{ x }}b" => vec![text(0..1), interp(1..8, 4..5), text(8..9)]; "interp_between_text")]
     #[test_case(b"{{ x }}{{ y }}" => vec![interp(0..7, 3..4), interp(7..14, 10..11)]; "two_interps")]
