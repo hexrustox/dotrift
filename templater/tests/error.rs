@@ -2,7 +2,7 @@ mod common;
 
 use std::collections::HashMap;
 
-use common::MockRegistry;
+use common::{MockRegistry, aggregate_scope};
 use templater::{Error, ParseError, RenderError, Template};
 use test_case::test_case;
 
@@ -111,4 +111,40 @@ fn undefined_variable_carries_name_span(source: &[u8]) -> (usize, usize) {
     };
     assert!(matches!(r, RenderError::UndefinedVariable));
     (span.offset(), span.len())
+}
+
+// --- Aggregate/dot/index render errors ------------------------------------
+
+fn render_err(source: &[u8]) -> (RenderError, (usize, usize)) {
+    let template = Template::from_bytes(source.to_vec()).expect("parse failed");
+    let mut out = Vec::new();
+    let e = template
+        .render(&mut out, &aggregate_scope(), &MockRegistry)
+        .unwrap_err();
+    let Error::Render { err, span } = e else {
+        panic!("expected render error, got: {e:?}");
+    };
+    (err, (span.offset(), span.len()))
+}
+
+#[test_case(b"{{ items.name }}" => matches RenderError::MapAccessOnNonMap { .. } ; "dot_on_list")]
+#[test_case(b"{{ user.0 }}" => matches RenderError::ListAccessOnNonList { .. } ; "index_on_map")]
+#[test_case(b"{{ user.name.0 }}" => matches RenderError::IndexAccessOnString ; "index_on_string")]
+#[test_case(b"{{ user.name.field }}" => matches RenderError::IndexAccessOnString ; "dot_on_string")]
+#[test_case(b"{{ items.-1 }}" => matches RenderError::NegativeListIndex { .. } ; "negative_index")]
+#[test_case(b"{{ items.5 }}" => matches RenderError::ListIndexOutOfBounds { .. } ; "index_out_of_bounds")]
+#[test_case(b"{{ user.missing }}" => matches RenderError::MapKeyNotFound { .. } ; "map_key_not_found")]
+fn aggregate_error_kind(source: &[u8]) -> RenderError {
+    render_err(source).0
+}
+
+#[test_case(b"{{ items.name }}" => (9, 4) ; "dot_on_list_span")]
+#[test_case(b"{{ user.0 }}" => (8, 1) ; "index_on_map_span")]
+#[test_case(b"{{ user.name.0 }}" => (13, 1) ; "index_on_string_span")]
+#[test_case(b"{{ user.name.field }}" => (13, 5) ; "dot_on_string_span")]
+#[test_case(b"{{ items.-1 }}" => (9, 2) ; "negative_index_span")]
+#[test_case(b"{{ items.5 }}" => (9, 1) ; "index_out_of_bounds_span")]
+#[test_case(b"{{ user.missing }}" => (8, 7) ; "map_key_not_found_span")]
+fn aggregate_error_span(source: &[u8]) -> (usize, usize) {
+    render_err(source).1
 }

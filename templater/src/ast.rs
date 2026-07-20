@@ -24,4 +24,20 @@ pub(crate) enum Expr {
     IntLit(i64),
     /// `true` | `false` — decoded at parse time into `bool`.
     BoolLit(bool),
+    /// `[ expr, expr, ... ]` — each element is evaluated via `eval`.
+    List(Vec<Expr>),
+    /// `left.field` — Map key lookup by identifier; `field` is the
+    /// identifier's byte span.
+    Dot {
+        left: Box<Expr>,
+        field: Range<usize>,
+    },
+    /// `left.0` — List index lookup by non-negative integer; negative indices
+    /// are stored and rejected at render time. `idx_span` covers the integer
+    /// literal for error reporting.
+    Index {
+        left: Box<Expr>,
+        idx: i64,
+        idx_span: Range<usize>,
+    },
 }

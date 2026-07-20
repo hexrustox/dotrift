@@ -2,7 +2,7 @@ mod common;
 
 use std::{collections::HashMap, io};
 
-use common::{MockRegistry, var_scope};
+use common::{MockRegistry, aggregate_scope, var_scope};
 use templater::Template;
 use test_case::test_case;
 
@@ -12,6 +12,16 @@ pub fn render(source: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     template
         .render(&mut out, &var_scope(), &MockRegistry)
+        .expect("render failed");
+    out
+}
+
+/// Renders `source` with the aggregate variable scope.
+pub fn render_aggregate(source: &[u8]) -> Vec<u8> {
+    let template = Template::from_bytes(source.to_vec()).expect("parse failed");
+    let mut out = Vec::new();
+    template
+        .render(&mut out, &aggregate_scope(), &MockRegistry)
         .expect("render failed");
     out
 }
@@ -93,6 +103,28 @@ pub fn render(source: &[u8]) -> Vec<u8> {
 #[test_case(br"\{#= x \#}" => br"{#= x #}".to_vec() ; "equal_preserves_internal_modifier_chars")]
 fn render_cases(source: &[u8]) -> Vec<u8> {
     render(source)
+}
+
+// --- List literals and aggregate canonical forms -------------------------
+#[test_case(b"{{ [] }}" => b"[]".to_vec() ; "empty_list")]
+#[test_case(b"{{ [1, 2] }}" => b"[1, 2]".to_vec() ; "list_of_ints")]
+#[test_case(br#"{{ ["a", "b"] }}"# => br#"["a", "b"]"#.to_vec() ; "list_of_strings")]
+#[test_case(br#"{{ ["a", 2, true] }}"# => br#"["a", 2, true]"#.to_vec() ; "list_mixed")]
+#[test_case(b"{{ empty }}" => b"[]".to_vec() ; "var_empty_list")]
+#[test_case(b"{{ items }}" => b"[\"a\", \"b\", 3]".to_vec() ; "var_list_of_mixed")]
+#[test_case(b"{{ nested }}" => b"[[1, 2], [3, 4]]".to_vec() ; "var_nested_lists")]
+#[test_case(b"{{ user }}" => b"{\"age\": 42, \"name\": \"ada\", \"prefs\": {\"theme\": \"dark\"}}".to_vec() ; "var_map")]
+#[test_case(b"{{ [[1], [2, 3]] }}" => b"[[1], [2, 3]]".to_vec() ; "nested_aggregate_literal")]
+#[test_case(br#"{{ ["\\", "\""] }}"# => br#"["\\", "\""]"#.to_vec() ; "string_escapes_in_list")]
+// --- Dot access and index chains ----------------------------------------
+#[test_case(b"{{ items.0 }}" => b"a".to_vec() ; "list_index")]
+#[test_case(b"{{ items.2 }}" => b"3".to_vec() ; "list_index_int")]
+#[test_case(b"{{ nested.0.1 }}" => b"2".to_vec() ; "list_index_chain")]
+#[test_case(b"{{ user.name }}" => b"ada".to_vec() ; "map_dot_access")]
+#[test_case(b"{{ user.prefs.theme }}" => b"dark".to_vec() ; "map_dot_chain")]
+#[test_case(b"{{ items.1 }} {{ user.name }}" => b"b ada".to_vec() ; "mixed_access")]
+fn aggregate_render_cases(source: &[u8]) -> Vec<u8> {
+    render_aggregate(source)
 }
 
 // --- Flush behavior -------------------------------------------------------

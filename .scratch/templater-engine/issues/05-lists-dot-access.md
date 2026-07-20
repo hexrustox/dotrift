@@ -4,12 +4,12 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `Expr::List(Vec<Expr>)` parses; empty `[]` accepted; trailing commas in list literals are parse errors; whitespace inside list brackets is optional and trimmed.
-- [ ] `Expr::Dot { left: Box<Expr>, field: Range<usize> }` performs Map key lookup on a Map receiver; empty identifier after `.` is a parse error.
-- [ ] `Expr::Index { left: Box<Expr>, idx: i64 }` performs List index lookup; negative indices are stored and rejected at render time.
-- [ ] `Value::write_nested` renders List and Map canonical forms with byte-level `\"` and `\\` escapes on nested strings (no delimiter re-escaping); Map iteration order is `BTreeMap`'s natural order.
-- [ ] Render errors: dot-access `.field` on non-Map, `.integer` on non-List, dot-access on String, negative list index, list index out of bounds, map key not found — each carries the offending expression's byte span.
-- [ ] End-to-end tests in `templater/tests/render.rs` cover list-literal round-trips, nested aggregate canonical forms, dot-access chains; error tests in `templater/tests/error.rs` cover each render-time type error.
-- [ ] `cargo test -p templater`, `cargo fmt`, `cargo clippy -p templater` pass.
+- [x] `Expr::List(Vec<Expr>)` parses; empty `[]` accepted; trailing commas in list literals are parse errors; whitespace inside list brackets is optional and trimmed.
+- [x] `Expr::Dot { left: Box<Expr>, field: Range<usize> }` performs Map key lookup on a Map receiver; empty identifier after `.` is a parse error.
+- [x] `Expr::Index { left: Box<Expr>, idx: i64, idx_span: Range<usize> }` performs List index lookup; negative indices are stored and rejected at render time.
+- [x] `Value::write_nested` renders List and Map canonical forms with byte-level `\"` and `\\` escapes on nested strings (no delimiter re-escaping); Map iteration order is `BTreeMap`'s natural order.
+- [x] Render errors: dot-access `.field` on non-Map, `.integer` on non-List, dot-access on String, negative list index, list index out of bounds, map key not found — each carries the offending expression's byte span.
+- [x] End-to-end tests in `templater/tests/render.rs` cover list-literal round-trips, nested aggregate canonical forms, dot-access chains; error tests in `templater/tests/error.rs` cover each render-time type error.
+- [x] `cargo test -p templater`, `cargo fmt`, `cargo clippy -p templater` pass.

@@ -61,17 +61,19 @@ fn lookup<'v>(name: &str, frame: &'v Frame<'v>) -> Option<Cow<'v, Value>> {
     }
 }
 
-/// Evaluates one non-string-literal expression to an owned `Value`. Per
-/// decision E1 the lookup path clones the underlying value out of the
-/// borrowed scope (`StrLit` is handled separately in `eval_body`).
+/// Evaluates one expression to an owned `Value`. Per decision E1 the lookup
+/// path clones the underlying value out of the borrowed scope (`StrLit` at
+/// top-level interpolation is handled separately in `eval_body` for the
+/// zero-allocation fast path, but nested string literals evaluate here).
 fn eval(expr: &Expr, src: &[u8], frame: &Frame<'_>) -> Result<Value> {
     Ok(match expr {
         Expr::IntLit(n) => Value::Int(*n),
         Expr::BoolLit(b) => Value::Bool(*b),
-        Expr::StrLit(_) => unreachable!(
-            "StrLit is handled by `eval_body`'s direct-to-writer path; \
-             `eval` only fires for Var/IntLit/BoolLit in this slice"
-        ),
+        Expr::StrLit(range) => {
+            let mut out = Vec::new();
+            write_string_literal(src, range.clone(), &mut out)?;
+            Value::Str(String::from_utf8(out).expect("decoded bytes are valid UTF-8"))
+        }
         Expr::Var(range) => {
             let name_bytes = &src[range.clone()];
             // Variable names are restricted to `[A-Za-z_][A-Za-z0-9_]*` by
@@ -83,6 +85,87 @@ fn eval(expr: &Expr, src: &[u8], frame: &Frame<'_>) -> Result<Value> {
                     return Err(Error::render(
                         RenderError::UndefinedVariable,
                         SourceSpan::from((range.start, range.end - range.start)),
+                    ));
+                }
+            }
+        }
+        Expr::List(elements) => {
+            let mut values = Vec::with_capacity(elements.len());
+            for element in elements {
+                values.push(eval(element, src, frame)?);
+            }
+            Value::List(values)
+        }
+        Expr::Dot { left, field } => {
+            let receiver = eval(left, src, frame)?;
+            match &receiver {
+                Value::Str(_) => {
+                    return Err(Error::render(
+                        RenderError::IndexAccessOnString,
+                        SourceSpan::from((field.start, field.end - field.start)),
+                    ));
+                }
+                Value::Map(map) => {
+                    let key = std::str::from_utf8(&src[field.clone()])
+                        .expect("field identifier is ascii");
+                    match map.get(key) {
+                        Some(v) => v.clone(),
+                        None => {
+                            return Err(Error::render(
+                                RenderError::MapKeyNotFound {
+                                    key: key.to_owned(),
+                                },
+                                SourceSpan::from((field.start, field.end - field.start)),
+                            ));
+                        }
+                    }
+                }
+                other => {
+                    return Err(Error::render(
+                        RenderError::MapAccessOnNonMap {
+                            got: other.value_type(),
+                        },
+                        SourceSpan::from((field.start, field.end - field.start)),
+                    ));
+                }
+            }
+        }
+        Expr::Index {
+            left,
+            idx,
+            idx_span,
+        } => {
+            let receiver = eval(left, src, frame)?;
+            let span = SourceSpan::from((idx_span.start, idx_span.end - idx_span.start));
+            if *idx < 0 {
+                return Err(Error::render(
+                    RenderError::NegativeListIndex { idx: *idx },
+                    span,
+                ));
+            }
+            match receiver {
+                Value::Str(_) => {
+                    return Err(Error::render(RenderError::IndexAccessOnString, span));
+                }
+                Value::List(list) => {
+                    let index = *idx as usize;
+                    if index >= list.len() {
+                        return Err(Error::render(
+                            RenderError::ListIndexOutOfBounds {
+                                idx: *idx,
+                                len: list.len(),
+                            },
+                            span,
+                        ));
+                    }
+                    list[index].clone()
+                }
+                other => {
+                    return Err(Error::render(
+                        RenderError::ListAccessOnNonList {
+                            got: other.value_type(),
+                        },
+                        span,
                     ));
                 }
             }

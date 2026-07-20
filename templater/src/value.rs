@@ -39,26 +39,88 @@ impl std::fmt::Display for ValueType {
 }
 
 impl Value {
-    /// Renders the value at the top level of an interpolation (the
-    /// "canonical string form" of the spec for Str/Int/Bool only in this
-    /// slice — List/Map are not reachable yet).
+    /// The runtime type of this value.
+    pub(crate) fn value_type(&self) -> ValueType {
+        match self {
+            Value::Str(_) => ValueType::Str,
+            Value::Int(_) => ValueType::Int,
+            Value::Bool(_) => ValueType::Bool,
+            Value::List(_) => ValueType::List,
+            Value::Map(_) => ValueType::Map,
+        }
+    }
+
+    /// Renders the value at the top level of an interpolation.
     ///
     /// - **Str** — verbatim (no escape processing, no delimiter escaping).
-    /// - **Int** — decimal, with a leading `-` for negatives; `{}` formatting
-    ///   of `i64` already does this.
+    /// - **Int** — decimal, with a leading `-` for negatives.
     /// - **Bool** — `true` / `false`.
+    /// - **List/Map** — their canonical nested forms via [`Value::write_nested`].
     pub(crate) fn write_top<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         match self {
             Value::Str(s) => writer.write_all(s.as_bytes()),
             Value::Int(n) => write!(writer, "{n}"),
             Value::Bool(b) => write!(writer, "{b}"),
-            // Not reachable in this slice — no list/map literals or function
-            // calls exist yet. Calling `write_top` on a List/Map is a
-            // programmer error in the host, not a templater error.
-            Value::List(_) | Value::Map(_) => unreachable!(
-                "write_top on List/Map is unreachable until list literals (ticket 05) \
-                 and function calls (ticket 04) ship"
-            ),
+            Value::List(_) | Value::Map(_) => self.write_nested(writer),
         }
     }
+
+    /// Renders the canonical nested form for List and Map values.
+    ///
+    /// - List: `[` comma-separated canonical forms `]`; empty `[]`.
+    /// - Map: `{` comma-separated `"key": value` pairs `}`; empty `{}`.
+    /// - String elements and String keys are double-quoted, escaping only `\`
+    ///   and `"` byte-by-byte; other backslash sequences pass through.
+    /// - String values inside aggregates are not re-escaped for delimiters.
+    /// - Map iteration follows `BTreeMap`'s natural order.
+    pub(crate) fn write_nested<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        match self {
+            Value::List(items) => {
+                writer.write_all(b"[")?;
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        writer.write_all(b", ")?;
+                    }
+                    item.write_nested(writer)?;
+                }
+                writer.write_all(b"]")?;
+            }
+            Value::Map(map) => {
+                writer.write_all(b"{")?;
+                for (i, (key, value)) in map.iter().enumerate() {
+                    if i > 0 {
+                        writer.write_all(b", ")?;
+                    }
+                    writer.write_all(b"\"")?;
+                    write_escaped_string(writer, key.as_bytes())?;
+                    writer.write_all(b"\": ")?;
+                    value.write_nested(writer)?;
+                }
+                writer.write_all(b"}")?;
+            }
+            Value::Str(s) => {
+                writer.write_all(b"\"")?;
+                write_escaped_string(writer, s.as_bytes())?;
+                writer.write_all(b"\"")?;
+            }
+            Value::Int(n) => write!(writer, "{n}")?,
+            Value::Bool(b) => write!(writer, "{b}")?,
+        }
+        Ok(())
+    }
+}
+
+/// Writes bytes with only `\"` and `\\` escape processing.
+fn write_escaped_string<W: io::Write>(writer: &mut W, bytes: &[u8]) -> io::Result<()> {
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b'\\' => writer.write_all(br"\\"),
+            b'"' => writer.write_all(b"\\\""),
+            _ => writer.write_all(&bytes[i..i + 1]),
+        }?;
+        i += 1;
+    }
+    Ok(())
 }

@@ -5,7 +5,6 @@ use miette::SourceSpan;
 use crate::{
     ast::{Expr, Node},
     error::{Error, ParseError},
-    lex::is_inner_ws,
     scanner::{Modifier, Token},
     util::source_span,
 };
@@ -127,148 +126,281 @@ fn parse_interp_body(
         ));
     }
 
-    let bytes = &source[body.clone()];
-    let first = bytes[0];
-
-    let kind = match first {
-        b'"' => parse_string_literal(bytes, &tag, &body)?,
-        b'-' | b'0'..=b'9' => parse_integer_literal(bytes, &body)?,
-        _ if is_ident_start(first) => parse_ident_or_keyword(bytes, &body)?,
-        _ => {
-            return Err(Error::parse(
-                ParseError::UnexpectedToken,
-                body_span(&body, 0..1),
-            ));
-        }
+    let mut state = ParserState {
+        source,
+        tag,
+        body: body.clone(),
+        pos: 0,
     };
-
-    // Reject trailing junk after the single expression. Skip interior
-    // whitespace, then if any bytes remain the error points at the first
-    // non-whitespace leftover byte.
-    let consumed = kind.consumed;
-    if consumed < bytes.len() {
-        let mut leftover = consumed;
-        while leftover < bytes.len() && is_inner_ws(bytes[leftover]) {
-            leftover += 1;
-        }
-        let at = if leftover >= bytes.len() {
-            consumed
-        } else {
-            leftover
-        };
+    let expr = state.parse_expr()?;
+    state.skip_ws();
+    if state.pos < state.len() {
         return Err(Error::parse(
             ParseError::UnexpectedTokensAfterExpr,
-            body_span(&body, at..at + 1),
+            state.span(state.pos..state.pos + 1),
         ));
     }
-
-    Ok(kind.expr)
+    Ok(expr)
 }
 
-/// Convenience bundle so `parse_interp_body` can read `consumed` before
-/// moving `expr`.
-struct KindBundle {
-    expr: Expr,
-    consumed: usize,
+struct ParserState<'s> {
+    source: &'s [u8],
+    tag: Range<usize>,
+    body: Range<usize>,
+    pos: usize,
 }
 
-fn parse_string_literal(
-    bytes: &[u8],
-    tag: &Range<usize>,
-    body: &Range<usize>,
-) -> std::result::Result<KindBundle, Error> {
-    debug_assert_eq!(bytes[0], b'"');
-    let mut i = 1;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' if i + 1 < bytes.len() => i += 2,
-            b'"' => {
-                // Closing quote at body offset `i`. Interior is `1..i`.
-                let interior = body_range(body, 1..i);
-                return Ok(KindBundle {
-                    expr: Expr::StrLit(interior),
-                    consumed: i + 1,
-                });
-            }
-            _ => i += 1,
+impl<'s> ParserState<'s> {
+    fn len(&self) -> usize {
+        self.body.len()
+    }
+
+    fn bytes(&self) -> &'s [u8] {
+        &self.source[self.body.clone()]
+    }
+
+    fn span(&self, rel: Range<usize>) -> SourceSpan {
+        source_span(self.body.start + rel.start..self.body.start + rel.end)
+    }
+
+    fn skip_ws(&mut self) {
+        let bytes = self.bytes();
+        while self.pos < bytes.len() && (bytes[self.pos] == b' ' || bytes[self.pos] == b'\t') {
+            self.pos += 1;
         }
     }
 
-    // Unclosed: span from the opening `"` (trimmed body start) through the
-    // end of the closing `}}` delimiter — the "rest of the tag" the parser
-    // would have consumed had the string closed.
-    Err(Error::parse(
-        ParseError::UnclosedString,
-        source_span(body.start..tag.end),
-    ))
-}
-
-fn parse_integer_literal(
-    bytes: &[u8],
-    body: &Range<usize>,
-) -> std::result::Result<KindBundle, Error> {
-    let mut i = 0;
-    let negative = bytes[0] == b'-';
-    if negative {
-        i += 1;
-    }
-    let digits_start = i;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        i += 1;
+    fn parse_expr(&mut self) -> std::result::Result<Expr, Error> {
+        let primary = self.parse_primary()?;
+        self.parse_postfix(primary)
     }
 
-    if i == digits_start {
-        // `-` with no following digits is not a valid integer literal.
-        return Err(Error::parse(
-            ParseError::UnexpectedToken,
-            body_span(body, 0..1),
-        ));
+    fn parse_primary(&mut self) -> std::result::Result<Expr, Error> {
+        self.skip_ws();
+        let bytes = self.bytes();
+        if self.pos >= bytes.len() {
+            return Err(Error::parse(
+                ParseError::UnexpectedToken,
+                self.span(self.pos..self.pos + 1),
+            ));
+        }
+
+        match bytes[self.pos] {
+            b'"' => self.parse_string_literal(),
+            b'-' | b'0'..=b'9' => self.parse_integer_literal(),
+            _ if is_ident_start(bytes[self.pos]) => self.parse_ident_or_keyword(),
+            b'[' => self.parse_list_literal(),
+            _ => Err(Error::parse(
+                ParseError::UnexpectedToken,
+                self.span(self.pos..self.pos + 1),
+            )),
+        }
     }
 
-    let digits = &bytes[digits_start..i];
+    fn parse_postfix(&mut self, mut left: Expr) -> std::result::Result<Expr, Error> {
+        loop {
+            let bytes = self.bytes();
+            if self.pos >= bytes.len() || bytes[self.pos] != b'.' {
+                break Ok(left);
+            }
+            let dot_pos = self.pos;
+            self.pos += 1; // consume '.'
 
-    let mut acc: i64 = 0;
-    for &d in digits {
-        acc = acc
-            .checked_mul(10)
-            .and_then(|n| {
-                let d = (d - b'0').into();
-                if negative {
-                    n.checked_sub(d)
-                } else {
-                    n.checked_add(d)
+            let bytes = self.bytes();
+            if self.pos >= bytes.len() {
+                return Err(Error::parse(
+                    ParseError::EmptyField,
+                    self.span(dot_pos..dot_pos + 1),
+                ));
+            }
+
+            if is_ident_start(bytes[self.pos]) {
+                let ident_start = self.pos;
+                while self.pos < bytes.len() && is_ident_byte(bytes[self.pos]) {
+                    self.pos += 1;
                 }
-            })
-            .ok_or(Error::parse(
-                ParseError::IntegerOutOfRange,
-                body_span(body, 0..i),
-            ))?;
+                let field = body_range(&self.body, ident_start..self.pos);
+                left = Expr::Dot {
+                    left: Box::new(left),
+                    field,
+                };
+            } else if bytes[self.pos] == b'-' || bytes[self.pos].is_ascii_digit() {
+                // Parse integer index, which may be negative.
+                let idx_start = self.pos;
+                let negative = bytes[self.pos] == b'-';
+                if negative {
+                    self.pos += 1;
+                }
+                if self.pos >= bytes.len() || !bytes[self.pos].is_ascii_digit() {
+                    return Err(Error::parse(
+                        ParseError::EmptyField,
+                        self.span(dot_pos..dot_pos + 1),
+                    ));
+                }
+                while self.pos < bytes.len() && bytes[self.pos].is_ascii_digit() {
+                    self.pos += 1;
+                }
+                let idx_bytes = &bytes[idx_start..self.pos];
+                let idx: i64 = std::str::from_utf8(idx_bytes)
+                    .expect("digits are ascii")
+                    .parse()
+                    .expect("digits fit within i64 for reasonable lengths");
+                let idx_span = body_range(&self.body, idx_start..self.pos);
+                left = Expr::Index {
+                    left: Box::new(left),
+                    idx,
+                    idx_span,
+                };
+            } else {
+                return Err(Error::parse(
+                    ParseError::EmptyField,
+                    self.span(dot_pos..dot_pos + 1),
+                ));
+            }
+        }
     }
 
-    Ok(KindBundle {
-        expr: Expr::IntLit(acc),
-        consumed: i,
-    })
-}
-
-fn parse_ident_or_keyword(
-    bytes: &[u8],
-    body: &Range<usize>,
-) -> std::result::Result<KindBundle, Error> {
-    let mut i = 0;
-    while i < bytes.len() && is_ident_byte(bytes[i]) {
-        i += 1;
+    fn parse_string_literal(&mut self) -> std::result::Result<Expr, Error> {
+        let bytes = self.bytes();
+        debug_assert_eq!(bytes[self.pos], b'"');
+        let start = self.pos;
+        self.pos += 1;
+        while self.pos < bytes.len() {
+            match bytes[self.pos] {
+                b'\\' if self.pos + 1 < bytes.len() => self.pos += 2,
+                b'"' => {
+                    let interior = body_range(&self.body, start + 1..self.pos);
+                    self.pos += 1;
+                    return Ok(Expr::StrLit(interior));
+                }
+                _ => self.pos += 1,
+            }
+        }
+        Err(Error::parse(
+            ParseError::UnclosedString,
+            source_span(self.body.start + start..self.tag.end),
+        ))
     }
-    debug_assert!(i > 0);
 
-    let range = body_range(body, 0..i);
-    let ident = &bytes[..i];
-    let expr = match ident {
-        b"true" => Expr::BoolLit(true),
-        b"false" => Expr::BoolLit(false),
-        _ => Expr::Var(range),
-    };
-    Ok(KindBundle { expr, consumed: i })
+    fn parse_integer_literal(&mut self) -> std::result::Result<Expr, Error> {
+        let bytes = self.bytes();
+        let start = self.pos;
+        let negative = bytes[self.pos] == b'-';
+        if negative {
+            self.pos += 1;
+        }
+        let digits_start = self.pos;
+        while self.pos < bytes.len() && bytes[self.pos].is_ascii_digit() {
+            self.pos += 1;
+        }
+
+        if self.pos == digits_start {
+            return Err(Error::parse(
+                ParseError::UnexpectedToken,
+                self.span(start..start + 1),
+            ));
+        }
+
+        let digits = &bytes[digits_start..self.pos];
+
+        let mut acc: i64 = 0;
+        for &d in digits {
+            acc = acc
+                .checked_mul(10)
+                .and_then(|n| {
+                    let d = (d - b'0').into();
+                    if negative {
+                        n.checked_sub(d)
+                    } else {
+                        n.checked_add(d)
+                    }
+                })
+                .ok_or(Error::parse(
+                    ParseError::IntegerOutOfRange,
+                    self.span(start..self.pos),
+                ))?;
+        }
+
+        Ok(Expr::IntLit(acc))
+    }
+
+    fn parse_ident_or_keyword(&mut self) -> std::result::Result<Expr, Error> {
+        let bytes = self.bytes();
+        let start = self.pos;
+        debug_assert!(is_ident_start(bytes[start]));
+        while self.pos < bytes.len() && is_ident_byte(bytes[self.pos]) {
+            self.pos += 1;
+        }
+
+        let range = body_range(&self.body, start..self.pos);
+        let ident = &bytes[start..self.pos];
+        Ok(match ident {
+            b"true" => Expr::BoolLit(true),
+            b"false" => Expr::BoolLit(false),
+            _ => Expr::Var(range),
+        })
+    }
+
+    fn parse_list_literal(&mut self) -> std::result::Result<Expr, Error> {
+        let bytes = self.bytes();
+        debug_assert_eq!(bytes[self.pos], b'[');
+        self.pos += 1; // consume '['
+
+        let mut elements = Vec::new();
+        loop {
+            self.skip_ws();
+            let bytes = self.bytes();
+            if self.pos >= bytes.len() {
+                return Err(Error::parse(
+                    ParseError::UnclosedDelimiter,
+                    self.span(self.pos.saturating_sub(1)..self.pos),
+                ));
+            }
+            if bytes[self.pos] == b']' {
+                self.pos += 1;
+                break;
+            }
+
+            elements.push(self.parse_expr()?);
+
+            self.skip_ws();
+            let bytes = self.bytes();
+            if self.pos >= bytes.len() {
+                return Err(Error::parse(
+                    ParseError::UnclosedDelimiter,
+                    self.span(self.pos.saturating_sub(1)..self.pos),
+                ));
+            }
+            match bytes[self.pos] {
+                b',' => {
+                    let comma_pos = self.pos;
+                    self.pos += 1;
+                    // Trailing comma check: if next non-ws is `]`, it's a
+                    // trailing comma.
+                    self.skip_ws();
+                    let bytes = self.bytes();
+                    if self.pos < bytes.len() && bytes[self.pos] == b']' {
+                        return Err(Error::parse(
+                            ParseError::TrailingComma,
+                            self.span(comma_pos..comma_pos + 1),
+                        ));
+                    }
+                }
+                b']' => {
+                    self.pos += 1;
+                    break;
+                }
+                _ => {
+                    return Err(Error::parse(
+                        ParseError::UnexpectedToken,
+                        self.span(self.pos..self.pos + 1),
+                    ));
+                }
+            }
+        }
+
+        Ok(Expr::List(elements))
+    }
 }
 
 fn is_ident_start(b: u8) -> bool {
@@ -285,17 +417,12 @@ fn body_range(body: &Range<usize>, rel: Range<usize>) -> Range<usize> {
     (body.start + rel.start)..(body.start + rel.end)
 }
 
-/// Translates a body-relative `Range` into a miette `SourceSpan` (used for
-/// error spans).
-fn body_span(body: &Range<usize>, rel: Range<usize>) -> SourceSpan {
-    source_span(body.start + rel.start..body.start + rel.end)
-}
-
 #[cfg(test)]
 mod tests {
     use test_case::test_case;
 
     use super::*;
+    use crate::lex::is_inner_ws;
 
     macro_rules! expr {
         (var $r:expr) => {
@@ -309,6 +436,22 @@ mod tests {
         };
         (bool $b:expr) => {
             Expr::BoolLit($b)
+        };
+        (list $($e:expr),* $(,)?) => {
+            Expr::List(vec![$($e),*])
+        };
+        (dot $left:expr, $field:expr) => {
+            Expr::Dot {
+                left: Box::new($left),
+                field: $field,
+            }
+        };
+        (idx $left:expr, $idx:expr, $span:expr) => {
+            Expr::Index {
+                left: Box::new($left),
+                idx: $idx,
+                idx_span: $span,
+            }
         };
     }
 
@@ -364,6 +507,17 @@ mod tests {
     #[test_case(b"{{ -9223372036854775808 }}" => expr!(int i64::MIN); "int_min_i64")]
     #[test_case(b"{{ true }}" => expr!(bool true); "bool_true")]
     #[test_case(b"{{ false }}" => expr!(bool false); "bool_false")]
+    // --- List literals ------------------------------------------------------
+    #[test_case(b"{{ [] }}" => expr!(list); "empty_list")]
+    #[test_case(b"{{ [1, 2] }}" => expr!(list expr!(int 1), expr!(int 2)); "list_of_ints")]
+    #[test_case(br#"{{ ["a", "b"] }}"# => expr!(list expr!(str 5..6), expr!(str 10..11)); "list_of_strings")]
+    #[test_case(b"{{ [1 , 2 , 3] }}" => expr!(list expr!(int 1), expr!(int 2), expr!(int 3)); "list_with_spaces")]
+    // --- Dot access ---------------------------------------------------------
+    #[test_case(b"{{ x.y }}" => expr!(dot expr!(var 3..4), 5..6); "simple_dot")]
+    #[test_case(b"{{ x.y.z }}" => expr!(dot expr!(dot expr!(var 3..4), 5..6), 7..8); "dot_chain")]
+    // --- Index access -------------------------------------------------------
+    #[test_case(b"{{ x.0 }}" => expr!(idx expr!(var 3..4), 0, 5..6); "simple_index")]
+    #[test_case(b"{{ x.0.1 }}" => expr!(idx expr!(idx expr!(var 3..4), 0, 5..6), 1, 7..8); "index_chain")]
     fn parse_one_cases(input: &[u8]) -> Expr {
         parse_one(input)
     }
@@ -386,6 +540,14 @@ mod tests {
     #[test_case(b"{{ @ }}" => matches ParseError::UnexpectedToken; "unexpected_byte")]
     #[test_case(b"{{ a b }}" => matches ParseError::UnexpectedTokensAfterExpr; "trailing_token")]
     #[test_case(b"{{ - }}" => matches ParseError::UnexpectedToken; "minus_alone")]
+    // List literal parse errors
+    #[test_case(b"{{ [a, ] }}" => matches ParseError::TrailingComma; "trailing_comma_list")]
+    #[test_case(b"{{ [ }}" => matches ParseError::UnclosedDelimiter; "unclosed_list")]
+    #[test_case(b"{{ x. }}" => matches ParseError::EmptyField; "empty_field")]
+    #[test_case(b"{{ x.- }}" => matches ParseError::EmptyField; "field_minus_without_digits")]
+    // Postfix whitespace errors
+    #[test_case(b"{{ x .y }}" => matches ParseError::UnexpectedTokensAfterExpr; "space_before_dot")]
+    #[test_case(b"{{ x. y }}" => matches ParseError::EmptyField; "space_after_dot")]
     fn kind_cases(input: &[u8]) -> ParseError {
         err(input).0
     }
@@ -397,6 +559,10 @@ mod tests {
     #[test_case(b"{{ @ }}" => (3, 1); "unexpected_byte_span")]
     #[test_case(b"{{ a b }}" => (5, 1); "trailing_token_span")]
     #[test_case(b"{{ \"hello }}" => (3, 9); "unclosed_string_span")]
+    #[test_case(b"{{ [a, ] }}" => (5, 1); "trailing_comma_list_span")]
+    #[test_case(b"{{ x. }}" => (4, 1); "empty_field_span")]
+    #[test_case(b"{{ x .y }}" => (5, 1); "space_before_dot_span")]
+    #[test_case(b"{{ x. y }}" => (4, 1); "space_after_dot_span")]
     fn span_cases(input: &[u8]) -> (usize, usize) {
         err(input).1
     }

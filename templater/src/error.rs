@@ -85,6 +85,12 @@ pub enum ParseError {
     #[error("unexpected tokens after expression")]
     #[diagnostic(code(templater::parse::unexpected_tokens_after_expr))]
     UnexpectedTokensAfterExpr,
+    #[error("trailing comma")]
+    #[diagnostic(code(templater::parse::trailing_comma))]
+    TrailingComma,
+    #[error("empty identifier after `.`")]
+    #[diagnostic(code(templater::parse::empty_field))]
+    EmptyField,
     #[error("stray delimiter")]
     #[diagnostic(code(templater::parse::stray_delimiter))]
     StrayDelimiter,
@@ -102,6 +108,24 @@ pub enum RenderError {
     #[error("undefined variable")]
     #[diagnostic(code(templater::render::undefined_variable))]
     UndefinedVariable,
+    #[error("map key `{key}` not found")]
+    #[diagnostic(code(templater::render::map_key_not_found))]
+    MapKeyNotFound { key: String },
+    #[error("list index {idx} out of bounds (length {len})")]
+    #[diagnostic(code(templater::render::list_index_out_of_bounds))]
+    ListIndexOutOfBounds { idx: i64, len: usize },
+    #[error("negative list index {idx}")]
+    #[diagnostic(code(templater::render::negative_list_index))]
+    NegativeListIndex { idx: i64 },
+    #[error("expected map, got {got}")]
+    #[diagnostic(code(templater::render::map_access_on_non_map))]
+    MapAccessOnNonMap { got: ValueType },
+    #[error("expected list, got {got}")]
+    #[diagnostic(code(templater::render::list_access_on_non_list))]
+    ListAccessOnNonList { got: ValueType },
+    #[error("cannot index into a string")]
+    #[diagnostic(code(templater::render::index_access_on_string))]
+    IndexAccessOnString,
 }
 
 /// Errors returned by the host's [`FunctionRegistry`](crate::FunctionRegistry).
