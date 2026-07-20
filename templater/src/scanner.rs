@@ -413,6 +413,7 @@ fn trim_inner_ws(src: &[u8], body_start: usize, body_end: usize) -> Range<usize>
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
     use test_case::{test_case, test_matrix};
 
     use super::*;
@@ -492,6 +493,8 @@ mod tests {
     #[test_case(b"{ not a tag" => vec![text(0..11)]; "single_brace_passthrough")]
     #[test_case(b"{% if %}" => vec![stmt(0..8, 3..5)]; "stmt_delimiters")]
     #[test_case(b"{# note #}" => vec![Token::Barrier]; "comment_delimiters_stripped")]
+    #[test_case(b"\\{{" => vec![text(1..3)]; "todo1")]
+    #[test_case(b"\\\\{{}}" => vec![text(0..1), interp(2..6,4..4)]; "todo2")]
     fn scan_cases(input: &[u8]) -> Vec<Token> {
         scan(input).unwrap()
     }
@@ -552,19 +555,18 @@ mod tests {
         }
     }
 
-    #[test_matrix(
-        [
-            MatrixVal::OpenInterp,
-            MatrixVal::CloseInterp,
-            MatrixVal::OpenStmt,
-            MatrixVal::CloseStmt,
-            MatrixVal::OpenComment,
-            MatrixVal::CloseComment,
-        ]
-    )]
-    fn escape_rule_parity(delim: MatrixVal) {
-        let prefix = b"A";
-        for n in 0..=20 {
+    proptest! {
+        #[test]
+        fn escape_rule_parity(n in 0usize..=255) {
+            let prefix = b"A";
+            for delim in [
+                MatrixVal::OpenInterp,
+                MatrixVal::CloseInterp,
+                MatrixVal::OpenStmt,
+                MatrixVal::CloseStmt,
+                MatrixVal::OpenComment,
+                MatrixVal::CloseComment,
+            ] {
             let mut src = Vec::new();
             src.extend_from_slice(prefix);
 
@@ -620,6 +622,7 @@ mod tests {
                 expected_literal_backslashes(delim, n),
                 "literal backslash count mismatch for {delim:?} n={n}"
             );
+            }
         }
     }
 

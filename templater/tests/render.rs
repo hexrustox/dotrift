@@ -2,34 +2,18 @@ mod common;
 
 use std::{collections::HashMap, io};
 
-use common::MockRegistry;
-use templater::{Template, Value};
+use common::{MockRegistry, var_scope};
+use templater::Template;
 use test_case::test_case;
 
 /// Renders `source` with no variables.
 pub fn render(source: &[u8]) -> Vec<u8> {
-    render_vars(source, &HashMap::new())
-}
-
-/// Renders `source` with the supplied variables.
-pub fn render_vars(source: &[u8], variables: &HashMap<String, Value>) -> Vec<u8> {
     let template = Template::from_bytes(source.to_vec()).expect("parse failed");
     let mut out = Vec::new();
     template
-        .render(&mut out, variables, &MockRegistry)
+        .render(&mut out, &var_scope(), &MockRegistry)
         .expect("render failed");
     out
-}
-
-/// A variable scope shared by several test cases.
-fn var_scope() -> HashMap<String, Value> {
-    HashMap::from([
-        ("name".to_string(), Value::Str("world".to_string())),
-        ("count".to_string(), Value::Int(42)),
-        ("neg".to_string(), Value::Int(-5)),
-        ("flag".to_string(), Value::Bool(true)),
-        ("off".to_string(), Value::Bool(false)),
-    ])
 }
 
 // --- Plain text ----------------------------------------------------------
@@ -99,7 +83,7 @@ fn interpolate_bool_literal(source: &[u8]) -> Vec<u8> {
 #[test_case(b"{{ count }} and {{ neg }} and {{ flag }}" => b"42 and -5 and true".to_vec() ; "multiple_in_sequence")]
 #[test_case(b"prefix {{   name   }} suffix" => b"prefix world suffix".to_vec() ; "drops_padding")]
 fn interpolate_var(source: &[u8]) -> Vec<u8> {
-    render_vars(source, &var_scope())
+    render(source)
 }
 
 // --- Scanner: escape rules ------------------------------------------------
@@ -114,8 +98,11 @@ fn interpolate_var(source: &[u8]) -> Vec<u8> {
 #[test_case(b"\\{# c \\#}" => b"{# c #}".to_vec() ; "escaped_comment_pair_renders_literal")]
 #[test_case(b"\\{%\\%}" => b"{%%}".to_vec() ; "escaped_empty_stmt_pair")]
 #[test_case(b"\\{#\\#}" => b"{##}".to_vec() ; "escaped_empty_comment_pair")]
+#[test_case(b"\\{{- name \\-}}" => b"{{- name -}}".to_vec() ; "escaped_tag_with_dash_modifiers")]
+#[test_case(b"\\{{= name \\=}}" => b"{{= name =}}".to_vec() ; "escaped_tag_with_equal_modifiers")]
+#[test_case(b"\\\\" => b"\\\\".to_vec() ; "even_backslashes_without_delimiter")]
 fn escaped_delimiters_render_literal(source: &[u8]) -> Vec<u8> {
-    render_vars(source, &var_scope())
+    render(source)
 }
 
 // --- Scanner: comments ----------------------------------------------------
@@ -141,7 +128,7 @@ fn comment_is_stripped(source: &[u8]) -> Vec<u8> {
 #[test_case(b"before\n  {{- name }}" => b"before\nworld".to_vec() ; "preserves_newline_left")]
 #[test_case(b"before\n\t{{- name }}" => b"before\nworld".to_vec() ; "preserves_newline_then_tab")]
 fn dash_trims_adjacent_spaces_and_tabs(source: &[u8]) -> Vec<u8> {
-    render_vars(source, &var_scope())
+    render(source)
 }
 
 // --- Scanner: equal whitespace modifier -----------------------------------
@@ -160,7 +147,7 @@ fn dash_trims_adjacent_spaces_and_tabs(source: &[u8]) -> Vec<u8> {
 #[test_case(b"{{ name =}}\t\nnext" => b"worldnext".to_vec() ; "right_eats_tabs_and_newline")]
 #[test_case(b"prefix\t{{= name }}" => b"world".to_vec() ; "left_eats_tab_before_tag")]
 fn equal_modifier_eats_plain_text_and_whitespace(source: &[u8]) -> Vec<u8> {
-    render_vars(source, &var_scope())
+    render(source)
 }
 
 // --- Flush behavior -------------------------------------------------------
