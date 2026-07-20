@@ -170,10 +170,7 @@ mod tests {
         let mut map = HashMap::new();
         map.insert("x".to_string(), Value::Int(1));
         let frame = Frame::Var(&map);
-        match lookup("x", &frame) {
-            Some(Cow::Borrowed(Value::Int(1))) => {}
-            other => panic!("expected Cow::Borrowed(Int(1)), got {other:?}"),
-        }
+        assert!(lookup("x", &frame).is_some_and(|v| v == Cow::Borrowed(&Value::Int(1))));
         assert!(lookup("missing", &frame).is_none());
     }
 }

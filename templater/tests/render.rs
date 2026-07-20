@@ -48,6 +48,7 @@ fn empty_source_renders_empty() {
 #[test_case(b"{{ \"line1\nline2\" }}" => b"line1\nline2".to_vec() ; "preserves_raw_newline")]
 // `}}` inside a closed string literal does not close the tag.
 #[test_case(br#"{{ "}}" }}"# => b"}}".to_vec() ; "shields_closing_delim")]
+    #[test_case(br#"{{ "\}}" }}"# => b"\\}}".to_vec() ; "string_backslash_quote_before_close_delim")]
 // String literals walk bytes directly into the writer — no char cast —
 // so non-ASCII byte sequences (here: the UTF-8 encoding of `é`) survive
 // intact even though they aren't valid standalone UTF-8 codepoints.

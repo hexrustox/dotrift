@@ -55,24 +55,13 @@ impl Error {
         }
     }
 
-    /// Constructs a function error annotated with the call-expression span.
-    #[allow(dead_code)] // Used by the function-call evaluator (ticket 04).
-    pub(crate) fn func(err: FuncError, span: impl Into<SourceSpan>) -> Self {
-        Self::Func {
-            err,
-            span: span.into(),
-        }
-    }
-
-    /// Returns the `(offset, length)` of the primary error span, if any.
-    pub fn span(&self) -> Option<(usize, usize)> {
-        match self {
-            Error::Parse { span, .. } | Error::Render { span, .. } | Error::Func { span, .. } => {
-                Some((span.offset(), span.len()))
-            }
-            Error::Io(_) => None,
-        }
-    }
+    // Constructs a function error annotated with the call-expression span.
+    // pub(crate) fn func(err: FuncError, span: impl Into<SourceSpan>) -> Self {
+    //     Self::Func {
+    //         err,
+    //         span: span.into(),
+    //     }
+    // }
 }
 
 /// Errors raised during tokenization or parsing, before any content executes.

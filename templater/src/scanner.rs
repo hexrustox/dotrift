@@ -61,7 +61,7 @@ impl ClusterKind {
         match self {
             ClusterKind::OpenInterp => ClusterKind::CloseInterp,
             ClusterKind::OpenStmt => ClusterKind::CloseStmt,
-            ClusterKind::OpenComment => ClusterKind::CloseComment,
+            // ClusterKind::OpenComment => ClusterKind::CloseComment,
             _ => unreachable!("matching_close is only called on opening kinds"),
         }
     }
@@ -108,7 +108,7 @@ pub(crate) fn scan(src: &[u8]) -> std::result::Result<Vec<Token>, Error> {
 
         match cluster.kind {
             ClusterKind::OpenInterp | ClusterKind::OpenStmt => {
-                let (left, body_start) = parse_left_modifier(src, cluster, cluster.kind)?;
+                let (left, body_start) = parse_left_modifier(src, cluster)?;
                 let open_pos = cluster.core;
                 let (close_core, right) = scan_body(src, body_start, cluster.kind, open_pos)?;
 
@@ -186,16 +186,9 @@ fn emit_escaped_cluster(tokens: &mut Vec<Token>, text_start: &mut usize, cluster
 fn parse_left_modifier(
     src: &[u8],
     cluster: Cluster,
-    kind: ClusterKind,
 ) -> std::result::Result<(Modifier, usize), Error> {
     let after_delim = cluster.core + 2;
     if after_delim < src.len() && is_modifier(src[after_delim]) {
-        if kind == ClusterKind::OpenComment {
-            return Err(Error::parse(
-                ParseError::InvalidModifier,
-                source_span(after_delim..after_delim + 1),
-            ));
-        }
         Ok((modifier(src[after_delim]), after_delim + 1))
     } else {
         Ok((Modifier::None, after_delim))
@@ -493,8 +486,10 @@ mod tests {
     #[test_case(b"{ not a tag" => vec![text(0..11)]; "single_brace_passthrough")]
     #[test_case(b"{% if %}" => vec![stmt(0..8, 3..5)]; "stmt_delimiters")]
     #[test_case(b"{# note #}" => vec![Token::Barrier]; "comment_delimiters_stripped")]
-    #[test_case(b"\\{{" => vec![text(1..3)]; "todo1")]
-    #[test_case(b"\\\\{{}}" => vec![text(0..1), interp(2..6,4..4)]; "todo2")]
+    #[test_case(b"\\{{" => vec![text(1..3)]; "backslash_escapes_open_delim")]
+    #[test_case(b"\\}}" => vec![text(1..3)]; "backslash_escapes_close_delim")]
+    #[test_case(b"\\\\{{}}" => vec![text(0..1), interp(2..6, 4..4)]; "escaped_backslash_then_empty_interp")]
+    #[test_case(b"{{ \\}} }}" => vec![interp(0..9, 3..6)]; "backslash_escapes_close_within_interp")]
     fn scan_cases(input: &[u8]) -> Vec<Token> {
         scan(input).unwrap()
     }
@@ -558,7 +553,7 @@ mod tests {
     proptest! {
         #[test]
         fn escape_rule_parity(n in 0usize..=255) {
-            let prefix = b"A";
+            let prefix = b"prefix";
             for delim in [
                 MatrixVal::OpenInterp,
                 MatrixVal::CloseInterp,

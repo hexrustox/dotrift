@@ -227,43 +227,26 @@ fn parse_integer_literal(
 
     let digits = &bytes[digits_start..i];
 
-    // i128 accumulator so we can detect i64 overflow ourselves (and report
-    // a precise span) rather than relying on i64 overflow semantics.
-    let mut acc: i128 = 0;
+    let mut acc: i64 = 0;
     for &d in digits {
         acc = acc
             .checked_mul(10)
-            .and_then(|n| n.checked_add((d - b'0') as i128))
+            .and_then(|n| {
+                let d = (d - b'0').into();
+                if negative {
+                    n.checked_sub(d)
+                } else {
+                    n.checked_add(d)
+                }
+            })
             .ok_or(Error::parse(
                 ParseError::IntegerOutOfRange,
                 body_span(body, 0..i),
             ))?;
     }
 
-    let value = if negative {
-        let neg = acc.checked_neg().ok_or(Error::parse(
-            ParseError::IntegerOutOfRange,
-            body_span(body, 0..i),
-        ))?;
-        if neg < i64::MIN as i128 {
-            return Err(Error::parse(
-                ParseError::IntegerOutOfRange,
-                body_span(body, 0..i),
-            ));
-        }
-        neg as i64
-    } else {
-        if acc > i64::MAX as i128 {
-            return Err(Error::parse(
-                ParseError::IntegerOutOfRange,
-                body_span(body, 0..i),
-            ));
-        }
-        acc as i64
-    };
-
     Ok(KindBundle {
-        expr: Expr::IntLit(value),
+        expr: Expr::IntLit(acc),
         consumed: i,
     })
 }
