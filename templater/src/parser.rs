@@ -455,19 +455,6 @@ mod tests {
         };
     }
 
-    /// Drives `parse` with one `{{ ... }}` token constructed the way the
-    /// scanner would: `tag` covers `{{ ... }}`, `body` is the trimmed
-    /// interior.
-    fn parse_one(input: &[u8]) -> Expr {
-        let token = token_from_input(input);
-        let nodes = parse(vec![token], input).unwrap();
-        assert_eq!(nodes.len(), 1);
-        match nodes.into_iter().next().unwrap() {
-            Node::Interpolate(e) => e,
-            _ => unreachable!("expected Interpolate"),
-        }
-    }
-
     /// Builds the same `Token::Interp { tag, body, left, right }` the scanner
     /// would produce for `input`: `tag = open..close_end`, `body` trimmed,
     /// no modifiers.
@@ -507,63 +494,46 @@ mod tests {
     #[test_case(b"{{ -9223372036854775808 }}" => expr!(int i64::MIN); "int_min_i64")]
     #[test_case(b"{{ true }}" => expr!(bool true); "bool_true")]
     #[test_case(b"{{ false }}" => expr!(bool false); "bool_false")]
-    // --- List literals ------------------------------------------------------
     #[test_case(b"{{ [] }}" => expr!(list); "empty_list")]
     #[test_case(b"{{ [1, 2] }}" => expr!(list expr!(int 1), expr!(int 2)); "list_of_ints")]
     #[test_case(br#"{{ ["a", "b"] }}"# => expr!(list expr!(str 5..6), expr!(str 10..11)); "list_of_strings")]
     #[test_case(b"{{ [1 , 2 , 3] }}" => expr!(list expr!(int 1), expr!(int 2), expr!(int 3)); "list_with_spaces")]
-    // --- Dot access ---------------------------------------------------------
+    #[test_case(br#"{{ [1, ["a"]] }}"# => expr!(list expr!(int 1), expr!(list expr!(str 9..10))); "nested_list")]
     #[test_case(b"{{ x.y }}" => expr!(dot expr!(var 3..4), 5..6); "simple_dot")]
     #[test_case(b"{{ x.y.z }}" => expr!(dot expr!(dot expr!(var 3..4), 5..6), 7..8); "dot_chain")]
-    // --- Index access -------------------------------------------------------
     #[test_case(b"{{ x.0 }}" => expr!(idx expr!(var 3..4), 0, 5..6); "simple_index")]
     #[test_case(b"{{ x.0.1 }}" => expr!(idx expr!(idx expr!(var 3..4), 0, 5..6), 1, 7..8); "index_chain")]
-    fn parse_one_cases(input: &[u8]) -> Expr {
-        parse_one(input)
+    fn parse_cases(input: &[u8]) -> Expr {
+        let token = token_from_input(input);
+        let nodes = parse(vec![token], input).unwrap();
+        assert_eq!(nodes.len(), 1);
+        match nodes.into_iter().next().unwrap() {
+            Node::Interpolate(e) => e,
+            _ => unreachable!("expected Interpolate"),
+        }
     }
 
-    // --- Parse errors -------------------------------------------------------
-
-    fn err(input: &[u8]) -> (ParseError, (usize, usize)) {
+    #[test_case(b"{{ }}" => matches (ParseError::EmptyInterpolation, (0, 5)); "empty_body")]
+    #[test_case(b"{{   }}" => matches (ParseError::EmptyInterpolation, (0, 7)); "empty_body_padded")]
+    #[test_case(b"{{}}" => matches (ParseError::EmptyInterpolation, (0, 4)); "empty_body_tight")]
+    #[test_case(b"{{ 99999999999999999999999 }}" => matches (ParseError::IntegerOutOfRange, (_, _)); "overflow_positive")]
+    #[test_case(b"{{ -99999999999999999999999 }}" => matches (ParseError::IntegerOutOfRange, (_, _)); "overflow_negative")]
+    #[test_case(br#"{{ "hello }}"# => matches (ParseError::UnclosedString, (3, 9)); "unclosed_string")]
+    #[test_case(b"{{ @ }}" => matches (ParseError::UnexpectedToken, (3, 1)); "unexpected_byte")]
+    #[test_case(b"{{ +7 }}" => matches (ParseError::UnexpectedToken, (3, 1)); "plus_prefix")]
+    #[test_case(b"{{ a b }}" => matches (ParseError::UnexpectedTokensAfterExpr, (5, 1)); "trailing_token")]
+    #[test_case(b"{{ - }}" => matches (ParseError::UnexpectedToken, (_, _)); "minus_alone")]
+    #[test_case(b"{{ [a, ] }}" => matches (ParseError::TrailingComma, (5, 1)); "trailing_comma_list")]
+    #[test_case(b"{{ [ }}" => matches (ParseError::UnclosedDelimiter, (_, _)); "unclosed_list")]
+    #[test_case(b"{{ x. }}" => matches (ParseError::EmptyField, (4, 1)); "empty_field")]
+    #[test_case(b"{{ x.- }}" => matches (ParseError::EmptyField, (_, _)); "field_minus_without_digits")]
+    #[test_case(b"{{ x .y }}" => matches (ParseError::UnexpectedTokensAfterExpr, (5, 1)); "space_before_dot")]
+    #[test_case(b"{{ x. y }}" => matches (ParseError::EmptyField, (4, 1)); "space_after_dot")]
+    fn parse_error_cases(input: &[u8]) -> (ParseError, (usize, usize)) {
         let token = token_from_input(input);
-        let e = parse(vec![token], input).unwrap_err();
-        let Error::Parse { err, span } = e else {
-            panic!("expected parse error, got {e:?}");
+        let Error::Parse { err, span } = parse(vec![token], input).unwrap_err() else {
+            panic!("expected parse error");
         };
         (err, (span.offset(), span.len()))
-    }
-
-    #[test_case(b"{{ }}" => matches ParseError::EmptyInterpolation; "empty_body")]
-    #[test_case(b"{{ 99999999999999999999999 }}" => matches ParseError::IntegerOutOfRange; "overflow_positive")]
-    #[test_case(b"{{ -99999999999999999999999 }}" => matches ParseError::IntegerOutOfRange; "overflow_negative")]
-    #[test_case(b"{{ \"hello }}" => matches ParseError::UnclosedString; "unclosed_string")]
-    #[test_case(b"{{ @ }}" => matches ParseError::UnexpectedToken; "unexpected_byte")]
-    #[test_case(b"{{ a b }}" => matches ParseError::UnexpectedTokensAfterExpr; "trailing_token")]
-    #[test_case(b"{{ - }}" => matches ParseError::UnexpectedToken; "minus_alone")]
-    // List literal parse errors
-    #[test_case(b"{{ [a, ] }}" => matches ParseError::TrailingComma; "trailing_comma_list")]
-    #[test_case(b"{{ [ }}" => matches ParseError::UnclosedDelimiter; "unclosed_list")]
-    #[test_case(b"{{ x. }}" => matches ParseError::EmptyField; "empty_field")]
-    #[test_case(b"{{ x.- }}" => matches ParseError::EmptyField; "field_minus_without_digits")]
-    // Postfix whitespace errors
-    #[test_case(b"{{ x .y }}" => matches ParseError::UnexpectedTokensAfterExpr; "space_before_dot")]
-    #[test_case(b"{{ x. y }}" => matches ParseError::EmptyField; "space_after_dot")]
-    fn kind_cases(input: &[u8]) -> ParseError {
-        err(input).0
-    }
-
-    #[test_case(b"{{ }}" => (0, 5); "empty_body_span")]
-    #[test_case(b"{{   }}" => (0, 7); "empty_body_span_padded")]
-    #[test_case(b"{{}}" => (0, 4); "empty_body_span_tight")]
-    #[test_case(b"{{ +7 }}" => (3, 1); "plus_prefixed_span")]
-    #[test_case(b"{{ @ }}" => (3, 1); "unexpected_byte_span")]
-    #[test_case(b"{{ a b }}" => (5, 1); "trailing_token_span")]
-    #[test_case(b"{{ \"hello }}" => (3, 9); "unclosed_string_span")]
-    #[test_case(b"{{ [a, ] }}" => (5, 1); "trailing_comma_list_span")]
-    #[test_case(b"{{ x. }}" => (4, 1); "empty_field_span")]
-    #[test_case(b"{{ x .y }}" => (5, 1); "space_before_dot_span")]
-    #[test_case(b"{{ x. y }}" => (4, 1); "space_after_dot_span")]
-    fn span_cases(input: &[u8]) -> (usize, usize) {
-        err(input).1
     }
 }

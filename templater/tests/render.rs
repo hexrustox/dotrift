@@ -2,11 +2,10 @@ mod common;
 
 use std::{collections::HashMap, io};
 
-use common::{MockRegistry, aggregate_scope, var_scope};
+use common::{MockRegistry, var_scope};
 use templater::Template;
 use test_case::test_case;
 
-/// Renders `source` with no variables.
 pub fn render(source: &[u8]) -> Vec<u8> {
     let template = Template::from_bytes(source.to_vec()).expect("parse failed");
     let mut out = Vec::new();
@@ -16,21 +15,9 @@ pub fn render(source: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Renders `source` with the aggregate variable scope.
-pub fn render_aggregate(source: &[u8]) -> Vec<u8> {
-    let template = Template::from_bytes(source.to_vec()).expect("parse failed");
-    let mut out = Vec::new();
-    template
-        .render(&mut out, &aggregate_scope(), &MockRegistry)
-        .expect("render failed");
-    out
-}
-
-// --- Plain text ----------------------------------------------------------
 #[test_case(b"hello, world\nthis is plain text" => b"hello, world\nthis is plain text".to_vec() ; "verbatim")]
 #[test_case(b"bin\x80ary\xff\xfedata\x00here" => b"bin\x80ary\xff\xfedata\x00here".to_vec() ; "non_utf8_bytes")]
 #[test_case(b"" => Vec::<u8>::new() ; "empty")]
-// --- Interpolation: literals ---------------------------------------------
 #[test_case(br#"{{ "literal" }}"# => b"literal".to_vec() ; "string_padded")]
 #[test_case(br#"{{"literal"}}"# => b"literal".to_vec() ; "string_no_padding")]
 #[test_case(br#"{{   "literal"   }}"# => b"literal".to_vec() ; "string_arbitrary_padding")]
@@ -49,7 +36,6 @@ pub fn render_aggregate(source: &[u8]) -> Vec<u8> {
 #[test_case(b"{{ 9223372036854775807 }}" => b"9223372036854775807".to_vec() ; "int_max_i64")]
 #[test_case(b"{{ true }}" => b"true".to_vec() ; "bool_true")]
 #[test_case(b"{{ false }}" => b"false".to_vec() ; "bool_false")]
-// --- Interpolation: variables --------------------------------------------
 #[test_case(b"{{ name }}" => b"world".to_vec() ; "var_string")]
 #[test_case(b"{{ count }}" => b"42".to_vec() ; "var_int")]
 #[test_case(b"{{ neg }}" => b"-5".to_vec() ; "var_negative_int")]
@@ -58,7 +44,6 @@ pub fn render_aggregate(source: &[u8]) -> Vec<u8> {
 #[test_case(b"hello {{ name }}!" => b"hello world!".to_vec() ; "var_mixed_with_text")]
 #[test_case(b"{{ count }} and {{ neg }} and {{ flag }}" => b"42 and -5 and true".to_vec() ; "var_multiple_in_sequence")]
 #[test_case(b"prefix {{   name   }} suffix" => b"prefix world suffix".to_vec() ; "var_drops_padding")]
-// --- Scanner: escape rules -----------------------------------------------
 #[test_case(br"before \{{ after" => br"before {{ after".to_vec() ; "escape_escaped_open_renders_literal_braces")]
 #[test_case(br"\{{\}}" => br"{{}}".to_vec() ; "escape_escaped_open_and_close")]
 #[test_case(br"\\{{ name }}" => br"\world".to_vec() ; "escape_two_backslashes_keep_tag_active")]
@@ -72,21 +57,18 @@ pub fn render_aggregate(source: &[u8]) -> Vec<u8> {
 #[test_case(br"\{{- name \-}}" => br"{{- name -}}".to_vec() ; "escape_escaped_tag_with_dash_modifiers")]
 #[test_case(br"\{{= name \=}}" => br"{{= name =}}".to_vec() ; "escape_escaped_tag_with_equal_modifiers")]
 #[test_case(br"\\" => br"\\".to_vec() ; "escape_even_backslashes_without_delimiter")]
-// --- Scanner: comments ---------------------------------------------------
 #[test_case(b"{# secret #}visible" => b"visible".to_vec() ; "comment_stripped")]
 #[test_case(b"before {# c #} after" => b"before  after".to_vec() ; "comment_splits_plain_text")]
 #[test_case(b"{#\n#}" => b"".to_vec() ; "comment_multiline_stripped")]
 #[test_case(br"{# foo \#} bar #}" => b"".to_vec() ; "comment_escaped_close_is_stripped")]
 #[test_case(b"visible{# c #}" => b"visible".to_vec() ; "comment_at_eof")]
 #[test_case(b"{# c #}\nvisible" => b"\nvisible".to_vec() ; "comment_at_sof_preserves_newline")]
-// --- Scanner: dash whitespace modifier -----------------------------------
 #[test_case(b"  {{- name }}" => b"world".to_vec() ; "dash_left_trims_spaces")]
 #[test_case(b"{{ name -}}  " => b"world".to_vec() ; "dash_right_trims_spaces")]
 #[test_case(b"\t{{- name }}" => b"world".to_vec() ; "dash_left_trims_tab")]
 #[test_case(b"{{ name -}}\t" => b"world".to_vec() ; "dash_right_trims_tab")]
 #[test_case(b"before\n  {{- name }}" => b"before\nworld".to_vec() ; "dash_preserves_newline_left")]
 #[test_case(b"before\n\t{{- name }}" => b"before\nworld".to_vec() ; "dash_preserves_newline_then_tab")]
-// --- Scanner: equal whitespace modifier ----------------------------------
 #[test_case(b"prefix {{= name }}" => b"world".to_vec() ; "equal_left_eats_to_line_start")]
 #[test_case(b"{{ name =}}suffix\nnext" => b"worldnext".to_vec() ; "equal_right_eats_through_newline")]
 #[test_case(b"{{ name =}} mid {{= name }}" => b"worldworld".to_vec() ; "equal_tags_share_line_delete_between")]
@@ -101,11 +83,6 @@ pub fn render_aggregate(source: &[u8]) -> Vec<u8> {
 #[test_case(br"text \\{{= name }}" => b"world".to_vec() ; "equal_left_eats_literal_backslashes")]
 #[test_case(br"\\{{= name =}}" => b"world".to_vec() ; "equal_both_sides_eat_literal_backslashes")]
 #[test_case(br"\{#= x \#}" => br"{#= x #}".to_vec() ; "equal_preserves_internal_modifier_chars")]
-fn render_cases(source: &[u8]) -> Vec<u8> {
-    render(source)
-}
-
-// --- List literals and aggregate canonical forms -------------------------
 #[test_case(b"{{ [] }}" => b"[]".to_vec() ; "empty_list")]
 #[test_case(b"{{ [1, 2] }}" => b"[1, 2]".to_vec() ; "list_of_ints")]
 #[test_case(br#"{{ ["a", "b"] }}"# => br#"["a", "b"]"#.to_vec() ; "list_of_strings")]
@@ -116,20 +93,16 @@ fn render_cases(source: &[u8]) -> Vec<u8> {
 #[test_case(b"{{ user }}" => b"{\"age\": 42, \"name\": \"ada\", \"prefs\": {\"theme\": \"dark\"}}".to_vec() ; "var_map")]
 #[test_case(b"{{ [[1], [2, 3]] }}" => b"[[1], [2, 3]]".to_vec() ; "nested_aggregate_literal")]
 #[test_case(br#"{{ ["\\", "\""] }}"# => br#"["\\", "\""]"#.to_vec() ; "string_escapes_in_list")]
-// --- Dot access and index chains ----------------------------------------
 #[test_case(b"{{ items.0 }}" => b"a".to_vec() ; "list_index")]
 #[test_case(b"{{ items.2 }}" => b"3".to_vec() ; "list_index_int")]
 #[test_case(b"{{ nested.0.1 }}" => b"2".to_vec() ; "list_index_chain")]
 #[test_case(b"{{ user.name }}" => b"ada".to_vec() ; "map_dot_access")]
 #[test_case(b"{{ user.prefs.theme }}" => b"dark".to_vec() ; "map_dot_chain")]
 #[test_case(b"{{ items.1 }} {{ user.name }}" => b"b ada".to_vec() ; "mixed_access")]
-fn aggregate_render_cases(source: &[u8]) -> Vec<u8> {
-    render_aggregate(source)
+fn render_cases(source: &[u8]) -> Vec<u8> {
+    render(source)
 }
 
-// --- Flush behavior -------------------------------------------------------
-
-/// A writer that records its bytes and how often it was flushed.
 #[derive(Default)]
 struct FlushCounter {
     bytes: Vec<u8>,

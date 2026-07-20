@@ -123,9 +123,6 @@ pub enum RenderError {
     #[error("expected list, got {got}")]
     #[diagnostic(code(templater::render::list_access_on_non_list))]
     ListAccessOnNonList { got: ValueType },
-    #[error("cannot index into a string")]
-    #[diagnostic(code(templater::render::index_access_on_string))]
-    IndexAccessOnString,
 }
 
 /// Errors returned by the host's [`FunctionRegistry`](crate::FunctionRegistry).

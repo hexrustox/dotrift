@@ -2,26 +2,18 @@ mod common;
 
 use std::collections::HashMap;
 
-use common::{MockRegistry, aggregate_scope};
-use templater::{Error, ParseError, RenderError, Template};
+use common::MockRegistry;
+use templater::{Error, ParseError, RenderError, Template, ValueType};
 use test_case::test_case;
 
-pub fn parse_err(source: &[u8]) -> (ParseError, (usize, usize)) {
-    match Template::from_bytes(source.to_vec()) {
-        Err(Error::Parse { err, span }) => (err, (span.offset(), span.len())),
-        Err(other) => panic!("expected parse error, got: {other:?}"),
-        Ok(_) => panic!("expected parse error, template parsed successfully"),
-    }
-}
+use crate::common::var_scope;
 
-// Scanner errors
 #[test_case(b"}}" => (ParseError::StrayDelimiter, (0, 2)) ; "stray_closing_delimiter")]
 #[test_case(b"\\{{}}" => (ParseError::StrayDelimiter, (3, 2)) ; "escaped_open_with_unescaped_close")]
 #[test_case(b"\\{{ }}" => (ParseError::StrayDelimiter, (4, 2)) ; "escaped_interp_open_then_close")]
 #[test_case(b"prefix \\{{ suffix }}" => (ParseError::StrayDelimiter, (18, 2)) ; "with_literal_prefix_and_suffix")]
 #[test_case(b"{#= x #}" => (ParseError::InvalidModifier, (2, 1)) ; "modifier_on_comment_open")]
 #[test_case(b"{# x =#}" => (ParseError::InvalidModifier, (5, 1)) ; "modifier_on_comment_close")]
-// Parser errors
 #[test_case(b"{{}}" => (ParseError::EmptyInterpolation, (0, 4)) ; "empty_interpolation_no_padding")]
 #[test_case(b"{{   }}" => (ParseError::EmptyInterpolation, (0, 7)) ; "empty_interpolation_with_padding")]
 #[test_case(b"{{ 99999999999999999999999 }}" => (ParseError::IntegerOutOfRange, (3, 23)) ; "integer_out_of_range_positive")]
@@ -46,37 +38,34 @@ pub fn parse_err(source: &[u8]) -> (ParseError, (usize, usize)) {
 #[test_case(b"{{ \"a\" b }}" => (ParseError::UnexpectedTokensAfterExpr, (7, 1)) ; "trailing_token_after_string")]
 #[test_case(b"{{ \"=}}" => (ParseError::UnclosedString, (3, 4)) ; "unclosed_string_with_equal_close")]
 #[test_case(b"{{\n}}" => (ParseError::EmptyInterpolation, (0, 5)) ; "newline_only_body")]
-fn parse_error_cases(source: &[u8]) -> (ParseError, (usize, usize)) {
-    parse_err(source)
+fn parse_error(source: &[u8]) -> (ParseError, (usize, usize)) {
+    match Template::from_bytes(source.to_vec()) {
+        Err(Error::Parse { err, span }) => (err, (span.offset(), span.len())),
+        _ => panic!("expected parse error"),
+    }
 }
 
-// --- Spec mismatch: reserved keywords as identifiers --------------------
-//
-// The spec says `if`, `elif`, `else`, `for`, `in`, and `end` are reserved
-// keywords and cannot be used as variable names. Today the parser treats
-// `{{ if }}` as a variable reference, so it is *not* a parse error. This
-// test documents the current behavior; it will fail once the parser is
-// updated to reject keywords as identifiers.
-
-#[test]
-fn keyword_as_identifier_is_currently_accepted() {
-    let template = Template::from_bytes(b"{{ if }}".to_vec()).expect("parse failed");
+#[test_case(b"hi {{ nope }}!" => matches (RenderError::UndefinedVariable, (6, 4)) ; "undefined_var_mid_source")]
+#[test_case(b"{{ missing }}" => matches (RenderError::UndefinedVariable, (3, 7)) ; "undefined_var_at_start_of_source")]
+#[test_case(b"{{ items.name }}" => matches (RenderError::MapAccessOnNonMap { got: ValueType::List }, (9, 4)) ; "dot_on_list")]
+#[test_case(b"{{ user.0 }}" => matches (RenderError::ListAccessOnNonList { got: ValueType::Map }, (8, 1)) ; "index_on_map")]
+#[test_case(b"{{ user.name.0 }}" => matches (RenderError::ListAccessOnNonList { got: ValueType::Str }, (13, 1)) ; "index_on_string")]
+#[test_case(b"{{ user.name.field }}" => matches (RenderError::MapAccessOnNonMap { got: ValueType::Str }, (13, 5)) ; "dot_on_string")]
+#[test_case(b"{{ items.-1 }}" => matches (RenderError::NegativeListIndex { idx: -1 }, (9, 2)) ; "negative_index")]
+#[test_case(b"{{ items.5 }}" => matches (RenderError::ListIndexOutOfBounds { idx: 5, len: 3 }, (9, 1)) ; "index_out_of_bounds")]
+#[test_case(b"{{ user.missing }}" => matches (RenderError::MapKeyNotFound { key }, (8, 7)) if key == "missing" ; "map_key_not_found")]
+fn render_error(source: &[u8]) -> (RenderError, (usize, usize)) {
+    let template = Template::from_bytes(source.to_vec()).expect("parse failed");
     let mut out = Vec::new();
     let e = template
-        .render(&mut out, &HashMap::new(), &MockRegistry)
+        .render(&mut out, &var_scope(), &MockRegistry)
         .unwrap_err();
-    let Error::Render {
-        err: RenderError::UndefinedVariable,
-        ..
-    } = e
-    else {
-        panic!("expected undefined variable because `if` is parsed as a variable, got: {e:?}");
+    let Error::Render { err, span } = e else {
+        panic!("expected render error");
     };
+    (err, (span.offset(), span.len()))
 }
 
-// --- Render errors ------------------------------------------------------
-
-/// A writer that always fails on `write`, used to verify IO errors propagate.
 struct FailingWriter;
 
 impl std::io::Write for FailingWriter {
@@ -96,55 +85,4 @@ fn render_propagates_io_error() {
         .render(&mut FailingWriter, &HashMap::new(), &MockRegistry)
         .unwrap_err();
     assert!(matches!(e, Error::Io(_)), "expected IO error, got: {e:?}");
-}
-
-#[test_case(b"hi {{ nope }}!" => (6, 4) ; "undefined_var_mid_source")]
-#[test_case(b"{{ missing }}" => (3, 7) ; "undefined_var_at_start_of_source")]
-fn undefined_variable_carries_name_span(source: &[u8]) -> (usize, usize) {
-    let template = Template::from_bytes(source.to_vec()).expect("parse failed");
-    let mut out = Vec::new();
-    let e = template
-        .render(&mut out, &HashMap::new(), &MockRegistry)
-        .unwrap_err();
-    let Error::Render { err: r, span } = e else {
-        panic!("expected render error, got: {e:?}");
-    };
-    assert!(matches!(r, RenderError::UndefinedVariable));
-    (span.offset(), span.len())
-}
-
-// --- Aggregate/dot/index render errors ------------------------------------
-
-fn render_err(source: &[u8]) -> (RenderError, (usize, usize)) {
-    let template = Template::from_bytes(source.to_vec()).expect("parse failed");
-    let mut out = Vec::new();
-    let e = template
-        .render(&mut out, &aggregate_scope(), &MockRegistry)
-        .unwrap_err();
-    let Error::Render { err, span } = e else {
-        panic!("expected render error, got: {e:?}");
-    };
-    (err, (span.offset(), span.len()))
-}
-
-#[test_case(b"{{ items.name }}" => matches RenderError::MapAccessOnNonMap { .. } ; "dot_on_list")]
-#[test_case(b"{{ user.0 }}" => matches RenderError::ListAccessOnNonList { .. } ; "index_on_map")]
-#[test_case(b"{{ user.name.0 }}" => matches RenderError::IndexAccessOnString ; "index_on_string")]
-#[test_case(b"{{ user.name.field }}" => matches RenderError::IndexAccessOnString ; "dot_on_string")]
-#[test_case(b"{{ items.-1 }}" => matches RenderError::NegativeListIndex { .. } ; "negative_index")]
-#[test_case(b"{{ items.5 }}" => matches RenderError::ListIndexOutOfBounds { .. } ; "index_out_of_bounds")]
-#[test_case(b"{{ user.missing }}" => matches RenderError::MapKeyNotFound { .. } ; "map_key_not_found")]
-fn aggregate_error_kind(source: &[u8]) -> RenderError {
-    render_err(source).0
-}
-
-#[test_case(b"{{ items.name }}" => (9, 4) ; "dot_on_list_span")]
-#[test_case(b"{{ user.0 }}" => (8, 1) ; "index_on_map_span")]
-#[test_case(b"{{ user.name.0 }}" => (13, 1) ; "index_on_string_span")]
-#[test_case(b"{{ user.name.field }}" => (13, 5) ; "dot_on_string_span")]
-#[test_case(b"{{ items.-1 }}" => (9, 2) ; "negative_index_span")]
-#[test_case(b"{{ items.5 }}" => (9, 1) ; "index_out_of_bounds_span")]
-#[test_case(b"{{ user.missing }}" => (8, 7) ; "map_key_not_found_span")]
-fn aggregate_error_span(source: &[u8]) -> (usize, usize) {
-    render_err(source).1
 }

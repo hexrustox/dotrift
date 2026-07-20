@@ -99,12 +99,6 @@ fn eval(expr: &Expr, src: &[u8], frame: &Frame<'_>) -> Result<Value> {
         Expr::Dot { left, field } => {
             let receiver = eval(left, src, frame)?;
             match &receiver {
-                Value::Str(_) => {
-                    return Err(Error::render(
-                        RenderError::IndexAccessOnString,
-                        SourceSpan::from((field.start, field.end - field.start)),
-                    ));
-                }
                 Value::Map(map) => {
                     let key = std::str::from_utf8(&src[field.clone()])
                         .expect("field identifier is ascii");
@@ -144,9 +138,6 @@ fn eval(expr: &Expr, src: &[u8], frame: &Frame<'_>) -> Result<Value> {
                 ));
             }
             match receiver {
-                Value::Str(_) => {
-                    return Err(Error::render(RenderError::IndexAccessOnString, span));
-                }
                 Value::List(list) => {
                     let index = *idx as usize;
                     if index >= list.len() {
