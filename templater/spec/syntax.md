@@ -313,6 +313,7 @@ Errors are either parse-time or render-time.
 - Integer literal overflowing i64
 - Reserved keyword used as an identifier (variable or function name)
 - Trailing comma in a list literal or function call argument list
+- Unclosed `(` in a function call (e.g. `f(a`)
 - `+`-prefixed integer literal (e.g. `+7`)
 - Orphan `{% end %}` (no matching `{% if %}` or `{% for %}` to close)
 - Unclosed `{% if %}` or `{% for %}` (missing `{% end %}`)

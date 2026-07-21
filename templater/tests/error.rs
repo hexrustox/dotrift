@@ -38,6 +38,10 @@ use crate::common::var_scope;
 #[test_case(b"{{ \"a\" b }}" => (ParseError::UnexpectedTokensAfterExpr, (7, 1)) ; "trailing_token_after_string")]
 #[test_case(b"{{ \"=}}" => (ParseError::UnclosedString, (3, 4)) ; "unclosed_string_with_equal_close")]
 #[test_case(b"{{\n}}" => (ParseError::EmptyInterpolation, (0, 5)) ; "newline_only_body")]
+#[test_case(b"{{ f( }}" => (ParseError::UnclosedCallParen, (4, 1)) ; "unclosed_call_paren_empty")]
+#[test_case(b"{{ f(a }}" => (ParseError::UnclosedCallParen, (4, 1)) ; "unclosed_call_paren_after_arg")]
+#[test_case(b"{{ f(a, }}" => (ParseError::UnclosedCallParen, (4, 1)) ; "unclosed_call_paren_after_comma")]
+#[test_case(b"{{ f(g() }}" => (ParseError::UnclosedCallParen, (4, 1)) ; "unclosed_call_paren_nested")]
 fn parse_error(source: &[u8]) -> (ParseError, (usize, usize)) {
     match Template::from_bytes(source.to_vec()) {
         Err(Error::Parse { err, span }) => (err, (span.offset(), span.len())),

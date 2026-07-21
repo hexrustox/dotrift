@@ -79,6 +79,9 @@ pub enum ParseError {
     #[error("unclosed delimiter")]
     #[diagnostic(code(templater::parse::unclosed_delimiter))]
     UnclosedDelimiter,
+    #[error("unclosed '(' in function call")]
+    #[diagnostic(code(templater::parse::unclosed_call_paren))]
+    UnclosedCallParen,
     #[error("unexpected token")]
     #[diagnostic(code(templater::parse::unexpected_token))]
     UnexpectedToken,

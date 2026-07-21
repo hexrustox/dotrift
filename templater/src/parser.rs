@@ -389,8 +389,8 @@ impl<'s> ParserState<'s> {
             let bytes = self.bytes();
             if self.pos >= bytes.len() {
                 return Err(Error::parse(
-                    ParseError::UnclosedDelimiter,
-                    self.span(self.pos.saturating_sub(1)..self.pos),
+                    ParseError::UnclosedCallParen,
+                    self.span(lparen..lparen + 1),
                 ));
             }
             if bytes[self.pos] == b')' {
@@ -404,8 +404,8 @@ impl<'s> ParserState<'s> {
             let bytes = self.bytes();
             if self.pos >= bytes.len() {
                 return Err(Error::parse(
-                    ParseError::UnclosedDelimiter,
-                    self.span(self.pos.saturating_sub(1)..self.pos),
+                    ParseError::UnclosedCallParen,
+                    self.span(lparen..lparen + 1),
                 ));
             }
             match bytes[self.pos] {
@@ -647,7 +647,11 @@ mod tests {
     #[test_case(b"{{ [a}}" => matches (ParseError::UnclosedDelimiter, (_, _)); "unclosed_list_")]
     #[test_case(b"{{ [a,}}" => matches (ParseError::UnclosedDelimiter, (_, _)); "unclosed_list_after_comma")]
     #[test_case(b"{{ [a b] }}" => matches (ParseError::UnexpectedToken, (_, _)); "unexpected_token_after_element")]
+    #[test_case(b"{{ f( }}" => matches (ParseError::UnclosedCallParen, (4, 1)); "unclosed_call_paren_empty")]
+    #[test_case(b"{{ f(a }}" => matches (ParseError::UnclosedCallParen, (4, 1)); "unclosed_call_paren_after_arg")]
+    #[test_case(b"{{ f(a, }}" => matches (ParseError::UnclosedCallParen, (4, 1)); "unclosed_call_paren_after_comma")]
     #[test_case(b"{{ f(a, ) }}" => matches (ParseError::TrailingComma, (6, 1)); "trailing_comma_call")]
+    #[test_case(b"{{ f(g() }}" => matches (ParseError::UnclosedCallParen, (4, 1)); "unclosed_call_paren_nested")]
     #[test_case(b"{{ if() }}" => matches (ParseError::ReservedKeyword { keyword }, (3, 2)) if keyword == "if"; "keyword_function_name_if")]
     #[test_case(b"{{ for() }}" => matches (ParseError::ReservedKeyword { keyword }, (3, 3)) if keyword == "for"; "keyword_function_name_for")]
     #[test_case(b"{{ end() }}" => matches (ParseError::ReservedKeyword { keyword }, (3, 3)) if keyword == "end"; "keyword_function_name_end")]
