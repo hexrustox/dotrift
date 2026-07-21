@@ -17,17 +17,24 @@ pub(crate) enum Expr {
     /// `<identifier>` — `name.0..name.1` is the identifier's byte span,
     /// resolved against the active scope at render time.
     Var(Range<usize>),
-    /// `"..."` — the range covers the literal's interior (between the
-    /// opening and closing quotes, exclusive).
-    StrLit(Range<usize>),
+    /// `"..."` — `interior` is between the quotes; `span` covers the full
+    /// literal including quotes (used for error attribution).
+    StrLit {
+        interior: Range<usize>,
+        span: Range<usize>,
+    },
     /// `<integer>` — decoded at parse time into `i64`. `range` is the
     /// literal's byte span for error attribution.
     IntLit(i64, Range<usize>),
     /// `true` | `false` — decoded at parse time into `bool`. `range` is the
     /// literal's byte span for error attribution.
     BoolLit(bool, Range<usize>),
-    /// `[ expr, expr, ... ]` — each element is evaluated via `eval`.
-    List(Vec<Expr>),
+    /// `[ expr, expr, ... ]` — `elements` are evaluated via `eval`; `span`
+    /// covers the full list literal including brackets.
+    List {
+        elements: Vec<Expr>,
+        span: Range<usize>,
+    },
     /// `left.field` — Map key lookup by identifier; `field` is the
     /// identifier's byte span.
     Dot {
@@ -55,12 +62,29 @@ impl PartialEq for Expr {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Expr::Var(a), Expr::Var(b)) => a == b,
-            (Expr::StrLit(a), Expr::StrLit(b)) => a == b,
-            // Literal source spans are structural (used for error reporting),
-            // not part of the value, so they are ignored for equality.
+            // Structural source spans are ignored for equality.
+            (
+                Expr::StrLit {
+                    interior: a,
+                    span: _,
+                },
+                Expr::StrLit {
+                    interior: b,
+                    span: _,
+                },
+            ) => a == b,
             (Expr::IntLit(a, _), Expr::IntLit(b, _)) => a == b,
             (Expr::BoolLit(a, _), Expr::BoolLit(b, _)) => a == b,
-            (Expr::List(a), Expr::List(b)) => a == b,
+            (
+                Expr::List {
+                    elements: a,
+                    span: _,
+                },
+                Expr::List {
+                    elements: b,
+                    span: _,
+                },
+            ) => a == b,
             (
                 Expr::Dot {
                     left: l1,
@@ -106,27 +130,13 @@ impl Expr {
     /// The full byte span of the expression in the original source.
     pub(crate) fn span(&self) -> Range<usize> {
         match self {
-            Expr::Var(range)
-            | Expr::StrLit(range)
-            | Expr::FnCall {
-                name: range,
-                args: _,
-                paren: _,
-            } => range.clone(),
+            Expr::Var(range) => range.clone(),
+            Expr::StrLit { span, .. } => span.clone(),
             Expr::IntLit(_, range) | Expr::BoolLit(_, range) => range.clone(),
-            Expr::List(elements) => {
-                if elements.is_empty() {
-                    0..0
-                } else {
-                    elements.first().unwrap().span().start..elements.last().unwrap().span().end
-                }
-            }
-            Expr::Dot { left: _, field } => field.clone(),
-            Expr::Index {
-                left: _,
-                idx: _,
-                idx_span,
-            } => idx_span.clone(),
+            Expr::List { span, .. } => span.clone(),
+            Expr::Dot { left, field } => left.span().start..field.end,
+            Expr::Index { left, idx_span, .. } => left.span().start..idx_span.end,
+            Expr::FnCall { name, paren, .. } => name.start..paren.end,
         }
     }
 }

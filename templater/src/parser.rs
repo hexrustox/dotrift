@@ -304,7 +304,8 @@ impl<'s> ParserState<'s> {
                 b'"' => {
                     let interior = body_range(&self.body, start + 1..self.pos);
                     self.pos += 1;
-                    return Ok(Expr::StrLit(interior));
+                    let span = body_range(&self.body, start..self.pos);
+                    return Ok(Expr::StrLit { interior, span });
                 }
                 _ => self.pos += 1,
             }
@@ -442,6 +443,7 @@ impl<'s> ParserState<'s> {
     fn parse_list_literal(&mut self) -> std::result::Result<Expr, Error> {
         let bytes = self.bytes();
         debug_assert_eq!(bytes[self.pos], b'[');
+        let start = self.pos;
         self.pos += 1; // consume '['
 
         let mut elements = Vec::new();
@@ -497,7 +499,8 @@ impl<'s> ParserState<'s> {
             }
         }
 
-        Ok(Expr::List(elements))
+        let span = body_range(&self.body, start..self.pos);
+        Ok(Expr::List { elements, span })
     }
 }
 
@@ -527,7 +530,7 @@ mod tests {
             Expr::Var($r)
         };
         (str $r:expr) => {
-            Expr::StrLit($r)
+            Expr::StrLit { interior: $r, span: $r }
         };
         (int $n:expr) => {
             Expr::IntLit($n, 0..0)
@@ -536,7 +539,7 @@ mod tests {
             Expr::BoolLit($b, 0..0)
         };
         (list $($e:expr),* $(,)?) => {
-            Expr::List(vec![$($e),*])
+            Expr::List { elements: vec![$($e),*], span: 0..0 }
         };
         (dot $left:expr, $field:expr) => {
             Expr::Dot {

@@ -37,8 +37,8 @@ impl Template {
                     // evaluated to an owned `Value` and written via
                     // `write_top`.
                     match expr {
-                        Expr::StrLit(range) => {
-                            write_string_literal(self.src.bytes(), range.clone(), writer)?;
+                        Expr::StrLit { interior, .. } => {
+                            write_string_literal(self.src.bytes(), interior.clone(), writer)?;
                         }
                         _ => {
                             let value = eval(expr, self.src.bytes(), frame, functions)?;
@@ -74,9 +74,9 @@ fn eval(
     Ok(match expr {
         Expr::IntLit(n, _) => Value::Int(*n),
         Expr::BoolLit(b, _) => Value::Bool(*b),
-        Expr::StrLit(range) => {
+        Expr::StrLit { interior, .. } => {
             let mut out = Vec::new();
-            write_string_literal(src, range.clone(), &mut out)?;
+            write_string_literal(src, interior.clone(), &mut out)?;
             Value::Str(String::from_utf8(out).expect("decoded bytes are valid UTF-8"))
         }
         Expr::Var(range) => {
@@ -94,7 +94,7 @@ fn eval(
                 }
             }
         }
-        Expr::List(elements) => {
+        Expr::List { elements, .. } => {
             let mut values = Vec::with_capacity(elements.len());
             for element in elements {
                 values.push(eval(element, src, frame, functions)?);

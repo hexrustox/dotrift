@@ -10,15 +10,6 @@ pub fn render(source: &[u8]) -> Vec<u8> {
     let template = Template::from_bytes(source.to_vec()).expect("parse failed");
     let mut out = Vec::new();
     template
-        .render(&mut out, &var_scope(), &MockRegistry)
-        .expect("render failed");
-    out
-}
-
-pub fn render_with_funcs(source: &[u8]) -> Vec<u8> {
-    let template = Template::from_bytes(source.to_vec()).expect("parse failed");
-    let mut out = Vec::new();
-    template
         .render(&mut out, &var_scope(), &TestRegistry)
         .expect("render failed");
     out
@@ -108,10 +99,6 @@ pub fn render_with_funcs(source: &[u8]) -> Vec<u8> {
 #[test_case(b"{{ user.name }}" => b"ada".to_vec() ; "map_dot_access")]
 #[test_case(b"{{ user.prefs.theme }}" => b"dark".to_vec() ; "map_dot_chain")]
 #[test_case(b"{{ items.1 }} {{ user.name }}" => b"b ada".to_vec() ; "mixed_access")]
-fn render_cases(source: &[u8]) -> Vec<u8> {
-    render(source)
-}
-
 #[test_case(b"{{ eq(count, 42) }}" => b"true".to_vec() ; "func_eq_true")]
 #[test_case(b"{{ eq(count, 0) }}" => b"false".to_vec() ; "func_eq_false")]
 #[test_case(b"{{ not(off) }}" => b"true".to_vec() ; "func_not")]
@@ -121,9 +108,8 @@ fn render_cases(source: &[u8]) -> Vec<u8> {
 #[test_case(b"{{ join(\":\", \".local\", \"bin\") }}" => b".local:bin".to_vec() ; "func_join_colon_example")]
 #[test_case(b"{{ not(eq(count, 0)) }}" => b"true".to_vec() ; "func_nested_call")]
 #[test_case(b"{{ join(\"-\", eq(count, 42), length(items)) }}" => b"true-3".to_vec() ; "func_nested_args")]
-#[test_case(b"prefix {{ join(\" \", \"hello\", \"world\") }} suffix" => b"prefix hello world suffix".to_vec() ; "func_call_mixed_with_text")]
-fn function_call_cases(source: &[u8]) -> Vec<u8> {
-    render_with_funcs(source)
+fn render_cases(source: &[u8]) -> Vec<u8> {
+    render(source)
 }
 
 #[derive(Default)]

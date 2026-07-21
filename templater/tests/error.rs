@@ -73,7 +73,13 @@ fn render_error(source: &[u8]) -> (RenderError, (usize, usize)) {
 #[test_case(b"{{ missing() }}" => matches (FuncError::Undefined { name }, (3, 7)) if name == "missing" ; "undefined_function")]
 #[test_case(b"{{ not() }}" => matches (FuncError::ArgCount { expected: 1, got: 0 }, (6, 2)) ; "arg_count_zero_args")]
 #[test_case(b"{{ length(items, items) }}" => matches (FuncError::ArgCount { expected: 1, got: 2 }, (10, 12)) ; "arg_count_too_many")]
-#[test_case(b"{{ not(1) }}" => matches (FuncError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Int, arg_index: 0 }, (7, 1)) ; "type_mismatch_arg")]
+#[test_case(b"{{ not(1) }}" => matches (FuncError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Int, arg_index: 0 }, (7, 1)) ; "type_mismatch_arg1")]
+#[test_case(br#"{{ not(" ") }}"# => matches (FuncError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Str, arg_index: 0 }, (7, 3)) ; "type_mismatch_arg2")]
+#[test_case(br#"{{ not(length(items)) }}"# => matches (FuncError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Int, arg_index: 0 }, (7, 13)) ; "type_mismatch_arg3")]
+#[test_case(b"{{ not([1]) }}" => matches (FuncError::TypeMismatch { expected: ValueType::Bool, got: ValueType::List, arg_index: 0 }, (7, 3)) ; "type_mismatch_arg4")]
+#[test_case(b"{{ not([ 1, 2 ]) }}" => matches (FuncError::TypeMismatch { expected: ValueType::Bool, got: ValueType::List, arg_index: 0 }, (7, 8)) ; "type_mismatch_arg7")]
+#[test_case(b"{{ not(user.name) }}" => matches (FuncError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Str, arg_index: 0 }, (7, 9)) ; "type_mismatch_arg5")]
+#[test_case(b"{{ not(items.0) }}" => matches (FuncError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Str, arg_index: 0 }, (7, 7)) ; "type_mismatch_arg6")]
 fn func_error(source: &[u8]) -> (FuncError, (usize, usize)) {
     let template = Template::from_bytes(source.to_vec()).expect("parse failed");
     let mut out = Vec::new();
