@@ -753,10 +753,7 @@ mod tests {
                 assert_eq!(span.offset(), prefix.len());
                 assert_eq!(span.len(), 2);
             }
-            (_, _) => panic!(
-                "expected {error:?} for {:?}, got {err:?}",
-                String::from_utf8_lossy(&input)
-            ),
+            (_, _) => panic!("expected {error:?}",),
         }
     }
 }

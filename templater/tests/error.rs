@@ -45,7 +45,7 @@ fn parse_error(source: &[u8]) -> (ParseError, (usize, usize)) {
     }
 }
 
-#[test_case(b"hi {{ nope }}!" => matches (RenderError::UndefinedVariable, (6, 4)) ; "undefined_var_mid_source")]
+#[test_case(b"{{ nope }}!" => matches (RenderError::UndefinedVariable, (3, 4)) ; "undefined_var_mid_source")]
 #[test_case(b"{{ missing }}" => matches (RenderError::UndefinedVariable, (3, 7)) ; "undefined_var_at_start_of_source")]
 #[test_case(b"{{ items.name }}" => matches (RenderError::MapAccessOnNonMap { got: ValueType::List }, (9, 4)) ; "dot_on_list")]
 #[test_case(b"{{ user.0 }}" => matches (RenderError::ListAccessOnNonList { got: ValueType::Map }, (8, 1)) ; "index_on_map")]
@@ -54,6 +54,10 @@ fn parse_error(source: &[u8]) -> (ParseError, (usize, usize)) {
 #[test_case(b"{{ items.-1 }}" => matches (RenderError::NegativeListIndex { idx: -1 }, (9, 2)) ; "negative_index")]
 #[test_case(b"{{ items.5 }}" => matches (RenderError::ListIndexOutOfBounds { idx: 5, len: 3 }, (9, 1)) ; "index_out_of_bounds")]
 #[test_case(b"{{ user.missing }}" => matches (RenderError::MapKeyNotFound { key }, (8, 7)) if key == "missing" ; "map_key_not_found")]
+#[test_case(b"{{ count.0 }}" => matches (RenderError::ListAccessOnNonList { got: ValueType::Int }, (9, 1)) ; "index_on_int")]
+#[test_case(b"{{ flag.0 }}" => matches (RenderError::ListAccessOnNonList { got: ValueType::Bool }, (8, 1)) ; "index_on_bool")]
+#[test_case(b"{{ count.name }}" => matches (RenderError::MapAccessOnNonMap { got: ValueType::Int }, (9, 4)) ; "dot_on_int")]
+#[test_case(b"{{ flag.name }}" => matches (RenderError::MapAccessOnNonMap { got: ValueType::Bool }, (8, 4)) ; "dot_on_bool")]
 fn render_error(source: &[u8]) -> (RenderError, (usize, usize)) {
     let template = Template::from_bytes(source.to_vec()).expect("parse failed");
     let mut out = Vec::new();
@@ -80,9 +84,30 @@ impl std::io::Write for FailingWriter {
 
 #[test]
 fn render_propagates_io_error() {
-    let template = Template::from_bytes(b"hello {{ name }}!".to_vec()).expect("parse failed");
+    let template = Template::from_bytes(b"hello".to_vec()).expect("parse failed");
     let e = template
         .render(&mut FailingWriter, &HashMap::new(), &MockRegistry)
+        .unwrap_err();
+    assert!(matches!(e, Error::Io(_)), "expected IO error, got: {e:?}");
+}
+
+struct FlushFailingWriter;
+
+impl std::io::Write for FlushFailingWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Err(std::io::Error::other("flush failure"))
+    }
+}
+
+#[test]
+fn render_propagates_flush_error() {
+    let template = Template::from_bytes(b"".to_vec()).expect("parse failed");
+    let e = template
+        .render(&mut FlushFailingWriter, &var_scope(), &MockRegistry)
         .unwrap_err();
     assert!(matches!(e, Error::Io(_)), "expected IO error, got: {e:?}");
 }

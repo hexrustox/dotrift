@@ -178,13 +178,6 @@ impl<'s> ParserState<'s> {
     fn parse_primary(&mut self) -> std::result::Result<Expr, Error> {
         self.skip_ws();
         let bytes = self.bytes();
-        if self.pos >= bytes.len() {
-            return Err(Error::parse(
-                ParseError::UnexpectedToken,
-                self.span(self.pos..self.pos + 1),
-            ));
-        }
-
         match bytes[self.pos] {
             b'"' => self.parse_string_literal(),
             b'-' | b'0'..=b'9' => self.parse_integer_literal(),
@@ -529,6 +522,9 @@ mod tests {
     #[test_case(b"{{ x.- }}" => matches (ParseError::EmptyField, (_, _)); "field_minus_without_digits")]
     #[test_case(b"{{ x .y }}" => matches (ParseError::UnexpectedTokensAfterExpr, (5, 1)); "space_before_dot")]
     #[test_case(b"{{ x. y }}" => matches (ParseError::EmptyField, (4, 1)); "space_after_dot")]
+    #[test_case(b"{{ [a}}" => matches (ParseError::UnclosedDelimiter, (_, _)); "unclosed_list_")]
+    #[test_case(b"{{ [a,}}" => matches (ParseError::UnclosedDelimiter, (_, _)); "unclosed_list_after_comma")]
+    #[test_case(b"{{ [a b] }}" => matches (ParseError::UnexpectedToken, (_, _)); "unexpected_token_after_element")]
     fn parse_error_cases(input: &[u8]) -> (ParseError, (usize, usize)) {
         let token = token_from_input(input);
         let Error::Parse { err, span } = parse(vec![token], input).unwrap_err() else {
