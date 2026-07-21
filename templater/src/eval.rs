@@ -101,7 +101,11 @@ fn eval(
             }
             Value::List(values)
         }
-        Expr::FnCall { name, args, paren } => {
+        Expr::FnCall {
+            name,
+            args,
+            paren: paren_span,
+        } => {
             let name_str = std::str::from_utf8(&src[name.clone()]).expect("identifier is ascii");
             let mut values = Vec::with_capacity(args.len());
             for arg in args {
@@ -111,7 +115,7 @@ fn eval(
             match functions.call(name_str, &values) {
                 Ok(value) => value,
                 Err(err) => {
-                    let span = func_error_span(&err, args, name, paren);
+                    let span = func_error_span(&err, args, name, paren_span);
                     return Err(Error::func(err, span));
                 }
             }
@@ -187,19 +191,19 @@ fn eval(
 /// Computes the source span for a function error per the spec:
 /// - `Undefined`: the function name.
 /// - `ArgCount`: all arguments (first arg start → last arg end); for zero
-///   args, the function name.
+///   args, the empty parenthesized argument list `()`.
 /// - `TypeMismatch`: the offending argument.
 fn func_error_span(
     err: &FuncError,
     args: &[Expr],
     name: &std::ops::Range<usize>,
-    paren: &std::ops::Range<usize>,
+    paren_span: &std::ops::Range<usize>,
 ) -> SourceSpan {
     match err {
         FuncError::Undefined { .. } => source_span(name.clone()),
         FuncError::ArgCount { .. } => {
             if args.is_empty() {
-                source_span(paren.clone())
+                source_span(paren_span.clone())
             } else {
                 source_span(args.first().unwrap().span().start..args.last().unwrap().span().end)
             }
