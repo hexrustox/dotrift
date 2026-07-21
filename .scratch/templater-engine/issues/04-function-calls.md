@@ -4,13 +4,13 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `Expr::FnCall { name: Range<usize>, args: Vec<Expr> }` parses; nested calls supported; zero-arg calls supported.
-- [ ] Parser rejects trailing commas in argument lists and reserved keywords as function names.
-- [ ] `FunctionRegistry::call(&self, name: &str, args: &[Value]) -> Result<Value, FuncError>` is the host trait; name extracted via `std::str::from_utf8` (parser guarantees ASCII identifier grammar).
-- [ ] Eval builds `Vec<Value>` per call via `eval` per arg; passes `&args` to the registry; returns the owned `Value` for further interpolation or nesting.
-- [ ] `FuncError` variants (`Undefined`, `ArgCount`, `TypeMismatch`) defined; lifted to `Error::Func` at the call boundary attributing `FnCall.name` byte span.
-- [ ] `tests/common/mod.rs` lands `MockRegistry` (always `Undefined`) and `TestRegistry` (`eq`, `not`, `length`, `join`) for use by this and later tickets.
-- [ ] End-to-end tests in `templater/tests/render.rs` cover happy-path nested calls; error tests in `templater/tests/error.rs` cover undefined function, wrong arg count, type mismatch with `matches!` + byte span equality.
-- [ ] `cargo test -p templater`, `cargo fmt`, `cargo clippy -p templater` pass.
+- [x] `Expr::FnCall { name: Range<usize>, args: Vec<Expr> }` parses; nested calls supported; zero-arg calls supported.
+- [x] Parser rejects trailing commas in argument lists and reserved keywords as function names.
+- [x] `FunctionRegistry::call(&self, name: &str, args: &[Value]) -> Result<Value, FuncError>` is the host trait; name extracted via `std::str::from_utf8` (parser guarantees ASCII identifier grammar).
+- [x] Eval builds `Vec<Value>` per call via `eval` per arg; passes `&args` to the registry; returns the owned `Value` for further interpolation or nesting.
+- [x] `FuncError` variants (`Undefined`, `ArgCount`, `TypeMismatch`) defined; lifted to `Error::Func` at the call boundary attributing `FnCall.name` byte span.
+- [x] `tests/common/mod.rs` lands `MockRegistry` (always `Undefined`) and `TestRegistry` (`eq`, `not`, `length`, `join`) for use by this and later tickets.
+- [x] End-to-end tests in `templater/tests/render.rs` cover happy-path nested calls; error tests in `templater/tests/error.rs` cover undefined function, wrong arg count, type mismatch with `matches!` + byte span equality.
+- [x] `cargo test -p templater`, `cargo fmt`, `cargo clippy -p templater` pass.

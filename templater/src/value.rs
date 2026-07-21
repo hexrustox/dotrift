@@ -39,8 +39,17 @@ impl std::fmt::Display for ValueType {
 }
 
 impl Value {
+    /// Renders this value using its top-level interpolation form.
+    pub fn render(&self) -> String {
+        let mut buf = Vec::new();
+        self.write_top(&mut buf)
+            .expect("writing to an in-memory buffer never fails");
+        // write_top only emits valid UTF-8 for Str; non-Str are ASCII.
+        String::from_utf8(buf).expect("rendered value is valid UTF-8")
+    }
+
     /// The runtime type of this value.
-    pub(crate) fn value_type(&self) -> ValueType {
+    pub fn value_type(&self) -> ValueType {
         match self {
             Value::Str(_) => ValueType::Str,
             Value::Int(_) => ValueType::Int,

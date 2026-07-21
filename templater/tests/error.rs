@@ -2,8 +2,8 @@ mod common;
 
 use std::collections::HashMap;
 
-use common::MockRegistry;
-use templater::{Error, ParseError, RenderError, Template, ValueType};
+use common::{MockRegistry, TestRegistry};
+use templater::{Error, FuncError, ParseError, RenderError, Template, ValueType};
 use test_case::test_case;
 
 use crate::common::var_scope;
@@ -66,6 +66,22 @@ fn render_error(source: &[u8]) -> (RenderError, (usize, usize)) {
         .unwrap_err();
     let Error::Render { err, span } = e else {
         panic!("expected render error");
+    };
+    (err, (span.offset(), span.len()))
+}
+
+#[test_case(b"{{ missing() }}" => matches (FuncError::Undefined { name }, (3, 7)) if name == "missing" ; "undefined_function")]
+#[test_case(b"{{ not() }}" => matches (FuncError::ArgCount { expected: 1, got: 0 }, (6, 2)) ; "arg_count_zero_args")]
+#[test_case(b"{{ length(items, items) }}" => matches (FuncError::ArgCount { expected: 1, got: 2 }, (10, 12)) ; "arg_count_too_many")]
+#[test_case(b"{{ not(1) }}" => matches (FuncError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Int, arg_index: 0 }, (7, 1)) ; "type_mismatch_arg")]
+fn func_error(source: &[u8]) -> (FuncError, (usize, usize)) {
+    let template = Template::from_bytes(source.to_vec()).expect("parse failed");
+    let mut out = Vec::new();
+    let e = template
+        .render(&mut out, &var_scope(), &TestRegistry)
+        .unwrap_err();
+    let Error::Func { err, span } = e else {
+        panic!("expected func error");
     };
     (err, (span.offset(), span.len()))
 }

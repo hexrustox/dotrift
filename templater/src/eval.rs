@@ -5,7 +5,9 @@ use miette::SourceSpan;
 use crate::{
     Template, Value,
     ast::{Expr, Node},
-    error::{Error, RenderError, Result},
+    error::{Error, FuncError, RenderError, Result},
+    function::FunctionRegistry,
+    util::source_span,
 };
 
 /// A binding layer in the scope stack walked by variable resolution. This
@@ -24,6 +26,7 @@ impl Template {
         nodes: &[Node],
         writer: &mut W,
         frame: &Frame<'_>,
+        functions: &dyn FunctionRegistry,
     ) -> Result<()> {
         for node in nodes {
             match node {
@@ -32,16 +35,13 @@ impl Template {
                     // String literals escape-walk directly into the writer
                     // (zero allocation, byte-preserved). All other exprs are
                     // evaluated to an owned `Value` and written via
-                    // `write_top`. When function calls (ticket 04) can pass
-                    // a string literal as an argument, `eval` will need to
-                    // grow a `Value::Str` path for StrLit; this slice's
-                    // shapes don't exercise that.
+                    // `write_top`.
                     match expr {
                         Expr::StrLit(range) => {
                             write_string_literal(self.src.bytes(), range.clone(), writer)?;
                         }
                         _ => {
-                            let value = eval(expr, self.src.bytes(), frame)?;
+                            let value = eval(expr, self.src.bytes(), frame, functions)?;
                             value.write_top(writer)?;
                         }
                     }
@@ -65,10 +65,15 @@ fn lookup<'v>(name: &str, frame: &'v Frame<'v>) -> Option<Cow<'v, Value>> {
 /// path clones the underlying value out of the borrowed scope (`StrLit` at
 /// top-level interpolation is handled separately in `eval_body` for the
 /// zero-allocation fast path, but nested string literals evaluate here).
-fn eval(expr: &Expr, src: &[u8], frame: &Frame<'_>) -> Result<Value> {
+fn eval(
+    expr: &Expr,
+    src: &[u8],
+    frame: &Frame<'_>,
+    functions: &dyn FunctionRegistry,
+) -> Result<Value> {
     Ok(match expr {
-        Expr::IntLit(n) => Value::Int(*n),
-        Expr::BoolLit(b) => Value::Bool(*b),
+        Expr::IntLit(n, _) => Value::Int(*n),
+        Expr::BoolLit(b, _) => Value::Bool(*b),
         Expr::StrLit(range) => {
             let mut out = Vec::new();
             write_string_literal(src, range.clone(), &mut out)?;
@@ -92,12 +97,27 @@ fn eval(expr: &Expr, src: &[u8], frame: &Frame<'_>) -> Result<Value> {
         Expr::List(elements) => {
             let mut values = Vec::with_capacity(elements.len());
             for element in elements {
-                values.push(eval(element, src, frame)?);
+                values.push(eval(element, src, frame, functions)?);
             }
             Value::List(values)
         }
+        Expr::FnCall { name, args, paren } => {
+            let name_str = std::str::from_utf8(&src[name.clone()]).expect("identifier is ascii");
+            let mut values = Vec::with_capacity(args.len());
+            for arg in args {
+                values.push(eval(arg, src, frame, functions)?);
+            }
+
+            match functions.call(name_str, &values) {
+                Ok(value) => value,
+                Err(err) => {
+                    let span = func_error_span(&err, args, name, paren);
+                    return Err(Error::func(err, span));
+                }
+            }
+        }
         Expr::Dot { left, field } => {
-            let receiver = eval(left, src, frame)?;
+            let receiver = eval(left, src, frame, functions)?;
             match &receiver {
                 Value::Map(map) => {
                     let key = std::str::from_utf8(&src[field.clone()])
@@ -129,7 +149,7 @@ fn eval(expr: &Expr, src: &[u8], frame: &Frame<'_>) -> Result<Value> {
             idx,
             idx_span,
         } => {
-            let receiver = eval(left, src, frame)?;
+            let receiver = eval(left, src, frame, functions)?;
             let span = SourceSpan::from((idx_span.start, idx_span.end - idx_span.start));
             if *idx < 0 {
                 return Err(Error::render(
@@ -162,6 +182,36 @@ fn eval(expr: &Expr, src: &[u8], frame: &Frame<'_>) -> Result<Value> {
             }
         }
     })
+}
+
+/// Computes the source span for a function error per the spec:
+/// - `Undefined`: the function name.
+/// - `ArgCount`: all arguments (first arg start → last arg end); for zero
+///   args, the function name.
+/// - `TypeMismatch`: the offending argument.
+fn func_error_span(
+    err: &FuncError,
+    args: &[Expr],
+    name: &std::ops::Range<usize>,
+    paren: &std::ops::Range<usize>,
+) -> SourceSpan {
+    match err {
+        FuncError::Undefined { .. } => source_span(name.clone()),
+        FuncError::ArgCount { .. } => {
+            if args.is_empty() {
+                source_span(paren.clone())
+            } else {
+                source_span(args.first().unwrap().span().start..args.last().unwrap().span().end)
+            }
+        }
+        FuncError::TypeMismatch { arg_index, .. } => {
+            if let Some(arg) = args.get(*arg_index) {
+                source_span(arg.span())
+            } else {
+                source_span(name.clone())
+            }
+        }
+    }
 }
 
 /// Walks the interior of a `"..."` literal (the byte range between the

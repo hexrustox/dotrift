@@ -51,10 +51,10 @@ impl Template {
         &self,
         mut writer: W,
         variables: &HashMap<String, Value>,
-        _functions: &dyn FunctionRegistry,
+        functions: &dyn FunctionRegistry,
     ) -> Result<()> {
         let frame = eval::Frame::Var(variables);
-        self.eval_body(&self.nodes, &mut writer, &frame)?;
+        self.eval_body(&self.nodes, &mut writer, &frame, functions)?;
         writer.flush()?;
         Ok(())
     }

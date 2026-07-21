@@ -55,13 +55,13 @@ impl Error {
         }
     }
 
-    // Constructs a function error annotated with the call-expression span.
-    // pub(crate) fn func(err: FuncError, span: impl Into<SourceSpan>) -> Self {
-    //     Self::Func {
-    //         err,
-    //         span: span.into(),
-    //     }
-    // }
+    /// Constructs a function error annotated with the call-expression span.
+    pub(crate) fn func(err: FuncError, span: impl Into<SourceSpan>) -> Self {
+        Self::Func {
+            err,
+            span: span.into(),
+        }
+    }
 }
 
 /// Errors raised during tokenization or parsing, before any content executes.
@@ -94,6 +94,9 @@ pub enum ParseError {
     #[error("stray delimiter")]
     #[diagnostic(code(templater::parse::stray_delimiter))]
     StrayDelimiter,
+    #[error("reserved keyword `{keyword}`")]
+    #[diagnostic(code(templater::parse::reserved_keyword))]
+    ReservedKeyword { keyword: String },
     #[error("invalid modifier")]
     #[diagnostic(code(templater::parse::invalid_modifier))]
     InvalidModifier,
@@ -133,19 +136,13 @@ pub enum FuncError {
     Undefined { name: String },
     #[error("expects {expected} arguments, got {got}")]
     #[diagnostic(code(templater::func::arg_count))]
-    ArgCount {
-        expected: String,
-        got: usize,
-        #[label("function called here")]
-        func_span: SourceSpan,
-    },
+    ArgCount { expected: usize, got: usize },
     #[error("expects type {expected}, got {got}")]
     #[diagnostic(code(templater::func::type_mismatch))]
     TypeMismatch {
         expected: ValueType,
         got: ValueType,
-        #[label("function called here")]
-        func_span: SourceSpan,
+        arg_index: usize,
     },
 }
 

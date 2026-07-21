@@ -181,13 +181,53 @@ impl<'s> ParserState<'s> {
         match bytes[self.pos] {
             b'"' => self.parse_string_literal(),
             b'-' | b'0'..=b'9' => self.parse_integer_literal(),
-            _ if is_ident_start(bytes[self.pos]) => self.parse_ident_or_keyword(),
+            _ if is_ident_start(bytes[self.pos]) => {
+                let (range, is_keyword) = self.parse_identifier()?;
+                let ident =
+                    &self.bytes()[range.start - self.body.start..range.end - self.body.start];
+                let lit_span = body_range(
+                    &self.body,
+                    (range.start - self.body.start)..(range.end - self.body.start),
+                );
+                Ok(match ident {
+                    b"true" => Expr::BoolLit(true, lit_span.clone()),
+                    b"false" => Expr::BoolLit(false, lit_span),
+                    _ => {
+                        if is_keyword {
+                            return Err(Error::parse(
+                                ParseError::ReservedKeyword {
+                                    keyword: std::str::from_utf8(ident)
+                                        .expect("identifier is ascii")
+                                        .to_owned(),
+                                },
+                                source_span(range.clone()),
+                            ));
+                        }
+                        // Function calls may have whitespace between the
+                        // name and `(`. Dot access may not; preserve the
+                        // original position so `x .y` remains an error.
+                        let after_ident = self.pos;
+                        self.skip_ws();
+                        match self.peek_byte() {
+                            Some(b'(') => self.parse_fn_call(range)?,
+                            _ => {
+                                self.pos = after_ident;
+                                Expr::Var(range)
+                            }
+                        }
+                    }
+                })
+            }
             b'[' => self.parse_list_literal(),
             _ => Err(Error::parse(
                 ParseError::UnexpectedToken,
                 self.span(self.pos..self.pos + 1),
             )),
         }
+    }
+
+    fn peek_byte(&self) -> Option<u8> {
+        self.bytes().get(self.pos).copied()
     }
 
     fn parse_postfix(&mut self, mut left: Expr) -> std::result::Result<Expr, Error> {
@@ -314,10 +354,15 @@ impl<'s> ParserState<'s> {
                 ))?;
         }
 
-        Ok(Expr::IntLit(acc))
+        let lit_span = body_range(&self.body, start..self.pos);
+        Ok(Expr::IntLit(acc, lit_span))
     }
 
-    fn parse_ident_or_keyword(&mut self) -> std::result::Result<Expr, Error> {
+    /// Parses an `[A-Za-z_][A-Za-z0-9_]*` identifier and returns its absolute
+    /// source range plus whether it is a reserved keyword (`if`, `elif`,
+    /// `else`, `for`, `in`, `end`). Boolean literals are treated separately by
+    /// the caller.
+    fn parse_identifier(&mut self) -> std::result::Result<(Range<usize>, bool), Error> {
         let bytes = self.bytes();
         let start = self.pos;
         debug_assert!(is_ident_start(bytes[start]));
@@ -327,11 +372,71 @@ impl<'s> ParserState<'s> {
 
         let range = body_range(&self.body, start..self.pos);
         let ident = &bytes[start..self.pos];
-        Ok(match ident {
-            b"true" => Expr::BoolLit(true),
-            b"false" => Expr::BoolLit(false),
-            _ => Expr::Var(range),
-        })
+        let is_keyword = matches!(ident, b"if" | b"elif" | b"else" | b"for" | b"in" | b"end");
+        Ok((range, is_keyword))
+    }
+
+    fn parse_fn_call(&mut self, name: Range<usize>) -> std::result::Result<Expr, Error> {
+        let bytes = self.bytes();
+        let lparen = self.pos;
+        debug_assert_eq!(bytes[self.pos], b'(');
+        self.pos += 1; // consume '('
+
+        let mut args = Vec::new();
+        loop {
+            self.skip_ws();
+            let bytes = self.bytes();
+            if self.pos >= bytes.len() {
+                return Err(Error::parse(
+                    ParseError::UnclosedDelimiter,
+                    self.span(self.pos.saturating_sub(1)..self.pos),
+                ));
+            }
+            if bytes[self.pos] == b')' {
+                self.pos += 1;
+                break;
+            }
+
+            args.push(self.parse_expr()?);
+
+            self.skip_ws();
+            let bytes = self.bytes();
+            if self.pos >= bytes.len() {
+                return Err(Error::parse(
+                    ParseError::UnclosedDelimiter,
+                    self.span(self.pos.saturating_sub(1)..self.pos),
+                ));
+            }
+            match bytes[self.pos] {
+                b',' => {
+                    let comma_pos = self.pos;
+                    self.pos += 1;
+                    // Trailing comma check: if next non-ws is `)`, it's a
+                    // trailing comma.
+                    self.skip_ws();
+                    let bytes = self.bytes();
+                    if self.pos < bytes.len() && bytes[self.pos] == b')' {
+                        return Err(Error::parse(
+                            ParseError::TrailingComma,
+                            self.span(comma_pos..comma_pos + 1),
+                        ));
+                    }
+                }
+                b')' => {
+                    self.pos += 1;
+                    break;
+                }
+                _ => {
+                    return Err(Error::parse(
+                        ParseError::UnexpectedToken,
+                        self.span(self.pos..self.pos + 1),
+                    ));
+                }
+            }
+        }
+
+        let paren = body_range(&self.body, lparen..self.pos);
+        Ok(Expr::FnCall { name, args, paren })
     }
 
     fn parse_list_literal(&mut self) -> std::result::Result<Expr, Error> {
@@ -425,10 +530,10 @@ mod tests {
             Expr::StrLit($r)
         };
         (int $n:expr) => {
-            Expr::IntLit($n)
+            Expr::IntLit($n, 0..0)
         };
         (bool $b:expr) => {
-            Expr::BoolLit($b)
+            Expr::BoolLit($b, 0..0)
         };
         (list $($e:expr),* $(,)?) => {
             Expr::List(vec![$($e),*])
@@ -444,6 +549,13 @@ mod tests {
                 left: Box::new($left),
                 idx: $idx,
                 idx_span: $span,
+            }
+        };
+        (call $name:expr, $paren:expr $(, $arg:expr)*) => {
+            Expr::FnCall {
+                name: $name,
+                paren: $paren,
+                args: vec![$($arg),*],
             }
         };
     }
@@ -496,6 +608,13 @@ mod tests {
     #[test_case(b"{{ x.y.z }}" => expr!(dot expr!(dot expr!(var 3..4), 5..6), 7..8); "dot_chain")]
     #[test_case(b"{{ x.0 }}" => expr!(idx expr!(var 3..4), 0, 5..6); "simple_index")]
     #[test_case(b"{{ x.0.1 }}" => expr!(idx expr!(idx expr!(var 3..4), 0, 5..6), 1, 7..8); "index_chain")]
+    #[test_case(b"{{ f() }}" => expr!(call 3..4, 4..6); "zero_arg_call")]
+    #[test_case(b"{{ f(1) }}" => expr!(call 3..4, 4..7, expr!(int 1)); "single_arg_call")]
+    #[test_case(b"{{ f(1, 2) }}" => expr!(call 3..4, 4..10, expr!(int 1), expr!(int 2)); "two_arg_call")]
+    #[test_case(b"{{ f(1 , 2) }}" => expr!(call 3..4, 4..11, expr!(int 1), expr!(int 2)); "call_with_spaces")]
+    #[test_case(br#"{{ join(":", "a", "b") }}"# => expr!(call 3..7, 7..22, expr!(str 9..10), expr!(str 14..15), expr!(str 19..20)); "call_string_args")]
+    #[test_case(b"{{ f(g()) }}" => expr!(call 3..4, 4..9, expr!(call 5..6, 6..8)); "nested_call")]
+    #[test_case(b"{{ f(g(), h()) }}" => expr!(call 3..4, 4..14, expr!(call 5..6, 6..8), expr!(call 10..11, 11..13)); "multiple_nested_calls")]
     fn parse_cases(input: &[u8]) -> Expr {
         let token = token_from_input(input);
         let nodes = parse(vec![token], input).unwrap();
@@ -525,6 +644,12 @@ mod tests {
     #[test_case(b"{{ [a}}" => matches (ParseError::UnclosedDelimiter, (_, _)); "unclosed_list_")]
     #[test_case(b"{{ [a,}}" => matches (ParseError::UnclosedDelimiter, (_, _)); "unclosed_list_after_comma")]
     #[test_case(b"{{ [a b] }}" => matches (ParseError::UnexpectedToken, (_, _)); "unexpected_token_after_element")]
+    #[test_case(b"{{ f(a, ) }}" => matches (ParseError::TrailingComma, (6, 1)); "trailing_comma_call")]
+    #[test_case(b"{{ if() }}" => matches (ParseError::ReservedKeyword { keyword }, (3, 2)) if keyword == "if"; "keyword_function_name_if")]
+    #[test_case(b"{{ for() }}" => matches (ParseError::ReservedKeyword { keyword }, (3, 3)) if keyword == "for"; "keyword_function_name_for")]
+    #[test_case(b"{{ end() }}" => matches (ParseError::ReservedKeyword { keyword }, (3, 3)) if keyword == "end"; "keyword_function_name_end")]
+    #[test_case(b"{{ 1st() }}" => matches (ParseError::UnexpectedTokensAfterExpr, (4, 1)); "digit_prefixed_call")]
+    #[test_case(b"{{ kebab-fn() }}" => matches (ParseError::UnexpectedTokensAfterExpr, (8, 1)); "kebab_function_name")]
     fn parse_error_cases(input: &[u8]) -> (ParseError, (usize, usize)) {
         let token = token_from_input(input);
         let Error::Parse { err, span } = parse(vec![token], input).unwrap_err() else {
