@@ -72,8 +72,8 @@ fn eval(
     functions: &dyn FunctionRegistry,
 ) -> Result<Value> {
     Ok(match expr {
-        Expr::IntLit(n, _) => Value::Int(*n),
-        Expr::BoolLit(b, _) => Value::Bool(*b),
+        Expr::IntLit { value: n, .. } => Value::Int(*n),
+        Expr::BoolLit { value: b, .. } => Value::Bool(*b),
         Expr::StrLit { interior, .. } => {
             let mut out = Vec::new();
             write_string_literal(src, interior.clone(), &mut out)?;
@@ -269,36 +269,98 @@ fn write_string_literal<W: io::Write>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use std::collections::HashMap;
-
     use test_case::test_case;
 
-    fn decode(interior: &[u8]) -> Vec<u8> {
+    use crate::{
+        ValueType,
+        parser::parse,
+        scanner::scan,
+        util::{TestRegistry, var_scope},
+    };
+
+    use super::*;
+
+    fn eval_err(src: &[u8]) -> Error {
+        let Node::Interpolate(expr) = parse(scan(src).unwrap(), src).unwrap().pop().unwrap() else {
+            panic!()
+        };
+        eval(&expr, src, &Frame::Var(&var_scope()), &TestRegistry).unwrap_err()
+    }
+
+    #[test_case(br#"a\"b"# => "a\"b"; "escaped_double_quote")]
+    #[test_case(br#"a\\b"# => "a\\b"; "escaped_backslash")]
+    #[test_case(br#"a\nb"# => "a\\nb"; "other_backslash_verbatim")]
+    #[test_case(br#"\t"# => "\\t"; "backslash_t_verbatim")]
+    #[test_case(b"hello" => "hello"; "plain_text_round_trips")]
+    #[test_case(b"a\nb" => "a\nb"; "raw_newline_preserved")]
+    #[test_case(br#"{{ }} {# #}"# => r#"{{ }} {# #}"#; "delimiters_are_literal")]
+    #[test_case(b"a}b" => "a}b"; "closing_brace_literal")]
+    #[test_case(b"abc\\" => "abc\\"; "trailing_lone_backslash")]
+    #[test_case(b"" => ""; "empty_interior")]
+    #[test_case(b"caf\xc3\xa9" => String::from_utf8_lossy(b"caf\xc3\xa9"); "non_ascii_bytes_survive")]
+    #[test_case(br#"\\\""# => "\\\""; "escaped_backslash_then_quote")]
+    fn write_string_literal_round_trips(src: &[u8]) -> String {
         let mut out = Vec::new();
-        write_string_literal(interior, 0..interior.len(), &mut out).unwrap();
-        out
+        write_string_literal(src, 0..src.len(), &mut out).unwrap();
+        String::from_utf8_lossy(&out).to_string()
     }
 
-    #[test_case(b"" => b"".to_vec(); "empty_interior")]
-    #[test_case(b"plain" => b"plain".to_vec(); "plain_text")]
-    #[test_case(b"a\\\"b" => b"a\"b".to_vec(); "escaped_quote")]
-    #[test_case(b"a\\\\b" => b"a\\b".to_vec(); "escaped_backslash")]
-    #[test_case(b"a\\nb" => b"a\\nb".to_vec(); "passthrough_escape")]
-    #[test_case(b"line1\nline2" => b"line1\nline2".to_vec(); "raw_newline")]
-    #[test_case(b"caf\xc3\xa9" => b"caf\xc3\xa9".to_vec(); "non_ascii_bytes_preserved")]
-    #[test_case(b"\xff\xfe" => b"\xff\xfe".to_vec(); "invalid_utf8_preserved")]
-    fn decode_cases(input: &[u8]) -> Vec<u8> {
-        decode(input)
+    #[test_case(b"{{ 42 }}" => Value::Int(42) ; "int_pos")]
+    #[test_case(b"{{ -7 }}" => Value::Int(-7) ; "int_neg")]
+    #[test_case(b"{{ true }}" => Value::Bool(true) ; "bool_true")]
+    #[test_case(b"{{ false }}" => Value::Bool(false) ; "bool_false")]
+    #[test_case(b"{{ \"x\" }}" => Value::Str("x".to_string()) ; "str_basic")]
+    #[test_case(br#"{{ "a\"b\\c" }}"# => Value::Str("a\"b\\c".to_string()) ; "str_escapes")]
+    #[test_case(br#"{{ "a
+b" }}"# => Value::Str("a\nb".to_string()) ; "str_raw_newline")]
+    #[test_case(b"{{ [] }}" => Value::List(vec![]) ; "list_empty")]
+    #[test_case(b"{{ [1, \"x\", true] }}" => Value::List(vec![Value::Int(1), Value::Str("x".to_string()), Value::Bool(true)]) ; "list_heterogeneous")]
+    #[test_case(b"{{ [[1, 2], []] }}" => Value::List(vec![Value::List(vec![Value::Int(1), Value::Int(2)]), Value::List(vec![])]) ; "list_nested")]
+    #[test_case(b"{{ str }}" => Value::Str("foobar".to_string()) ; "var_str")]
+    #[test_case(b"{{ num }}" => Value::Int(42) ; "var_int")]
+    #[test_case(b"{{ yes }}" => Value::Bool(true) ; "var_bool")]
+    #[test_case(b"{{ list }}" => Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]) ; "var_list")]
+    #[test_case(b"{{ map.key }}" => Value::Str("value".to_string()) ; "dot_map_key")]
+    #[test_case(b"{{ map.nested.nested }}" => Value::Str("value".to_string()) ; "dot_nested")]
+    #[test_case(b"{{ list.0 }}" => Value::Int(1) ; "index_first")]
+    #[test_case(b"{{ list.2 }}" => Value::Int(3) ; "index_last")]
+    #[test_case(b"{{ same([10, 20]).1 }}" => Value::Int(20) ; "index_on_call")]
+    #[test_case(b"{{ same(\"z\") }}" => Value::Str("z".to_string()) ; "call_same")]
+    #[test_case(b"{{ foo(\"a\", \"b\") }}" => Value::Str("bar".to_string()) ; "call_foo")]
+    #[test_case(b"{{ foo() }}" => Value::Str("bar".to_string()) ; "call_zero_args")]
+    #[test_case(b"{{ same(same(\"deep\")) }}" => Value::Str("deep".to_string()) ; "call_nested")]
+    fn eval_success(src: &[u8]) -> Value {
+        let Node::Interpolate(expr) = parse(scan(src).unwrap(), src).unwrap().pop().unwrap() else {
+            panic!()
+        };
+        eval(&expr, src, &Frame::Var(&var_scope()), &TestRegistry).unwrap()
     }
 
-    #[test]
-    fn lookup_borrows_from_var_frame() {
-        let mut map = HashMap::new();
-        map.insert("x".to_string(), Value::Int(1));
-        let frame = Frame::Var(&map);
-        assert!(lookup("x", &frame).is_some_and(|v| v == Cow::Borrowed(&Value::Int(1))));
-        assert!(lookup("missing", &frame).is_none());
+    #[test_case(b"{{ missing }}" => (RenderError::UndefinedVariable, (3, 7)) ; "undefined_variable")]
+    #[test_case(b"{{ map.nope }}" => (RenderError::MapKeyNotFound { key: "nope".into() }, (7, 4)) ; "map_key_not_found")]
+    #[test_case(b"{{ str.field }}" => (RenderError::MapAccessOnNonMap { got: ValueType::Str }, (7, 5)) ; "map_access_on_str")]
+    #[test_case(b"{{ num.field }}" => (RenderError::MapAccessOnNonMap { got: ValueType::Int }, (7, 5)) ; "map_access_on_int")]
+    #[test_case(b"{{ list.field }}" => (RenderError::MapAccessOnNonMap { got: ValueType::List }, (8, 5)) ; "map_access_on_list")]
+    #[test_case(b"{{ \"s\".0 }}" => (RenderError::ListAccessOnNonList { got: ValueType::Str }, (7, 1)) ; "list_access_on_str")]
+    #[test_case(b"{{ map.0 }}" => (RenderError::ListAccessOnNonList { got: ValueType::Map }, (7, 1)) ; "list_access_on_map")]
+    #[test_case(b"{{ list.3 }}" => (RenderError::ListIndexOutOfBounds { idx: 3, len: 3 }, (8, 1)) ; "index_out_of_bounds")]
+    #[test_case(b"{{ list.-1 }}" => (RenderError::NegativeListIndex { idx: -1 }, (8, 2)) ; "negative_index")]
+    fn eval_render(src: &[u8]) -> (RenderError, (usize, usize)) {
+        match eval_err(src) {
+            Error::Render { err, span } => (err, (span.offset(), span.len())),
+            e => panic!("expected Render error, got {e:?}"),
+        }
+    }
+
+    #[test_case(b"{{ nope() }}" => (FuncError::Undefined { name: "nope".into() }, (3, 4)) ; "undefined_function")]
+    #[test_case(b"{{ same() }}" => (FuncError::ArgCount { expected: 1, got: 0 }, (7, 2)) ; "arg_count_zero_args")]
+    #[test_case(b"{{ exact1(\"a\", \"b\") }}" => (FuncError::ArgCount { expected: 1, got: 2 }, (10, 8)) ; "arg_count_multi_args")]
+    #[test_case(b"{{ foo(1) }}" => (FuncError::TypeMismatch { expected: ValueType::Str, got: ValueType::Int, arg_index: 0 }, (7, 1)) ; "type_mismatch_arg0")]
+    #[test_case(b"{{ foo(\"a\", 1) }}" => (FuncError::TypeMismatch { expected: ValueType::Str, got: ValueType::Int, arg_index: 1 }, (12, 1)) ; "type_mismatch_arg1")]
+    fn eval_func(src: &[u8]) -> (FuncError, (usize, usize)) {
+        match eval_err(src) {
+            Error::Func { err, span } => (err, (span.offset(), span.len())),
+            e => panic!("expected Func error, got {e:?}"),
+        }
     }
 }

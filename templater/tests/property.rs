@@ -280,8 +280,11 @@ fn ident_strategy() -> impl Strategy<Value = String> {
             bytes.extend(rest);
             String::from_utf8(bytes).expect("identifier bytes are ASCII")
         })
-        .prop_filter("identifier must not be a boolean keyword", |name| {
-            name != "true" && name != "false"
+        .prop_filter("identifier must not be a keyword", |name| {
+            !matches!(
+                name.as_str(),
+                "true" | "false" | "if" | "elif" | "else" | "for" | "in" | "end"
+            )
         })
 }
 

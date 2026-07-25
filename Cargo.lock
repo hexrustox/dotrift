@@ -1528,6 +1528,7 @@ dependencies = [
  "memmap2",
  "miette",
  "proptest",
+ "templater",
  "test-case",
  "thiserror",
 ]

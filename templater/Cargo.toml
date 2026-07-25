@@ -9,6 +9,10 @@ memmap2.workspace = true
 miette.workspace = true
 thiserror.workspace = true
 
+[features]
+testing = []
+
 [dev-dependencies]
+templater = { path = ".", features = ["testing"] }
 proptest.workspace = true
 test-case.workspace = true

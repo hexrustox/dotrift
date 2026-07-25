@@ -79,7 +79,7 @@ pub enum ParseError {
     #[error("unclosed delimiter")]
     #[diagnostic(code(templater::parse::unclosed_delimiter))]
     UnclosedDelimiter,
-    #[error("unclosed '(' in function call")]
+    #[error("unclosed `(` in function call")]
     #[diagnostic(code(templater::parse::unclosed_call_paren))]
     UnclosedCallParen,
     #[error("unexpected token")]
@@ -109,7 +109,7 @@ pub enum ParseError {
 }
 
 /// Errors raised only on actually-executed content.
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error, Diagnostic, PartialEq)]
 pub enum RenderError {
     #[error("undefined variable")]
     #[diagnostic(code(templater::render::undefined_variable))]
@@ -132,7 +132,7 @@ pub enum RenderError {
 }
 
 /// Errors returned by the host's [`FunctionRegistry`](crate::FunctionRegistry).
-#[derive(Debug, thiserror::Error, Diagnostic)]
+#[derive(Debug, thiserror::Error, Diagnostic, PartialEq)]
 pub enum FuncError {
     #[error("undefined function `{name}`")]
     #[diagnostic(code(templater::func::undefined))]

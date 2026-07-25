@@ -2,10 +2,9 @@ mod ast;
 mod error;
 mod eval;
 mod function;
-mod lex;
 mod parser;
 mod scanner;
-mod util;
+pub mod util;
 mod value;
 
 use std::{collections::HashMap, io};
