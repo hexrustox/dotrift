@@ -402,51 +402,9 @@ fn trim_inner_ws(src: &[u8], body_start: usize, body_end: usize) -> Range<usize>
 mod tests {
     use test_case::test_case;
 
+    use crate::{interp, stmt, text};
+
     use super::*;
-
-    macro_rules! text {
-        ($range:expr) => {
-            Token::Text($range)
-        };
-    }
-
-    macro_rules! interp {
-        ($tag:expr, $body:expr) => {
-            Token::Interp {
-                tag: $tag,
-                body: $body,
-                left: Modifier::None,
-                right: Modifier::None,
-            }
-        };
-        ($tag:expr, $body:expr, $left:ident, $right:ident) => {
-            Token::Interp {
-                tag: $tag,
-                body: $body,
-                left: Modifier::$left,
-                right: Modifier::$right,
-            }
-        };
-    }
-
-    macro_rules! stmt {
-        ($tag:expr, $body:expr) => {
-            Token::Stmt {
-                tag: $tag,
-                body: $body,
-                left: Modifier::None,
-                right: Modifier::None,
-            }
-        };
-        ($tag:expr, $body:expr, $left:ident, $right:ident) => {
-            Token::Stmt {
-                tag: $tag,
-                body: $body,
-                left: Modifier::$left,
-                right: Modifier::$right,
-            }
-        };
-    }
 
     #[test_case(b"" => Vec::<Token>::new(); "empty")]
     #[test_case(b"hello" => vec![text!(0..5)]; "plain_text")]

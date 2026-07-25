@@ -4,6 +4,7 @@ mod eval;
 mod function;
 mod parser;
 mod scanner;
+mod trim;
 pub mod util;
 mod value;
 
@@ -37,7 +38,8 @@ impl Source {
 impl Template {
     /// Constructs a template from an owned byte buffer.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
-        let tokens = scanner::scan(&bytes)?;
+        let mut tokens = scanner::scan(&bytes)?;
+        trim::trim_tokens(&mut tokens, &bytes);
         let nodes = parser::parse(tokens, &bytes)?;
         Ok(Self {
             nodes,

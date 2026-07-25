@@ -5,30 +5,20 @@ use miette::SourceSpan;
 use crate::{
     ast::{Expr, Node},
     error::{Error, ParseError},
-    scanner::{Modifier, Token},
+    scanner::Token,
     util::{is_whitespace, source_span},
 };
 
-/// Assembles tokens into AST nodes, recognizing `{{ expr }}` interpolations
-/// and applying whitespace-control modifiers to adjacent text ranges.
+/// Assembles already-trimmed tokens into AST nodes, recognizing
+/// `{{ expr }}` interpolations.
 pub(crate) fn parse(tokens: Vec<Token>, source: &[u8]) -> std::result::Result<Vec<Node>, Error> {
-    let mut items: Vec<Item> = Vec::with_capacity(tokens.len());
+    let mut nodes = Vec::with_capacity(tokens.len());
     for token in tokens {
         match token {
-            Token::Text(range) => items.push(Item::Text(range)),
-            Token::Barrier => items.push(Item::Barrier),
-            Token::Interp {
-                tag,
-                body,
-                left,
-                right,
-            } => {
-                let expr = parse_interp_body(source, body, tag)?;
-                items.push(Item::Tag {
-                    left,
-                    right,
-                    node: Node::Interpolate(expr),
-                });
+            Token::Text(range) => nodes.push(Node::Text(range)),
+            Token::Barrier => {}
+            Token::Interp { tag, body, .. } => {
+                nodes.push(Node::Interpolate(parse_interp_body(source, body, tag)?));
             }
             Token::Stmt { tag, .. } => {
                 // TODO
@@ -40,75 +30,7 @@ pub(crate) fn parse(tokens: Vec<Token>, source: &[u8]) -> std::result::Result<Ve
         }
     }
 
-    let mut nodes = Vec::new();
-    for (i, item) in items.iter().enumerate() {
-        match item {
-            Item::Text(range) => {
-                let mut r = range.clone();
-                if let Some(Item::Tag { right, .. }) = i.checked_sub(1).and_then(|j| items.get(j)) {
-                    r.start = trim_left(source, &r, *right);
-                }
-                if let Some(Item::Tag { left, .. }) = items.get(i + 1) {
-                    r.end = trim_right(source, &r, *left);
-                }
-                if r.start < r.end {
-                    nodes.push(Node::Text(r));
-                }
-            }
-            Item::Tag { node, .. } => nodes.push(node.clone()),
-            Item::Barrier => {}
-        }
-    }
-
     Ok(nodes)
-}
-
-enum Item {
-    Text(Range<usize>),
-    Tag {
-        left: Modifier,
-        right: Modifier,
-        node: Node,
-    },
-    Barrier,
-}
-
-fn trim_left(src: &[u8], range: &Range<usize>, right: Modifier) -> usize {
-    match right {
-        Modifier::None => range.start,
-        Modifier::Dash => {
-            let mut i = range.start;
-            while i < range.end && (src[i] == b' ' || src[i] == b'\t') {
-                i += 1;
-            }
-            i
-        }
-        Modifier::Equal => match src[range.start..range.end].iter().position(|&b| b == b'\n') {
-            Some(k) => range.start + k + 1,
-            None => range.end,
-        },
-    }
-}
-
-fn trim_right(src: &[u8], range: &Range<usize>, left: Modifier) -> usize {
-    match left {
-        Modifier::None => range.end,
-        Modifier::Dash => {
-            let mut i = range.end;
-            while i > range.start && (src[i - 1] == b' ' || src[i - 1] == b'\t') {
-                i -= 1;
-            }
-            i
-        }
-        Modifier::Equal => match src[range.start..range.end]
-            .iter()
-            .rposition(|&b| b == b'\n')
-        {
-            // Left `=` stops before the newline, so the newline is preserved.
-            Some(k) => range.start + k + 1,
-            None => range.start,
-        },
-    }
 }
 
 /// Parses the trimmed body of a `{{ ... }}` tag into one `Expr`. The body

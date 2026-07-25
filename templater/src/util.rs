@@ -17,6 +17,56 @@ pub(crate) fn source_span(range: Range<usize>) -> SourceSpan {
     (range.start, range.end - range.start).into()
 }
 
+#[cfg(test)]
+mod macros {
+    #[macro_export]
+    macro_rules! text {
+        ($range:expr) => {
+            Token::Text($range)
+        };
+    }
+
+    #[macro_export]
+    macro_rules! interp {
+        ($tag:expr, $body:expr) => {
+            Token::Interp {
+                tag: $tag,
+                body: $body,
+                left: Modifier::None,
+                right: Modifier::None,
+            }
+        };
+        ($tag:expr, $body:expr, $left:ident, $right:ident) => {
+            Token::Interp {
+                tag: $tag,
+                body: $body,
+                left: Modifier::$left,
+                right: Modifier::$right,
+            }
+        };
+    }
+
+    #[macro_export]
+    macro_rules! stmt {
+        ($tag:expr, $body:expr) => {
+            Token::Stmt {
+                tag: $tag,
+                body: $body,
+                left: Modifier::None,
+                right: Modifier::None,
+            }
+        };
+        ($tag:expr, $body:expr, $left:ident, $right:ident) => {
+            Token::Stmt {
+                tag: $tag,
+                body: $body,
+                left: Modifier::$left,
+                right: Modifier::$right,
+            }
+        };
+    }
+}
+
 #[cfg(any(test, feature = "testing"))]
 #[allow(dead_code)]
 mod test_utils {

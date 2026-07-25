@@ -80,16 +80,16 @@ mod tests {
 
     use super::*;
 
-    #[test_case(b"var" => 2..5)]
-    #[test_case(br#""hi""# => 2..6)]
-    #[test_case(b"42" => 2..4)]
-    #[test_case(b" -7" => 3..5)]
-    #[test_case(b"[]" => 2..4)]
-    #[test_case(b"[ a , b ]" => 2..11)]
-    #[test_case(b"a.b.c" => 2..7)]
-    #[test_case(b"a.0.1" => 2..7)]
-    #[test_case(b"f()" => 2..5)]
-    #[test_case(b"f( g( ) , h())" => 2..16)]
+    #[test_case(b"var" => 2..5 ; "simple_variable")]
+    #[test_case(br#""hi""# => 2..6 ; "string_literal")]
+    #[test_case(b"42" => 2..4 ; "positive_integer_literal")]
+    #[test_case(b" -7" => 3..5 ; "negative_integer_literal")]
+    #[test_case(b"[]" => 2..4 ; "empty_list")]
+    #[test_case(b"[ a , b ]" => 2..11 ; "list_with_elements")]
+    #[test_case(b"a.b.c" => 2..7 ; "chained_dot_access")]
+    #[test_case(b"a.0.1" => 2..7 ; "mixed_dot_and_index_access")]
+    #[test_case(b"f()" => 2..5 ; "function_call_no_args")]
+    #[test_case(b"f( g( ) , h())" => 2..16 ; "nested_function_calls")]
     fn span(src: &[u8]) -> Range<usize> {
         let src = [b"{{", src, b"}}"].concat();
         let Node::Interpolate(expr) = parse(scan(&src).unwrap(), &src).unwrap().pop().unwrap()
