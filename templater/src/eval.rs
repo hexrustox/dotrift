@@ -212,6 +212,7 @@ fn func_error_span(
             if let Some(arg) = args.get(*arg_index) {
                 source_span(arg.span())
             } else {
+                // unreachable
                 source_span(name.clone())
             }
         }
@@ -282,7 +283,7 @@ mod tests {
 
     fn eval_err(src: &[u8]) -> Error {
         let Node::Interpolate(expr) = parse(scan(src).unwrap(), src).unwrap().pop().unwrap() else {
-            panic!()
+            panic!("expected Interpolate")
         };
         eval(&expr, src, &Frame::Var(&var_scope()), &TestRegistry).unwrap_err()
     }
@@ -331,7 +332,7 @@ b" }}"# => Value::Str("a\nb".to_string()) ; "str_raw_newline")]
     #[test_case(b"{{ same(same(\"deep\")) }}" => Value::Str("deep".to_string()) ; "call_nested")]
     fn eval_success(src: &[u8]) -> Value {
         let Node::Interpolate(expr) = parse(scan(src).unwrap(), src).unwrap().pop().unwrap() else {
-            panic!()
+            panic!("expected Interpolate")
         };
         eval(&expr, src, &Frame::Var(&var_scope()), &TestRegistry).unwrap()
     }
@@ -340,6 +341,7 @@ b" }}"# => Value::Str("a\nb".to_string()) ; "str_raw_newline")]
     #[test_case(b"{{ map.nope }}" => (RenderError::MapKeyNotFound { key: "nope".into() }, (7, 4)) ; "map_key_not_found")]
     #[test_case(b"{{ str.field }}" => (RenderError::MapAccessOnNonMap { got: ValueType::Str }, (7, 5)) ; "map_access_on_str")]
     #[test_case(b"{{ num.field }}" => (RenderError::MapAccessOnNonMap { got: ValueType::Int }, (7, 5)) ; "map_access_on_int")]
+    #[test_case(b"{{ yes.field }}" => (RenderError::MapAccessOnNonMap { got: ValueType::Bool }, (7, 5)) ; "map_access_on_bool")]
     #[test_case(b"{{ list.field }}" => (RenderError::MapAccessOnNonMap { got: ValueType::List }, (8, 5)) ; "map_access_on_list")]
     #[test_case(b"{{ \"s\".0 }}" => (RenderError::ListAccessOnNonList { got: ValueType::Str }, (7, 1)) ; "list_access_on_str")]
     #[test_case(b"{{ map.0 }}" => (RenderError::ListAccessOnNonList { got: ValueType::Map }, (7, 1)) ; "list_access_on_map")]

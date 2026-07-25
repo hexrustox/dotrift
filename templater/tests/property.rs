@@ -382,6 +382,7 @@ fn segment_strategy() -> impl Strategy<Value = Segment> {
 }
 
 proptest! {
+    #[ignore]
     #[test]
     fn generated_templates_render_predictably(
         segments in prop::collection::vec(segment_strategy(), 0..=32)

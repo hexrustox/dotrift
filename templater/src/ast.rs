@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 /// A parsed template node. Ranges are byte offsets into the source.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Node {
     /// Plain text, emitted verbatim.
     Text(Range<usize>),
@@ -70,5 +70,32 @@ impl Expr {
             Expr::Index { left, idx_span, .. } => left.span().start..idx_span.end,
             Expr::FnCall { name, paren, .. } => name.start..paren.end,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{parser::parse, scanner::scan};
+    use test_case::test_case;
+
+    use super::*;
+
+    #[test_case(b"var" => 2..5)]
+    #[test_case(br#""hi""# => 2..6)]
+    #[test_case(b"42" => 2..4)]
+    #[test_case(b" -7" => 3..5)]
+    #[test_case(b"[]" => 2..4)]
+    #[test_case(b"[ a , b ]" => 2..11)]
+    #[test_case(b"a.b.c" => 2..7)]
+    #[test_case(b"a.0.1" => 2..7)]
+    #[test_case(b"f()" => 2..5)]
+    #[test_case(b"f( g( ) , h())" => 2..16)]
+    fn span(src: &[u8]) -> Range<usize> {
+        let src = [b"{{", src, b"}}"].concat();
+        let Node::Interpolate(expr) = parse(scan(&src).unwrap(), &src).unwrap().pop().unwrap()
+        else {
+            panic!("expected Interpolate")
+        };
+        expr.span()
     }
 }

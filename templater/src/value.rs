@@ -39,15 +39,6 @@ impl std::fmt::Display for ValueType {
 }
 
 impl Value {
-    /// Renders this value using its top-level interpolation form.
-    pub fn render(&self) -> String {
-        let mut buf = Vec::new();
-        self.write_top(&mut buf)
-            .expect("writing to an in-memory buffer never fails");
-        // write_top only emits valid UTF-8 for Str; non-Str are ASCII.
-        String::from_utf8(buf).expect("rendered value is valid UTF-8")
-    }
-
     /// The runtime type of this value.
     pub fn value_type(&self) -> ValueType {
         match self {
@@ -126,10 +117,29 @@ fn write_escaped_string<W: io::Write>(writer: &mut W, bytes: &[u8]) -> io::Resul
         let b = bytes[i];
         match b {
             b'\\' => writer.write_all(br"\\"),
-            b'"' => writer.write_all(b"\\\""),
+            b'"' => writer.write_all(br#"\""#),
             _ => writer.write_all(&bytes[i..i + 1]),
         }?;
         i += 1;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_case::test_case;
+
+    #[test_case(Value::Str("str".to_string()) => "str" ; "string_value")]
+    #[test_case(Value::Int(42) => "42" ; "integer_42")]
+    #[test_case(Value::Bool(true) => "true" ; "bool_true")]
+    #[test_case(Value::List(vec![]) => "[]" ; "empty_list")]
+    #[test_case(Value::List(vec![Value::Int(1), Value::Bool(false)]) => "[1, false]" ; "list_with_elements")]
+    #[test_case(Value::Map(BTreeMap::from_iter([("key".to_string(), Value::Str("value".to_string()))])) => r#"{"key": "value"}"# ; "map_with_entry")]
+    #[test_case(Value::List(vec![Value::Str(r#"""#.to_string()), Value::Str(r#"\"#.to_string())]) => r#"["\"", "\\"]"# ; "escape_quotes_and_backslashes")]
+    fn write(value: Value) -> String {
+        let mut out = Vec::new();
+        value.write_top(&mut out).unwrap();
+        String::from_utf8(out).unwrap()
+    }
 }

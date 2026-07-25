@@ -450,7 +450,7 @@ mod tests {
 
     #[test_case(b"" => Vec::<Token>::new(); "empty")]
     #[test_case(b"hello" => vec![text!(0..5)]; "plain_text")]
-    #[test_case(b"{}" => vec![text!(0..2)]; "brackets")]
+    #[test_case(b"{}" => vec![text!(0..2)]; "braces")]
     #[test_case(b"{{x}}" => vec![interp!(0..5, 2..3)]; "basic_interpolation")]
     #[test_case(b"{{ x }}" => vec![interp!(0..7, 3..4)]; "interpolation_with_spaces")]
     #[test_case(b"{{  x  }}" => vec![interp!(0..9, 4..5)]; "interpolation_with_multiple_spaces")]
