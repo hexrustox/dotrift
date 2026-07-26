@@ -94,29 +94,6 @@ mod test_utils {
         fn call(&self, name: &str, args: &[Value]) -> Result<Value, FuncError> {
             match name {
                 "same" => {
-                    let Some(el) = args.last() else {
-                        return Err(FuncError::ArgCount {
-                            expected: 1,
-                            got: args.len(),
-                        });
-                    };
-                    Ok(el.clone())
-                }
-                "foo" => {
-                    if let Some((i, arg)) = args
-                        .iter()
-                        .enumerate()
-                        .find(|(_, el)| el.value_type() != ValueType::Str)
-                    {
-                        return Err(FuncError::TypeMismatch {
-                            expected: ValueType::Str,
-                            got: arg.value_type(),
-                            arg_index: i,
-                        });
-                    }
-                    Ok(Value::Str("bar".to_string()))
-                }
-                "exact1" => {
                     if args.len() != 1 {
                         return Err(FuncError::ArgCount {
                             expected: 1,
@@ -124,6 +101,23 @@ mod test_utils {
                         });
                     }
                     Ok(args[0].clone())
+                }
+                "foo" => Ok(Value::Str("bar".to_string())),
+                "exact1" => {
+                    if args.len() != 1 {
+                        return Err(FuncError::ArgCount {
+                            expected: 1,
+                            got: args.len(),
+                        });
+                    }
+                    match &args[0] {
+                        Value::Str(_) => Ok(args[0].clone()),
+                        other => Err(FuncError::TypeMismatch {
+                            expected: ValueType::Str,
+                            got: other.value_type(),
+                            arg_index: 0,
+                        }),
+                    }
                 }
                 _ => Err(FuncError::Undefined {
                     name: name.to_owned(),
@@ -146,6 +140,7 @@ mod test_utils {
             ("neg".to_string(), Value::Int(-5)),
             ("yes".to_string(), Value::Bool(true)),
             ("no".to_string(), Value::Bool(false)),
+            ("empty_list".to_string(), Value::List(vec![])),
             (
                 "list".to_string(),
                 Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]),

@@ -171,9 +171,9 @@ hellonext line
 ```
 {{ expr =}} mid {{= expr }}
 ```
-Becomes:
+If `var` is `"hello"`, becomes:
 ```
-{{ expr =}}{{= expr }}
+hellohello
 ```
 
 ## Expressions

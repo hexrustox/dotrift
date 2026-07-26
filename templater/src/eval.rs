@@ -357,8 +357,7 @@ b" }}"# => Value::Str("a\nb".to_string()) ; "str_raw_newline")]
     #[test_case(b"{{ nope() }}" => (FuncError::Undefined { name: "nope".into() }, (3, 4)) ; "undefined_function")]
     #[test_case(b"{{ same() }}" => (FuncError::ArgCount { expected: 1, got: 0 }, (7, 2)) ; "arg_count_zero_args")]
     #[test_case(b"{{ exact1(\"a\", \"b\") }}" => (FuncError::ArgCount { expected: 1, got: 2 }, (10, 8)) ; "arg_count_multi_args")]
-    #[test_case(b"{{ foo(1) }}" => (FuncError::TypeMismatch { expected: ValueType::Str, got: ValueType::Int, arg_index: 0 }, (7, 1)) ; "type_mismatch_arg0")]
-    #[test_case(b"{{ foo(\"a\", 1) }}" => (FuncError::TypeMismatch { expected: ValueType::Str, got: ValueType::Int, arg_index: 1 }, (12, 1)) ; "type_mismatch_arg1")]
+    #[test_case(b"{{ exact1(12) }}" => (FuncError::TypeMismatch { expected: ValueType::Str, got: ValueType::Int, arg_index: 0 }, (10, 2)) ; "type_mismatch_arg")]
     fn eval_func(src: &[u8]) -> (FuncError, (usize, usize)) {
         match eval_err(src) {
             Error::Func { err, span } => (err, (span.offset(), span.len())),
