@@ -54,8 +54,8 @@ impl Template {
         variables: &HashMap<String, Value>,
         functions: &dyn FunctionRegistry,
     ) -> Result<()> {
-        let frame = eval::Frame::Var(variables);
-        self.eval_body(&self.nodes, &mut writer, &frame, functions)?;
+        let mut scope = eval::Scope::new(variables);
+        self.eval_body(&self.nodes, &mut writer, &mut scope, functions)?;
         writer.flush()?;
         Ok(())
     }

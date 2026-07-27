@@ -10,22 +10,56 @@ use crate::{
     util::source_span,
 };
 
-/// A binding layer in the scope stack walked by variable resolution. This
-/// slice has only the base Var frame; `for` will add a loop frame later
-/// (ticket 06) and the borrowed/owned distinction will pay off then.
+/// A binding layer in the scope stack walked by variable resolution.
 pub(crate) enum Frame<'a> {
     /// The host-provided top-level variable scope (`Template::render`'s
-    /// `variables` argument). Borrowed for the lifetime of the render.
+    /// `variables` argument). Borrowed for the lifetime of the render —
+    /// no clone of the host map.
     Var(&'a HashMap<String, Value>),
+    /// A `for`-loop binding. `name` is the byte span of the loop-variable
+    /// identifier in the source; `value` is the current iteration's owned
+    /// value. The loop variable shadows any outer binding of the same name
+    /// for the body; the outer binding is restored when the frame is popped
+    /// at `{% end %}`.
+    Loop {
+        name: std::ops::Range<usize>,
+        value: Value,
+    },
+}
+
+/// The active scope stack: a LIFO of [`Frame`]s. Variable resolution walks
+/// from innermost outward; only `for` introduces a scope, `if`/`elif`/`else`
+/// do not.
+pub(crate) struct Scope<'a> {
+    frames: Vec<Frame<'a>>,
+}
+
+impl<'a> Scope<'a> {
+    pub(crate) fn new(variables: &'a HashMap<String, Value>) -> Self {
+        Self {
+            frames: vec![Frame::Var(variables)],
+        }
+    }
+
+    fn push_loop(&mut self, name: std::ops::Range<usize>, value: Value) {
+        self.frames.push(Frame::Loop { name, value });
+    }
+
+    /// Pops the innermost Loop frame. Called once per `push_loop`; balanced
+    /// push/pop pairing is the caller's responsibility, and the stack pops
+    /// naturally (the bottom Var frame is never popped in well-formed use).
+    fn pop_loop(&mut self) {
+        self.frames.pop();
+    }
 }
 
 impl Template {
-    /// Renders a sequence of nodes to the writer.
+    /// Renders a sequence of nodes to the writer against the active scope.
     pub(crate) fn eval_body<W: io::Write>(
         &self,
         nodes: &[Node],
         writer: &mut W,
-        frame: &Frame<'_>,
+        scope: &mut Scope<'_>,
         functions: &dyn FunctionRegistry,
     ) -> Result<()> {
         for node in nodes {
@@ -41,8 +75,64 @@ impl Template {
                             write_string_literal(self.src.bytes(), interior.clone(), writer)?;
                         }
                         _ => {
-                            let value = eval(expr, self.src.bytes(), frame, functions)?;
+                            let value = eval(expr, self.src.bytes(), scope, functions)?;
                             value.write_top(writer)?;
+                        }
+                    }
+                }
+                Node::If {
+                    branches,
+                    else_body,
+                } => {
+                    let mut taken = false;
+                    for branch in branches {
+                        let cond = eval(&branch.cond, self.src.bytes(), scope, functions)?;
+                        match cond {
+                            Value::Bool(true) => {
+                                self.eval_body(&branch.body, writer, scope, functions)?;
+                                taken = true;
+                                break;
+                            }
+                            Value::Bool(false) => {} // skip this branch
+                            other => {
+                                let span = branch.cond.span();
+                                return Err(Error::render(
+                                    RenderError::TypeMismatch {
+                                        expected: crate::ValueType::Bool,
+                                        got: other.value_type(),
+                                    },
+                                    SourceSpan::from((span.start, span.end - span.start)),
+                                ));
+                            }
+                        }
+                    }
+                    if !taken && let Some(body) = else_body {
+                        self.eval_body(body, writer, scope, functions)?;
+                    }
+                }
+                Node::For { var, iter, body } => {
+                    let iterable = eval(iter, self.src.bytes(), scope, functions)?;
+                    match iterable {
+                        Value::List(items) => {
+                            // Evaluate the iterable exactly once and consume
+                            // the owned Vec via into_iter (zero per-iter
+                            // clones). An empty iterable never pushes a Loop
+                            // frame, preserving any outer binding.
+                            for value in items {
+                                scope.push_loop(var.clone(), value);
+                                self.eval_body(body, writer, scope, functions)?;
+                                scope.pop_loop();
+                            }
+                        }
+                        other => {
+                            let span = iter.span();
+                            return Err(Error::render(
+                                RenderError::TypeMismatch {
+                                    expected: crate::ValueType::List,
+                                    got: other.value_type(),
+                                },
+                                SourceSpan::from((span.start, span.end - span.start)),
+                            ));
                         }
                     }
                 }
@@ -52,13 +142,28 @@ impl Template {
     }
 }
 
-/// Looks up `name` against the active scope stack. Returns a borrowed
-/// `Cow::Borrowed` for the Var frame (the common case — no clone until
-/// the caller asks for `into_owned`).
-fn lookup<'v>(name: &str, frame: &'v Frame<'v>) -> Option<Cow<'v, Value>> {
-    match frame {
-        Frame::Var(map) => map.get(name).map(Cow::Borrowed),
+/// Looks up `name` against the active scope stack, walking from innermost
+/// outward. Returns a borrowed `Cow` for Var/Loop frames (no clone until the
+/// caller asks for `into_owned`).
+fn lookup<'v>(name: &str, src: &[u8], scope: &'v Scope<'v>) -> Option<Cow<'v, Value>> {
+    for frame in scope.frames.iter().rev() {
+        match frame {
+            Frame::Var(map) => {
+                if let Some(v) = map.get(name) {
+                    return Some(Cow::Borrowed(v));
+                }
+            }
+            Frame::Loop {
+                name: var_range,
+                value,
+            } => {
+                if &src[var_range.clone()] == name.as_bytes() {
+                    return Some(Cow::Borrowed(value));
+                }
+            }
+        }
     }
+    None
 }
 
 /// Evaluates one expression to an owned `Value`. Per decision E1 the lookup
@@ -68,7 +173,7 @@ fn lookup<'v>(name: &str, frame: &'v Frame<'v>) -> Option<Cow<'v, Value>> {
 fn eval(
     expr: &Expr,
     src: &[u8],
-    frame: &Frame<'_>,
+    scope: &Scope<'_>,
     functions: &dyn FunctionRegistry,
 ) -> Result<Value> {
     Ok(match expr {
@@ -84,7 +189,7 @@ fn eval(
             // Variable names are restricted to `[A-Za-z_][A-Za-z0-9_]*` by
             // the parser, so the byte slice is ASCII (valid UTF-8).
             let name = std::str::from_utf8(name_bytes).expect("identifier is ascii");
-            match lookup(name, frame) {
+            match lookup(name, src, scope) {
                 Some(v) => v.into_owned(),
                 None => {
                     return Err(Error::render(
@@ -97,7 +202,7 @@ fn eval(
         Expr::List { elements, .. } => {
             let mut values = Vec::with_capacity(elements.len());
             for element in elements {
-                values.push(eval(element, src, frame, functions)?);
+                values.push(eval(element, src, scope, functions)?);
             }
             Value::List(values)
         }
@@ -109,7 +214,7 @@ fn eval(
             let name_str = std::str::from_utf8(&src[name.clone()]).expect("identifier is ascii");
             let mut values = Vec::with_capacity(args.len());
             for arg in args {
-                values.push(eval(arg, src, frame, functions)?);
+                values.push(eval(arg, src, scope, functions)?);
             }
 
             match functions.call(name_str, &values) {
@@ -121,7 +226,7 @@ fn eval(
             }
         }
         Expr::Dot { left, field } => {
-            let receiver = eval(left, src, frame, functions)?;
+            let receiver = eval(left, src, scope, functions)?;
             match &receiver {
                 Value::Map(map) => {
                     let key = std::str::from_utf8(&src[field.clone()])
@@ -140,7 +245,8 @@ fn eval(
                 }
                 other => {
                     return Err(Error::render(
-                        RenderError::MapAccessOnNonMap {
+                        RenderError::TypeMismatch {
+                            expected: crate::ValueType::Map,
                             got: other.value_type(),
                         },
                         SourceSpan::from((field.start, field.end - field.start)),
@@ -153,7 +259,7 @@ fn eval(
             idx,
             idx_span,
         } => {
-            let receiver = eval(left, src, frame, functions)?;
+            let receiver = eval(left, src, scope, functions)?;
             let span = SourceSpan::from((idx_span.start, idx_span.end - idx_span.start));
             if *idx < 0 {
                 return Err(Error::render(
@@ -177,7 +283,8 @@ fn eval(
                 }
                 other => {
                     return Err(Error::render(
-                        RenderError::ListAccessOnNonList {
+                        RenderError::TypeMismatch {
+                            expected: crate::ValueType::List,
                             got: other.value_type(),
                         },
                         span,
@@ -285,7 +392,9 @@ mod tests {
         let Node::Interpolate(expr) = parse(scan(src).unwrap(), src).unwrap().pop().unwrap() else {
             panic!("expected Interpolate")
         };
-        eval(&expr, src, &Frame::Var(&var_scope()), &TestRegistry).unwrap_err()
+        let vars = var_scope();
+        let scope = Scope::new(&vars);
+        eval(&expr, src, &scope, &TestRegistry).unwrap_err()
     }
 
     #[test_case(br#"a\"b"# => "a\"b"; "escaped_double_quote")]
@@ -334,17 +443,19 @@ b" }}"# => Value::Str("a\nb".to_string()) ; "str_raw_newline")]
         let Node::Interpolate(expr) = parse(scan(src).unwrap(), src).unwrap().pop().unwrap() else {
             panic!("expected Interpolate")
         };
-        eval(&expr, src, &Frame::Var(&var_scope()), &TestRegistry).unwrap()
+        let vars = var_scope();
+        let scope = Scope::new(&vars);
+        eval(&expr, src, &scope, &TestRegistry).unwrap()
     }
 
     #[test_case(b"{{ missing }}" => (RenderError::UndefinedVariable, (3, 7)) ; "undefined_variable")]
     #[test_case(b"{{ map.nope }}" => (RenderError::MapKeyNotFound { key: "nope".into() }, (7, 4)) ; "map_key_not_found")]
-    #[test_case(b"{{ str.field }}" => (RenderError::MapAccessOnNonMap { got: ValueType::Str }, (7, 5)) ; "map_access_on_str")]
-    #[test_case(b"{{ num.field }}" => (RenderError::MapAccessOnNonMap { got: ValueType::Int }, (7, 5)) ; "map_access_on_int")]
-    #[test_case(b"{{ yes.field }}" => (RenderError::MapAccessOnNonMap { got: ValueType::Bool }, (7, 5)) ; "map_access_on_bool")]
-    #[test_case(b"{{ list.field }}" => (RenderError::MapAccessOnNonMap { got: ValueType::List }, (8, 5)) ; "map_access_on_list")]
-    #[test_case(b"{{ \"s\".0 }}" => (RenderError::ListAccessOnNonList { got: ValueType::Str }, (7, 1)) ; "list_access_on_str")]
-    #[test_case(b"{{ map.0 }}" => (RenderError::ListAccessOnNonList { got: ValueType::Map }, (7, 1)) ; "list_access_on_map")]
+    #[test_case(b"{{ str.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Str }, (7, 5)) ; "map_access_on_str")]
+    #[test_case(b"{{ num.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Int }, (7, 5)) ; "map_access_on_int")]
+    #[test_case(b"{{ yes.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Bool }, (7, 5)) ; "map_access_on_bool")]
+    #[test_case(b"{{ list.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::List }, (8, 5)) ; "map_access_on_list")]
+    #[test_case(b"{{ \"s\".0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str }, (7, 1)) ; "list_access_on_str")]
+    #[test_case(b"{{ map.0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Map }, (7, 1)) ; "list_access_on_map")]
     #[test_case(b"{{ list.3 }}" => (RenderError::ListIndexOutOfBounds { idx: 3, len: 3 }, (8, 1)) ; "index_out_of_bounds")]
     #[test_case(b"{{ list.-1 }}" => (RenderError::NegativeListIndex { idx: -1 }, (8, 2)) ; "negative_index")]
     fn eval_render(src: &[u8]) -> (RenderError, (usize, usize)) {

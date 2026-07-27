@@ -7,6 +7,28 @@ pub(crate) enum Node {
     Text(Range<usize>),
     /// `{{ expr }}` — the expression is evaluated and its value emitted.
     Interpolate(Expr),
+    /// `{% if expr %} ... {% elif expr %} ... {% else %} ... {% end %}`.
+    /// Branches are stored in source order; the first `Bool(true)` condition
+    /// renders its body. `else_body` runs when no branch matched.
+    If {
+        branches: Vec<Branch>,
+        else_body: Option<Vec<Node>>,
+    },
+    /// `{% for var in iter %} ... {% end %}`. `var` is the byte span of the
+    /// loop-variable identifier; `iter` is evaluated once and must be a List.
+    For {
+        var: Range<usize>,
+        iter: Expr,
+        body: Vec<Node>,
+    },
+}
+
+/// One branch of an `{% if %}` block: a condition expression and the body
+/// that runs when the condition evaluates to `Bool(true)`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Branch {
+    pub(crate) cond: Expr,
+    pub(crate) body: Vec<Node>,
 }
 
 /// A parsed expression. Ranges are byte offsets into the source; string

@@ -79,12 +79,12 @@ pub enum ParseError {
     #[error("unclosed delimiter")]
     #[diagnostic(code(templater::parse::unclosed_delimiter))]
     UnclosedDelimiter,
-    #[error("unclosed function call")]
-    #[diagnostic(code(templater::parse::unclosed_call_paren))]
-    UnclosedCallParen,
+    #[error("unclosed function")]
+    #[diagnostic(code(templater::parse::unclosed_function))]
+    UnclosedFunction,
     #[error("unclosed list")]
-    #[diagnostic(code(templater::parse::unclosed_call_paren))]
-    UnclosedListBracket,
+    #[diagnostic(code(templater::parse::unclosed_list))]
+    UnclosedList,
     #[error("unexpected token")]
     #[diagnostic(code(templater::parse::unexpected_token))]
     UnexpectedToken,
@@ -106,9 +106,39 @@ pub enum ParseError {
     #[error("invalid modifier")]
     #[diagnostic(code(templater::parse::invalid_modifier))]
     InvalidModifier,
+    #[error("empty statement")]
+    #[diagnostic(code(templater::parse::empty_statement))]
+    EmptyStatement,
     #[error("unrecognized statement")]
     #[diagnostic(code(templater::parse::unrecognized_statement))]
     UnrecognizedStatement,
+    #[error("missing condition")]
+    #[diagnostic(code(templater::parse::missing_condition))]
+    MissingCondition,
+    #[error("empty `for` statement")]
+    #[diagnostic(code(templater::parse::empty_for))]
+    EmptyFor,
+    #[error("not a valid variable name")]
+    #[diagnostic(code(templater::parse::invalid_variable))]
+    InvalidVariable,
+    #[error("missing `in` keyword")]
+    #[diagnostic(code(templater::parse::missing_in))]
+    MissingIn,
+    #[error("missing iterable")]
+    #[diagnostic(code(templater::parse::missing_iterable))]
+    MissingIterable,
+    #[error("unclosed block")]
+    #[diagnostic(code(templater::parse::unclosed_block))]
+    UnclosedBlock,
+    #[error("orphan `end`")]
+    #[diagnostic(code(templater::parse::orphan_end))]
+    OrphanEnd,
+    #[error("`elif` outside of an `if` block")]
+    #[diagnostic(code(templater::parse::elif_outside_if))]
+    ElifOutsideIf,
+    #[error("`else` outside of an `if` block")]
+    #[diagnostic(code(templater::parse::else_outside_if))]
+    ElseOutsideIf,
 }
 
 /// Errors raised only on actually-executed content.
@@ -126,12 +156,9 @@ pub enum RenderError {
     #[error("negative list index {idx}")]
     #[diagnostic(code(templater::render::negative_list_index))]
     NegativeListIndex { idx: i64 },
-    #[error("expected map, got {got}")]
-    #[diagnostic(code(templater::render::map_access_on_non_map))]
-    MapAccessOnNonMap { got: ValueType },
-    #[error("expected list, got {got}")]
-    #[diagnostic(code(templater::render::list_access_on_non_list))]
-    ListAccessOnNonList { got: ValueType },
+    #[error("expects {expected}, got {got}")]
+    #[diagnostic(code(templater::render::type_mismatch))]
+    TypeMismatch { expected: ValueType, got: ValueType },
 }
 
 /// Errors returned by the host's [`FunctionRegistry`](crate::FunctionRegistry).
