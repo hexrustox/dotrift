@@ -421,8 +421,7 @@ mod tests {
     #[test_case(b"{{ false }}" => Value::Bool(false) ; "bool_false")]
     #[test_case(b"{{ \"x\" }}" => Value::Str("x".to_string()) ; "str_basic")]
     #[test_case(br#"{{ "a\"b\\c" }}"# => Value::Str("a\"b\\c".to_string()) ; "str_escapes")]
-    #[test_case(br#"{{ "a
-b" }}"# => Value::Str("a\nb".to_string()) ; "str_raw_newline")]
+    #[test_case(b"{{ \"a\nb\" }}" => Value::Str("a\nb".to_string()) ; "str_raw_newline")]
     #[test_case(b"{{ [] }}" => Value::List(vec![]) ; "list_empty")]
     #[test_case(b"{{ [1, \"x\", true] }}" => Value::List(vec![Value::Int(1), Value::Str("x".to_string()), Value::Bool(true)]) ; "list_heterogeneous")]
     #[test_case(b"{{ [[1, 2], []] }}" => Value::List(vec![Value::List(vec![Value::Int(1), Value::Int(2)]), Value::List(vec![])]) ; "list_nested")]
@@ -455,6 +454,8 @@ b" }}"# => Value::Str("a\nb".to_string()) ; "str_raw_newline")]
     #[test_case(b"{{ yes.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Bool }, (7, 5)) ; "map_access_on_bool")]
     #[test_case(b"{{ list.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::List }, (8, 5)) ; "map_access_on_list")]
     #[test_case(b"{{ \"s\".0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str }, (7, 1)) ; "list_access_on_str")]
+    #[test_case(b"{{ yes.0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Bool }, (7, 1)); "index_on_bool")]
+    #[test_case(b"{{ num.0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Int }, (7, 1)); "index_on_int")]
     #[test_case(b"{{ map.0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Map }, (7, 1)) ; "list_access_on_map")]
     #[test_case(b"{{ list.3 }}" => (RenderError::ListIndexOutOfBounds { idx: 3, len: 3 }, (8, 1)) ; "index_out_of_bounds")]
     #[test_case(b"{{ list.-1 }}" => (RenderError::NegativeListIndex { idx: -1 }, (8, 2)) ; "negative_index")]
@@ -473,6 +474,52 @@ b" }}"# => Value::Str("a\nb".to_string()) ; "str_raw_newline")]
         match eval_err(src) {
             Error::Func { err, span } => (err, (span.offset(), span.len())),
             e => panic!("expected Func error, got {e:?}"),
+        }
+    }
+
+    #[test_case(b"{% if yes %}Y{% end %}" => "Y"; "if_true")]
+    #[test_case(b"{% if no %}Y{% else %}N{% end %}" => "N"; "if_false")]
+    #[test_case(b"{% if no %}A{% elif yes %}B{% else %}C{% end %}" => "B"; "if_elif")]
+    #[test_case(b"{% if yes %}{% if yes %}ok{% end %}{% end %}" => "ok"; "nested_if")]
+    #[test_case(b"{% for x in list %}{{x}},{% end %}" => "1,2,3,"; "for_list_var")]
+    #[test_case(b"{% for x in [10, 20] %}{{x}};{% end %}" => "10;20;"; "for_list_literal")]
+    #[test_case(b"{% for x in same([\"a\", \"b\"]) %}{{x}}{% end %}" => "ab"; "for_fn_call")]
+    #[test_case(b"{% for x in list %}{{ str }}{% end %}" => "foobarfoobarfoobar"; "for_uses_outer_var")]
+    #[test_case(b"{% for str in list %}{{str}}{% end %}" => "123"; "for_shadows_outer_var")]
+    #[test_case(b"{% for str in list %}{{str}}{% end %}{{str}}" => "123foobar"; "for_restores_after_end")]
+    #[test_case(b"{% for x in empty_list %}{{x}}{% end %}after" => "after"; "for_empty_iterable_silent")]
+    #[test_case(b"{% if false %}{% for x in [1] %}{{ missing }}{% end %}{% end %}" => ""; "for_in_untaken_branch_silent")]
+    fn eval_body_if(src: &[u8]) -> String {
+        let template = Template {
+            nodes: parse(scan(src).unwrap(), src).unwrap(),
+            src: crate::Source::Owned(src.to_vec()),
+        };
+        let mut out = Vec::new();
+        let vars = var_scope();
+        let mut scope = Scope::new(&vars);
+        template
+            .eval_body(&template.nodes, &mut out, &mut scope, &TestRegistry)
+            .unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test_case(b"{% if str %}x{% end %}" => (RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Str }, (6, 3)); "if_cond_str")]
+    #[test_case(b"{% if no %}{% elif num %}x{% end %}" => (RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Int }, (19, 3)); "elif_cond_int")]
+    #[test_case(b"{% for x in str %}{{x}}{% end %}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str }, (12, 3)); "for_iterable_str")]
+    fn eval_body_if_error(src: &[u8]) -> (RenderError, (usize, usize)) {
+        let template = Template {
+            nodes: parse(scan(src).unwrap(), src).unwrap(),
+            src: crate::Source::Owned(src.to_vec()),
+        };
+        let mut out = Vec::new();
+        let vars = var_scope();
+        let mut scope = Scope::new(&vars);
+        match template
+            .eval_body(&template.nodes, &mut out, &mut scope, &TestRegistry)
+            .unwrap_err()
+        {
+            Error::Render { err, span } => (err, (span.offset(), span.len())),
+            e => panic!("expected Render error, got {e:?}"),
         }
     }
 }

@@ -121,17 +121,44 @@ mod tests {
 
     use super::*;
 
-    #[test_case(b"{{--}}" => vec![interp!(0..6, 3..3, Dash, Dash)]; "interp_dash_empty")]
-    #[test_case(b"{{==}}" => vec![interp!(0..6, 3..3, Equal, Equal)]; "interp_equal_empty")]
+    // ── Empty / trivial ──────────────────────────────────────────────────
+    #[test_case(b"" => Vec::<Token>::new(); "empty_source")]
     #[test_case(b"hello" => vec![text!(0..5)]; "plain_text_no_tags")]
+    #[test_case(b"{{ x }}" => vec![interp!(0..7, 3..4)]; "single_tag_only")]
+    // ── No modifiers (baseline) ──────────────────────────────────────────
     #[test_case(b"a {{ x }}b" => vec![text!(0..2), interp!(2..9, 5..6), text!(9..10)]; "no_modifiers_with_text")]
-    #[test_case(b"{%- -%}" => vec![stmt!(0..7, 4..4, Dash, Dash)]; "stmt_dash_empty")]
-    #[test_case(b"{%= =%}" => vec![stmt!(0..7, 4..4, Equal, Equal)]; "stmt_equal_empty")]
-    #[test_case(b"  {{- x -}}  " => vec![interp!(2..11, 6..7, Dash, Dash)]; "spaces_fully_consumed")]
-    #[test_case(b"\n{{= x =}}\n" => vec![text!(0..1), interp!(1..10, 5..6, Equal, Equal)]; "equal_trims_to_newline")]
+    // ── Dash modifier (`-` trims spaces & tabs) ─────────────────────────
+    // Single-sided: left dash
+    #[test_case(b"  {{- x }}" => vec![interp!(2..10, 6..7, Dash, None)]; "dash_full_collapse_left")]
     #[test_case(b"a {{- x }}b" => vec![text!(0..1), interp!(2..10, 6..7, Dash, None), text!(10..11)]; "left_dash_trims_preceding")]
+    // Single-sided: right dash
     #[test_case(b"a {{ x -}}  b" => vec![text!(0..2), interp!(2..10, 5..6, None, Dash), text!(12..13)]; "right_dash_trims_following")]
+    #[test_case(b"{{ x -}}\nb" => vec![interp!(0..8, 3..4, None, Dash), text!(8..10)]; "dash_preserves_newline")]
+    // Both sides
+    #[test_case(b"  {{- x -}}  " => vec![interp!(2..11, 6..7, Dash, Dash)]; "spaces_fully_consumed")]
+    #[test_case(b"a\t{{- x -}}\tb" => vec![text!(0..1), interp!(2..11, 6..7, Dash, Dash), text!(12..13)]; "dash_trims_tabs")]
+    // Empty tag with dash
+    #[test_case(b"{{--}}" => vec![interp!(0..6, 3..3, Dash, Dash)]; "interp_dash_empty")]
+    #[test_case(b"{%- -%}" => vec![stmt!(0..7, 4..4, Dash, Dash)]; "stmt_dash_empty")]
+    // ── Equal modifier (`=` trims to newline) ────────────────────────────
+    // SOF / EOF edges
+    #[test_case(b"{{= x }}abc" => vec![interp!(0..8, 4..5, Equal, None), text!(8..11)]; "left_equal_at_sof")]
+    #[test_case(b"abc {{= x =}}" => vec![interp!(4..13, 8..9, Equal, Equal)]; "right_equal_at_eof")]
+    // Basic newline trimming
+    #[test_case(b"\n{{= x =}}\n" => vec![text!(0..1), interp!(1..10, 5..6, Equal, Equal)]; "equal_trims_to_newline")]
+    #[test_case(b"a\n\n{{= x }}\n" => vec![text!(0..3), interp!(3..11, 7..8, Equal, None), text!(11..12)]; "equal_stops_at_closest_newline")]
+    // Plain text deletion (not just whitespace)
+    #[test_case(b"prefix {{= x =}}\nsuffix" => vec![interp!(7..16, 11..12, Equal, Equal), text!(17..23)]; "equal_eats_plain_text")]
+    // Empty tag with equal
+    #[test_case(b"{{==}}" => vec![interp!(0..6, 3..3, Equal, Equal)]; "interp_equal_empty")]
+    #[test_case(b"{%= =%}" => vec![stmt!(0..7, 4..4, Equal, Equal)]; "stmt_equal_empty")]
+    // ── Asymmetric / mixed modifiers ─────────────────────────────────────
+    #[test_case(b"a\n{{= x }}b" => vec![text!(0..2), interp!(2..10, 6..7, Equal, None), text!(10..11)]; "left_equal_only")]
     #[test_case(b"a\n{{= x =}}\nb" => vec![text!(0..2), interp!(2..11, 6..7, Equal, Equal), text!(12..13)]; "equal_with_mixed_content")]
+    // ── Barrier behavior (`=` stops at tag delimiters) ───────────────────
+    #[test_case(b"a {# c #} {{= x }}" => vec![text!(0..2), Token::Barrier, interp!(10..18, 14..15, Equal, None)]; "barrier_comment_stops_equal")]
+    // ── Multi-tag interactions ───────────────────────────────────────────
+    #[test_case(b"{{= x =}} mid {{= y }}" => vec![interp!(0..9, 4..5, Equal, Equal), interp!(14..22, 18..19, Equal, None)]; "two_equal_tags_same_line")]
     fn trim_cases(source: &[u8]) -> Vec<Token> {
         let mut tokens = scan(source).unwrap();
         trim_tokens(&mut tokens, source);

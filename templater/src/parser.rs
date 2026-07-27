@@ -202,7 +202,7 @@ impl<'s> Parser<'s> {
                 source_span(tag.clone()),
             ));
         }
-        let (kind, ttag, rest) = self.peek_terminator()?;
+        let (kind, _, rest) = self.peek_terminator()?;
         match kind {
             StmtKind::End => {
                 self.pos += 1;
@@ -212,9 +212,6 @@ impl<'s> Parser<'s> {
                         operand_nonws_span(self.source, rest),
                     ));
                 }
-            }
-            StmtKind::Elif | StmtKind::Else => {
-                return Err(Error::parse(ParseError::ElseOutsideIf, source_span(ttag)));
             }
             _ => unreachable!("parse_nodes(ForBlock) stops only at terminators"),
         }
@@ -998,11 +995,11 @@ mod tests {
     #[test_case(b"{% if true %}{% end %}" => Node::If {
         branches: vec![Branch { cond: expr!(bool true, 6..10), body: vec![] }],
         else_body: None,
-    })]
+    } ; "if_only_bool_true")]
     #[test_case(b"{% if true %}{{x}}{% end %}" => Node::If {
         branches: vec![Branch { cond: expr!(bool true, 6..10), body: vec![Node::Interpolate(expr!(var 15..16))] }],
         else_body: None,
-    })]
+    } ; "if_only_with_interpolation")]
     #[test_case(b"{% if no %}A{% elif yes %}B{% end %}" => Node::If {
         branches: vec![
             Branch { cond: expr!(var 6..8), body: vec![Node::Text(11..12)] },
@@ -1025,7 +1022,7 @@ mod tests {
             Branch { cond: expr!(var 32..33), body: vec![Node::Text(36..37)] }
         ],
         else_body: Some(vec![Node::Text(47..48)]),
-    })]
+    } ; "if_multi_elif_with_else")]
     #[test_case(b"{% if a %}{% if b %}{% end %}{% end %}" => Node::If {
         branches: vec![Branch { cond: expr!(var 6..7), body: vec![
             Node::If {
@@ -1034,7 +1031,7 @@ mod tests {
             }
         ] }],
         else_body: None,
-    })]
+    } ; "if_nested_if")]
     #[test_case(b"{% for x in list %}{% if true %}{{ x }}{% end %}{% end %}" => Node::For {
         var: 7..8,
         iter: expr!(var 12..16),
@@ -1106,31 +1103,33 @@ mod tests {
     }
 
     // -- empty / invalid statements --
-    #[test_case(b"" => (ParseError::EmptyStatement, (0, 4)))]
-    #[test_case(b" " => (ParseError::EmptyStatement, (0, 5)))]
-    #[test_case(b"@" => (ParseError::UnrecognizedStatement, (2, 1)))]
-    #[test_case(b"ifx" => (ParseError::UnrecognizedStatement, (2, 3)))]
-    #[test_case(b"forx in y" => (ParseError::UnrecognizedStatement, (2, 9)))]
+    #[test_case(b"" => (ParseError::EmptyStatement, (0, 4)) ; "empty_statement")]
+    #[test_case(b" " => (ParseError::EmptyStatement, (0, 5)) ; "whitespace_statement")]
+    #[test_case(b"@" => (ParseError::UnrecognizedStatement, (2, 1)) ; "unrecognized_statement_at")]
+    #[test_case(b"ifx" => (ParseError::UnrecognizedStatement, (2, 3)) ; "unrecognized_statement_ifx")]
+    #[test_case(b"forx in y" => (ParseError::UnrecognizedStatement, (2, 9)) ; "unrecognized_statement_forx")]
     #[test_case(b"123" => (ParseError::UnrecognizedStatement, (2, 3)) ; "statement_starts_with_digit")]
     #[test_case(b"IF x" => (ParseError::UnrecognizedStatement, (2, 4)) ; "statement_uppercase_keyword")]
     // -- if errors --
-    #[test_case(b"if" => (ParseError::MissingCondition, (4, 1)))]
-    #[test_case(b"if!" => (ParseError::UnexpectedToken, (4, 1)))]
-    #[test_case(b"if x y" => (ParseError::UnexpectedTokensAfterExpr, (7, 1)))]
+    #[test_case(b"if" => (ParseError::MissingCondition, (4, 1)) ; "if_missing_condition")]
+    #[test_case(b"if!" => (ParseError::UnexpectedToken, (4, 1)) ; "if_unexpected_token_bang")]
+    #[test_case(b"if x y" => (ParseError::UnexpectedTokensAfterExpr, (7, 1)) ; "if_unexpected_tokens_after_condition")]
     #[test_case(b"if \"unclosed" => (ParseError::UnclosedString, (5, 1)) ; "if_unclosed_string_condition")]
     #[test_case(b"if 9223372036854775808" => (ParseError::IntegerOutOfRange, (5, 19)) ; "if_int_overflow_condition")]
     #[test_case(b"if in" => (ParseError::ReservedKeyword { keyword: "in".into() }, (5, 2)) ; "if_reserved_keyword_condition")]
     #[test_case(b"if a." => (ParseError::EmptyField, (6, 1)) ; "if_trailing_dot_in_condition")]
+    #[test_case(b"if a@" => (ParseError::UnexpectedToken, (6, 1)) ; "if_unexpected_token_at")]
     // -- for errors --
-    #[test_case(b"for" => (ParseError::EmptyFor, (2, 3)))]
-    #[test_case(b"for $" => (ParseError::InvalidVariable, (6, 1)))]
-    #[test_case(b"for x$" => (ParseError::UnexpectedToken, (7, 1)))]
-    #[test_case(b"for x" => (ParseError::MissingIn, (7, 1)))]
-    #[test_case(b"for x x" => (ParseError::MissingIn, (8, 1)))]
+    #[test_case(b"for" => (ParseError::EmptyFor, (2, 3)) ; "for_missing_binding")]
+    #[test_case(b"for $" => (ParseError::InvalidVariable, (6, 1)) ; "for_invalid_variable_dollar")]
+    #[test_case(b"for x$" => (ParseError::UnexpectedToken, (7, 1)) ; "for_invalid_variable_trailing")]
+    #[test_case(b"for x" => (ParseError::MissingIn, (7, 1)) ; "for_missing_in")]
+    #[test_case(b"for x x" => (ParseError::MissingIn, (8, 1)) ; "for_missing_in_second_word")]
     #[test_case(b"for x on list" => (ParseError::MissingIn, (8, 2)) ; "for_wrong_word_instead_of_in")]
-    #[test_case(b"for x in" => (ParseError::MissingIterable, (10, 1)))]
+    #[test_case(b"for x in" => (ParseError::MissingIterable, (10, 1)) ; "for_missing_iterable")]
     #[test_case(b"for x in   " => (ParseError::MissingIterable, (10, 1)) ; "for_missing_iterable_with_trailing_ws")]
-    #[test_case(b"for x in y x" => (ParseError::UnexpectedTokensAfterExpr, (13, 1)))]
+    #[test_case(b"for x in y x" => (ParseError::UnexpectedTokensAfterExpr, (13, 1)) ; "for_unexpected_tokens_after_iterable")]
+    #[test_case(b"for x in y$" => (ParseError::UnexpectedToken, (12, 1)) ; "for_unexpected_token_in_iterable")]
     #[test_case(b"for if in list" => (ParseError::ReservedKeyword { keyword: "if".into() }, (6, 2)) ; "for_reserved_keyword_var")]
     #[test_case(b"for true in list" => (ParseError::ReservedKeyword { keyword: "true".into() }, (6, 4)) ; "for_bool_literal_var")]
     #[test_case(b"for 1 in list" => (ParseError::InvalidVariable, (6, 1)) ; "for_digit_start_var")]
@@ -1144,21 +1143,21 @@ mod tests {
     }
 
     // -- orphan terminators --
-    #[test_case(b"{%end%}" => (ParseError::OrphanEnd, (0, 7)))]
-    #[test_case(b"{%elif%}" => (ParseError::ElifOutsideIf, (0, 8)))]
-    #[test_case(b"{%else%}" => (ParseError::ElseOutsideIf, (0, 8)))]
+    #[test_case(b"{%end%}" => (ParseError::OrphanEnd, (0, 7)) ; "orphan_end")]
+    #[test_case(b"{%elif%}" => (ParseError::ElifOutsideIf, (0, 8)) ; "orphan_elif")]
+    #[test_case(b"{%else%}" => (ParseError::ElseOutsideIf, (0, 8)) ; "orphan_else")]
     #[test_case(b"{% if a %}{% end %}{% elif b %}{% end %}" => (ParseError::ElifOutsideIf, (19, 12)) ; "elif_after_closed_if")]
     #[test_case(b"{% if a %}A{% else %}B{% end %}{% end %}" => (ParseError::OrphanEnd, (31, 9)) ; "extra_end_after_closed_if")]
     // -- elif / else in wrong blocks --
-    #[test_case(b"{% for x in list %}{% elif y %}{% end %}" => (ParseError::ElifOutsideIf, (19, 12)))]
-    #[test_case(b"{% for x in list %}{% else %}{% end %}" => (ParseError::ElseOutsideIf, (19, 10)))]
-    #[test_case(b"{% if a %}A{% else %}B{% elif c %}C{% end %}" => (ParseError::ElifOutsideIf, (22, 12)))]
-    #[test_case(b"{% if a %}A{% else %}B{% else %}C{% end %}" => (ParseError::ElseOutsideIf, (22, 10)))]
+    #[test_case(b"{% if a %}A{% else %}B{% elif c %}C{% end %}" => (ParseError::ElifOutsideIf, (22, 12)) ; "elif_after_else")]
+    #[test_case(b"{% if a %}A{% else %}B{% else %}C{% end %}" => (ParseError::ElseOutsideIf, (22, 10)) ; "else_after_else")]
+    #[test_case(b"{% for x in list %}{% elif y %}{% end %}" => (ParseError::ElifOutsideIf, (19, 12)) ; "elif_in_for")]
+    #[test_case(b"{% for x in list %}{% else %}{% end %}" => (ParseError::ElseOutsideIf, (19, 10)) ; "else_in_for")]
     // -- unexpected tokens on terminators --
-    #[test_case(b"{%if true%}{%end x%}" => (ParseError::UnexpectedToken, (17, 1)))]
+    #[test_case(b"{%if true%}{%end x%}" => (ParseError::UnexpectedToken, (17, 1)) ; "end_with_operand")]
     #[test_case(b"{% for x in list %}{% end x %}" => (ParseError::UnexpectedToken, (26, 1)) ; "for_end_with_operand")]
-    #[test_case(b"{%if true%}{%else x%}" => (ParseError::UnexpectedToken, (18, 1)))]
-    #[test_case(b"{%if true%}{%else a b c%}" => (ParseError::UnexpectedToken, (18, 1)))]
+    #[test_case(b"{%if true%}{%else x%}" => (ParseError::UnexpectedToken, (18, 1)) ; "else_with_operand")]
+    #[test_case(b"{%if true%}{%else a b c%}" => (ParseError::UnexpectedToken, (18, 1)) ; "else_with_multiple_operands")]
     // -- unclosed blocks --
     #[test_case(b"{% if true %}text" => (ParseError::UnclosedBlock, (0, 13)) ; "unclosed_if")]
     #[test_case(b"{% for x in list %}text" => (ParseError::UnclosedBlock, (0, 19)) ; "unclosed_for")]

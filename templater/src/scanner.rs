@@ -400,76 +400,231 @@ fn trim_inner_ws(src: &[u8], body_start: usize, body_end: usize) -> Range<usize>
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
     use test_case::test_case;
 
     use crate::{interp, stmt, text};
 
     use super::*;
 
+    // Trivial / empty
     #[test_case(b"" => Vec::<Token>::new(); "empty")]
     #[test_case(b"hello" => vec![text!(0..5)]; "plain_text")]
     #[test_case(b"{}" => vec![text!(0..2)]; "braces")]
+    // Basic interpolation
     #[test_case(b"{{x}}" => vec![interp!(0..5, 2..3)]; "basic_interpolation")]
     #[test_case(b"{{ x }}" => vec![interp!(0..7, 3..4)]; "interpolation_with_spaces")]
     #[test_case(b"{{  x  }}" => vec![interp!(0..9, 4..5)]; "interpolation_with_multiple_spaces")]
     #[test_case(b"{{x}}y{{z}}" => vec![interp!(0..5, 2..3), text!(5..6), interp!(6..11, 8..9)]; "adjacent_interpolations")]
-    #[test_case(b"{%if x%}" => vec![stmt!(0..8, 2..6)]; "basic_statement")]
-    #[test_case(b"{# c #}" => vec![Token::Barrier]; "comment_with_content")]
-    #[test_case(b"a{#c#}b" => vec![text!(0..1), Token::Barrier, text!(6..7)]; "comment_between_text")]
-    #[test_case(b"{##}" => vec![Token::Barrier]; "minimal_comment")]
     #[test_case(b"{{\nx\n}}" => vec![interp!(0..7, 3..4)]; "interpolation_with_newlines")]
     #[test_case(b"{{\tx\t}}" => vec![interp!(0..7, 3..4)]; "interpolation_with_tabs")]
     #[test_case(b"{{ x\r }}" => vec![interp!(0..8, 3..5)]; "carriage_return_survives")]
     #[test_case(b"{{\n x\n}}" => vec![interp!(0..8, 4..5)]; "multiline_interpolation")]
-    #[test_case(b"{{-x-}}" => vec![interp!(0..7, 3..4, Dash, Dash)]; "dash_modifiers_tight")]
-    #[test_case(b"{{- x -}}" => vec![interp!(0..9, 4..5, Dash, Dash)]; "dash_modifiers_with_spaces")]
-    #[test_case(b"{{=x=}}" => vec![interp!(0..7, 3..4, Equal, Equal)]; "equal_modifiers_tight")]
-    #[test_case(b"{{= x =}}" => vec![interp!(0..9, 4..5, Equal, Equal)]; "equal_modifiers_with_spaces")]
-    #[test_case(b"{%-if x-%}" => vec![stmt!(0..10, 3..7, Dash, Dash)]; "statement_dash_modifiers")]
-    #[test_case(b"{%=if x=%}" => vec![stmt!(0..10, 3..7, Equal, Equal)]; "statement_equal_modifiers")]
+    // Basic statements
+    #[test_case(b"{%if x%}" => vec![stmt!(0..8, 2..6)]; "basic_statement")]
+    #[test_case(b"{% %}" => vec![stmt!(0..5, 3..3)]; "empty_statement_with_spaces")]
+    // Basic comments
+    #[test_case(b"{# c #}" => vec![Token::Barrier]; "comment_with_content")]
+    #[test_case(b"a{#c#}b" => vec![text!(0..1), Token::Barrier, text!(6..7)]; "comment_between_text")]
+    #[test_case(b"{##}" => vec![Token::Barrier]; "minimal_comment")]
+    #[test_case(b"{# a\nb #}" => vec![Token::Barrier]; "multiline_comment")]
+    #[test_case(b"x{# c #}y" => vec![text!(0..1), Token::Barrier, text!(8..9)]; "comment_with_surrounding_text")]
+    // Interpolation modifiers — single side
     #[test_case(b"{{-x}}" => vec![interp!(0..6, 3..4, Dash, None)]; "left_dash_only")]
     #[test_case(b"{{x-}}" => vec![interp!(0..6, 2..3, None, Dash)]; "right_dash_only")]
     #[test_case(b"{{=x}}" => vec![interp!(0..6, 3..4, Equal, None)]; "left_equal_only")]
     #[test_case(b"{{x=}}" => vec![interp!(0..6, 2..3, None, Equal)]; "right_equal_only")]
+    // Interpolation modifiers — both sides
+    #[test_case(b"{{-x-}}" => vec![interp!(0..7, 3..4, Dash, Dash)]; "dash_modifiers_tight")]
+    #[test_case(b"{{- x -}}" => vec![interp!(0..9, 4..5, Dash, Dash)]; "dash_modifiers_with_spaces")]
+    #[test_case(b"{{=x=}}" => vec![interp!(0..7, 3..4, Equal, Equal)]; "equal_modifiers_tight")]
+    #[test_case(b"{{= x =}}" => vec![interp!(0..9, 4..5, Equal, Equal)]; "equal_modifiers_with_spaces")]
     #[test_case(b"{{- x =}}" => vec![interp!(0..9, 4..5, Dash, Equal)]; "dash_left_equal_right")]
     #[test_case(b"{{= x -}}" => vec![interp!(0..9, 4..5, Equal, Dash)]; "equal_left_dash_right")]
-    #[test_case(b"{# a\nb #}" => vec![Token::Barrier]; "multiline_comment")]
-    #[test_case(b"x{# c #}y" => vec![text!(0..1), Token::Barrier, text!(8..9)]; "comment_with_surrounding_text")]
+    // Statement modifiers
+    #[test_case(b"{%-if x-%}" => vec![stmt!(0..10, 3..7, Dash, Dash)]; "statement_dash_modifiers")]
+    #[test_case(b"{%=if x=%}" => vec![stmt!(0..10, 3..7, Equal, Equal)]; "statement_equal_modifiers")]
+    #[test_case(b"{%x-%}" => vec![stmt!(0..6, 2..3, None, Dash)]; "statement_dash_right_tight")]
+    #[test_case(b"{%=x=%}" => vec![stmt!(0..7, 3..4, Equal, Equal)]; "statement_equal_modifiers_tight")]
+    #[test_case(b"{%-x=%}" => vec![stmt!(0..7, 3..4, Dash, Equal)]; "statement_dash_left_equal_right")]
+    #[test_case(b"{%=x-%}" => vec![stmt!(0..7, 3..4, Equal, Dash)]; "statement_equal_left_dash_right")]
+    // Empty interpolation bodies
+    #[test_case(b"{{}}" => vec![interp!(0..4, 2..2)]; "empty_interpolation_tight")]
+    #[test_case(b"{{ }}" => vec![interp!(0..5, 3..3)]; "empty_interpolation_with_spaces")]
+    // String literals inside tags — shielding
+    #[test_case(b"{{ \"}}\" }}" => vec![interp!(0..10, 3..7)]; "string_shields_closing_delimiter")]
+    #[test_case(b"{% \"}}\" %}" => vec![stmt!(0..10, 3..7)]; "string_shields_in_statement")]
+    #[test_case(b"{{ \"{{\" }}" => vec![interp!(0..10, 3..7)]; "string_contains_open_delimiter")]
+    #[test_case(b"{{ \"%}\" }}" => vec![interp!(0..10, 3..7)]; "string_contains_statement_close")]
+    #[test_case(b"{{ \"\" }}" => vec![interp!(0..8, 3..5)]; "empty_string_literal")]
+    #[test_case(b"{{ \"\\\\\" }}" => vec![interp!(0..10, 3..7)]; "string_with_escaped_backslash")]
+    #[test_case(b"{{ \"a\nb\" }}" => vec![interp!(0..11, 3..8)]; "multiline_string_in_tag")]
+    // Delimiters inside tag body treated as ordinary text
+    #[test_case(b"{{ {{ }}" => vec![interp!(0..8, 3..5)]; "opening_delimiter_inside_body_is_text")]
+    // Escaping — odd backslashes (delimiter becomes literal)
     #[test_case(b"\\{{" => vec![text!(1..3)]; "escaped_opening_interpolation")]
     #[test_case(b"\\{{\\}}" => vec![text!(1..3), text!(4..6)]; "escaped_interpolation_pair")]
-    #[test_case(b"\\\\{{x}}" => vec![text!(0..1), interp!(2..7, 4..5)]; "two_backslashes_then_tag")]
-    #[test_case(b"\\\\\\\\{{x}}" => vec![text!(0..2), interp!(4..9, 6..7)]; "four_backslashes_then_tag")]
     #[test_case(b"\\\\\\{{" => vec![text!(2..5)]; "three_backslashes_escaped")]
     #[test_case(b"a\\{{b" => vec![text!(0..1), text!(2..5)]; "text_with_escaped_interpolation")]
+    #[test_case(b"a\\{{b\\}}c" => vec![text!(0..1), text!(2..5), text!(6..9)]; "escaped_pair_merge_into_trailing_text")]
+    // Escaping — even backslashes (delimiter is active, literal backslashes emitted)
+    #[test_case(b"\\\\{{x}}" => vec![text!(0..1), interp!(2..7, 4..5)]; "two_backslashes_then_tag")]
+    #[test_case(b"\\\\\\\\{{x}}" => vec![text!(0..2), interp!(4..9, 6..7)]; "four_backslashes_then_tag")]
+    #[test_case(b"{{ \\\\}}" => vec![interp!(0..7, 3..5)]; "escaped_backslashes_before_close")]
+    // Escaping — backslashes before modifiers
+    #[test_case(b"\\\\{{- x }}" => vec![text!(0..1), interp!(2..10, 6..7, Dash, None)]; "two_backslashes_then_dash_tag")]
+    #[test_case(b"\\\\{%x=%}" => vec![text!(0..1), stmt!(2..8, 4..5, None, Equal)]; "two_backslashes_then_equal_statement")]
+    #[test_case(b"\\{{-" => vec![text!(1..4)]; "escaped_opening_interpolation_with_dash_modifier")]
+    #[test_case(b"\\{{=" => vec![text!(1..4)]; "escaped_opening_interpolation_with_equal_modifier")]
+    #[test_case(b"\\-%}" => vec![text!(1..4)]; "escaped_backslash_before_close_dash_modifier")]
+    #[test_case(b"\\=%}" => vec![text!(1..4)]; "escaped_backslash_before_close_equal_modifier")]
+    // Escaping — inside tag body
     #[test_case(b"{{ \\{{ }}" => vec![interp!(0..9, 3..6)]; "escaped_opening_inside_interpolation")]
     #[test_case(b"{{ \\}} }}" => vec![interp!(0..9, 3..6)]; "escaped_closing_inside_interpolation")]
     #[test_case(b"{% \\{% %}" => vec![stmt!(0..9, 3..6)]; "escaped_opening_inside_statement")]
     #[test_case(b"{% \\%} %}" => vec![stmt!(0..9, 3..6)]; "escaped_closing_inside_statement")]
     #[test_case(b"{# \\#{ #}" => vec![Token::Barrier]; "escaped_opening_inside_comment")]
     #[test_case(b"{# \\#} #}" => vec![Token::Barrier]; "escaped_closing_inside_comment")]
-    #[test_case(b"{{ \"}}\" }}" => vec![interp!(0..10, 3..7)]; "string_shields_closing_delimiter")]
-    #[test_case(b"{% \"}}\" %}" => vec![stmt!(0..10, 3..7)]; "string_shields_in_statement")]
+    // Escaping — comment close backslash quantization
+    #[test_case(b"{# \\\\#}" => vec![Token::Barrier]; "comment_with_even_backslashes_before_close")]
+    #[test_case(b"{# \\\\\\#} #}" => vec![Token::Barrier]; "comment_with_odd_backslashes_then_real_close")]
+    // Non-ASCII / UTF-8 byte indexing
+    #[test_case(b"\xCE\xB1{{x}}\xCE\xB2" => vec![text!(0..2), interp!(2..7, 4..5), text!(7..9)]; "utf8_bytes_around_tag")]
     fn scan_token(input: &[u8]) -> Vec<Token> {
         scan(input).unwrap()
     }
 
-    #[test_case(b"}}" => (ParseError::StrayDelimiter, (0, 2)) ; "stray closing interpolation")]
-    #[test_case(b"%}" => (ParseError::StrayDelimiter, (0, 2)) ; "stray closing statement")]
-    #[test_case(b"#}" => (ParseError::StrayDelimiter, (0, 2)) ; "stray closing comment")]
-    #[test_case(b"a}}" => (ParseError::StrayDelimiter, (1, 2)) ; "stray delimiter after text")]
-    #[test_case(b"\\{{}}" => (ParseError::StrayDelimiter, (3, 2)) ; "stray close after escaped open")]
-    #[test_case(b"{{" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed interpolation")]
-    #[test_case(b"{{ x" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed interpolation with content")]
-    #[test_case(b"{%" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed statement")]
-    #[test_case(b"{#" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed comment")]
-    #[test_case(b"{{ \"unterminated" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed string in interpolation")]
-    #[test_case(b"{#- x #}" => (ParseError::InvalidModifier, (2, 1)) ; "modifier after opening comment")]
-    #[test_case(b"{#= =#}" => (ParseError::InvalidModifier, (2, 1)) ; "equal modifier after opening comment")]
-    #[test_case(b"{# x -#}" => (ParseError::InvalidModifier, (5, 1)) ; "modifier before closing comment")]
+    // Stray delimiters — basic
+    #[test_case(b"}}" => (ParseError::StrayDelimiter, (0, 2)) ; "stray_closing_interpolation")]
+    #[test_case(b"%}" => (ParseError::StrayDelimiter, (0, 2)) ; "stray_closing_statement")]
+    #[test_case(b"#}" => (ParseError::StrayDelimiter, (0, 2)) ; "stray_closing_comment")]
+    #[test_case(b"a}}" => (ParseError::StrayDelimiter, (1, 2)) ; "stray_delimiter_after_text")]
+    // Stray delimiters — after escaped opening
+    #[test_case(b"\\{{}}" => (ParseError::StrayDelimiter, (3, 2)) ; "stray_close_after_escaped_open")]
+    #[test_case(b"\\{% %}" => (ParseError::StrayDelimiter, (4, 2)) ; "stray_close_after_escaped_statement_open")]
+    #[test_case(b"\\{{-x}}" => (ParseError::StrayDelimiter, (5, 2)) ; "stray_close_after_escaped_interpolation_open")]
+    // Stray delimiters — after valid tag
+    #[test_case(b"{{x}}%}" => (ParseError::StrayDelimiter, (5, 2)) ; "stray_statement_close_after_interpolation")]
+    #[test_case(b"{{x}}#}" => (ParseError::StrayDelimiter, (5, 2)) ; "stray_comment_close_after_interpolation")]
+    // Unclosed delimiters — basic
+    #[test_case(b"{{" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_interpolation")]
+    #[test_case(b"{{ x" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_interpolation_with_content")]
+    #[test_case(b"{%" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_statement")]
+    #[test_case(b"{#" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_comment")]
+    #[test_case(b"{#}" => (ParseError::UnclosedDelimiter, (0, 2)) ; "comment_missing_second_hash")]
+    // Unclosed delimiters — string / modifier edge cases
+    #[test_case(b"{{ \"unterminated" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_string_in_interpolation")]
+    #[test_case(b"{% \"unterminated" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_string_in_statement")]
+    #[test_case(b"{{-x" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_with_left_dash_modifier")]
+    #[test_case(b"{{ x \\-}}" => (ParseError::UnclosedDelimiter, (0, 2)) ; "escaped_modifier_close_unclosed")]
+    #[test_case(b"{# \\#}" => (ParseError::UnclosedDelimiter, (0, 2)) ; "escaped_comment_close_at_eof")]
+    // Invalid modifiers — comment
+    #[test_case(b"{#- x #}" => (ParseError::InvalidModifier, (2, 1)) ; "modifier_after_opening_comment")]
+    #[test_case(b"{#= =#}" => (ParseError::InvalidModifier, (2, 1)) ; "equal_modifier_after_opening_comment")]
+    #[test_case(b"{# x -#}" => (ParseError::InvalidModifier, (5, 1)) ; "modifier_before_closing_comment")]
+    #[test_case(b"{# x\n-#}" => (ParseError::InvalidModifier, (5, 1)) ; "modifier_before_comment_close_across_newline")]
     fn scan_errors(input: &[u8]) -> (ParseError, (usize, usize)) {
         let Error::Parse { err, span } = scan(input).unwrap_err() else {
             panic!("expected parse error");
         };
         (err, (span.offset(), span.len()))
+    }
+
+    /// Printable ASCII bytes that cannot form or modify a delimiter, nor act
+    /// as an escape prefix.
+    fn safe_plain_bytes() -> Vec<u8> {
+        (32u8..=126)
+            .filter(|&b| !matches!(b, b'{' | b'}' | b'\\'))
+            .collect()
+    }
+
+    proptest! {
+        #[test]
+        fn odd_backslashes_escape_delimiter(
+            delim in prop::sample::select(vec!["{{", "{%", "{#", "{{-", "{%-", "{{=", "{%=", "}}", "%}", "#}", "-}}", "-%}", "=}}", "=%}"]),
+            bs_count in (1usize..=31).prop_filter("odd", |n| n % 2 == 1),
+            prefix in prop::collection::vec(prop::sample::select(safe_plain_bytes()), 0..=16),
+            suffix in prop::collection::vec(prop::sample::select(safe_plain_bytes()), 0..=16),
+        ) {
+            let mut src = Vec::new();
+            src.extend(&prefix);
+            src.extend(std::iter::repeat_n(b'\\', bs_count));
+            let delim_start = src.len();
+            src.extend_from_slice(delim.as_bytes());
+            src.extend(&suffix);
+
+            let prefix_len = prefix.len();
+            let literal_bs = (bs_count - 1) / 2;
+            let literal_start = delim_start - literal_bs;
+            let suffix_end = delim_start + delim.len() + suffix.len();
+
+            let expected = if prefix_len == 0 {
+                vec![text!(literal_start..suffix_end)]
+            } else {
+                vec![
+                    text!(0..prefix_len),
+                    text!(literal_start..suffix_end),
+                ]
+            };
+
+            prop_assert_eq!(scan(&src).unwrap(), expected);
+        }
+
+        #[test]
+        fn even_backslashes_leave_delimiter_active(
+            delim in prop::sample::select(vec![b"{{", b"{%", b"{#"]),
+            bs_count in (0usize..=32).prop_filter("even", |n| n % 2 == 0),
+            prefix in prop::collection::vec(prop::sample::select(safe_plain_bytes()), 0..=16),
+        ) {
+            let mut src = Vec::new();
+            src.extend(&prefix);
+            let literal_bs = bs_count / 2;
+            src.extend(std::iter::repeat_n(b'\\', bs_count));
+            let delim_start = src.len();
+            src.extend_from_slice(delim);
+
+            let close: &[u8] = match delim {
+                b"{{" => b"}}",
+                b"{%" => b"%}",
+                b"{#" => b"#}",
+                _ => b"",
+            };
+            src.extend_from_slice(close);
+
+            let leading_text_end = prefix.len() + literal_bs;
+
+            let tag = delim_start..delim_start + 4;
+            let body = delim_start + 2..delim_start + 2;
+            match delim {
+                b"{{" => {
+                    let tokens = scan(&src).unwrap();
+                    let mut expected = Vec::new();
+                    if leading_text_end > 0 {
+                        expected.push(text!(0..leading_text_end));
+                    }
+                    expected.push(interp!(tag, body));
+                    prop_assert_eq!(tokens, expected);
+                }
+                b"{%" => {
+                    let tokens = scan(&src).unwrap();
+                    let mut expected = Vec::new();
+                    if leading_text_end > 0 {
+                        expected.push(text!(0..leading_text_end));
+                    }
+                    expected.push(stmt!(tag, body));
+                    prop_assert_eq!(tokens, expected);
+                }
+                b"{#" => {
+                    let tokens = scan(&src).unwrap();
+                    let mut expected = Vec::new();
+                    if leading_text_end > 0 {
+                        expected.push(text!(0..leading_text_end));
+                    }
+                    expected.push(Token::Barrier);
+                    prop_assert_eq!(tokens, expected);
+                }
+                _ => unreachable!(),
+            }
+        }
     }
 }
