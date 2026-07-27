@@ -93,3 +93,25 @@ fn render_flushes_writer_on_success() {
     assert_eq!(writer.flushes, 1);
     assert_eq!(writer.bytes, b"hello");
 }
+
+#[test]
+fn from_file_renders_same_as_from_bytes() {
+    let bytes = b"{% for x in list %}{{x}}{% end %}";
+    let temp = tempfile::tempdir().expect("temp dir");
+    let path = temp.path().join("template.txt");
+    std::fs::write(&path, bytes).expect("write template");
+
+    let mut file_out = Vec::new();
+    Template::from_file(&path)
+        .expect("from_file failed")
+        .render(&mut file_out, &var_scope(), &TestRegistry)
+        .expect("render failed");
+
+    let mut bytes_out = Vec::new();
+    Template::from_bytes(bytes.to_vec())
+        .unwrap()
+        .render(&mut bytes_out, &var_scope(), &TestRegistry)
+        .expect("render failed");
+
+    assert_eq!(file_out, bytes_out);
+}

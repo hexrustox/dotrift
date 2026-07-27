@@ -17,13 +17,21 @@ impl std::io::Write for FailingWriter {
     }
 }
 
+fn assert_root_io_error(report: &miette::Report) {
+    let err = report.downcast_ref::<Error>().expect("root error is Error");
+    assert!(
+        matches!(err, Error::Io(_)),
+        "expected IO error, got: {err:?}"
+    );
+}
+
 #[test]
 fn render_propagates_io_error() {
     let template = Template::from_bytes(b"hello".to_vec()).expect("parse failed");
-    let e = template
+    let report = template
         .render(&mut FailingWriter, &HashMap::new(), &MockRegistry)
         .unwrap_err();
-    assert!(matches!(e, Error::Io(_)), "expected IO error, got: {e:?}");
+    assert_root_io_error(&report);
 }
 
 struct FlushFailingWriter;
@@ -41,8 +49,27 @@ impl std::io::Write for FlushFailingWriter {
 #[test]
 fn render_propagates_flush_error() {
     let template = Template::from_bytes(b"".to_vec()).expect("parse failed");
-    let e = template
+    let report = template
         .render(&mut FlushFailingWriter, &var_scope(), &MockRegistry)
         .unwrap_err();
-    assert!(matches!(e, Error::Io(_)), "expected IO error, got: {e:?}");
+    assert_root_io_error(&report);
+}
+
+#[test]
+fn from_file_missing_file_is_io_error() {
+    let err = Template::from_file("/definitely/does/not/exist.dotrift").unwrap_err();
+    assert!(
+        matches!(err, Error::Io(_)),
+        "expected IO error, got: {err:?}"
+    );
+}
+
+#[test]
+fn from_file_directory_is_io_error() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let err = Template::from_file(temp.path()).unwrap_err();
+    assert!(
+        matches!(err, Error::Io(_)),
+        "expected IO error, got: {err:?}"
+    );
 }

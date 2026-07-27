@@ -14,6 +14,8 @@ pub enum Error {
         err: ParseError,
         #[label]
         span: SourceSpan,
+        #[source_code]
+        source_code: ByteSource<'static>,
     },
     #[error("{err}")]
     #[diagnostic(code(templater::render))]
@@ -22,6 +24,8 @@ pub enum Error {
         err: RenderError,
         #[label]
         span: SourceSpan,
+        #[source_code]
+        source_code: ByteSource<'static>,
     },
     #[error("{err}")]
     #[diagnostic(code(templater::func))]
@@ -30,6 +34,8 @@ pub enum Error {
         err: FuncError,
         #[label(primary)]
         span: SourceSpan,
+        #[source_code]
+        source_code: ByteSource<'static>,
     },
     #[error("{0}")]
     #[diagnostic(code(templater::io))]
@@ -40,26 +46,60 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
     /// Constructs a parse error annotated with a source span.
+    ///
+    /// The source code is left empty; it is filled in at the construction
+    /// boundary with the full source bytes.
     pub(crate) fn parse(err: ParseError, span: impl Into<SourceSpan>) -> Self {
         Self::Parse {
             err,
             span: span.into(),
+            source_code: ByteSource::Owned(Arc::from(&[][..])),
         }
     }
 
     /// Constructs a render error annotated with a source span.
+    ///
+    /// The source code is left empty; it is filled in at the public render
+    /// boundary with a span window borrowed from the template's source.
     pub(crate) fn render(err: RenderError, span: impl Into<SourceSpan>) -> Self {
         Self::Render {
             err,
             span: span.into(),
+            source_code: ByteSource::Owned(Arc::from(&[][..])),
         }
     }
 
     /// Constructs a function error annotated with the call-expression span.
+    ///
+    /// The source code is left empty; it is filled in at the public render
+    /// boundary with a span window borrowed from the template's source.
     pub(crate) fn func(err: FuncError, span: impl Into<SourceSpan>) -> Self {
         Self::Func {
             err,
             span: span.into(),
+            source_code: ByteSource::Owned(Arc::from(&[][..])),
+        }
+    }
+
+    /// Replaces the source code attached to a parse/render/function error.
+    pub(crate) fn with_source_code(self, source_code: ByteSource<'static>) -> Self {
+        match self {
+            Self::Parse { err, span, .. } => Self::Parse {
+                err,
+                span,
+                source_code,
+            },
+            Self::Render { err, span, .. } => Self::Render {
+                err,
+                span,
+                source_code,
+            },
+            Self::Func { err, span, .. } => Self::Func {
+                err,
+                span,
+                source_code,
+            },
+            other => other,
         }
     }
 }
@@ -182,87 +222,142 @@ pub enum FuncError {
 /// Source bytes exposed to miette so error spans render byte-accurately.
 /// Only the requested span window is ever decoded; the whole source is never
 /// lossily converted.
-#[allow(dead_code)] // Constructed by the parse-error path from issue 02 onward.
-pub(crate) enum ByteSource {
+#[derive(Debug)]
+pub enum ByteSource<'a> {
     Owned(Arc<[u8]>),
+    Borrowed(&'a [u8]),
 }
 
-impl SourceCode for ByteSource {
+impl ByteSource<'_> {
+    /// Returns an owned source-code snippet containing the requested span plus
+    /// one line of context on each side.
+    pub(crate) fn snippet(src: &[u8], span: SourceSpan) -> ByteSource<'static> {
+        let window = span_window_bounds(src, &span, 1, 1);
+        let data = match String::from_utf8_lossy(&src[window.start..window.end]) {
+            Cow::Borrowed(_) => src[window.start..window.end].to_vec(),
+            Cow::Owned(decoded) => decoded.into_bytes(),
+        };
+        ByteSource::Owned(Arc::from(data))
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            ByteSource::Owned(bytes) => bytes,
+            ByteSource::Borrowed(bytes) => bytes,
+        }
+    }
+}
+
+/// Positional and byte-span metadata for a source window.
+struct SpanWindow {
+    start: usize,
+    end: usize,
+    line: usize,
+    column: usize,
+    line_count: usize,
+}
+
+/// Computes the byte window and positional metadata for a span.
+fn span_window_bounds(
+    src: &[u8],
+    span: &SourceSpan,
+    context_lines_before: usize,
+    context_lines_after: usize,
+) -> SpanWindow {
+    let start = span.offset();
+    let end = start + span.len();
+    assert!(
+        end <= src.len(),
+        "span out of bounds: {start}..{end} > {}",
+        src.len()
+    );
+
+    // Start of the line containing `pos` (`\n` is the only line
+    // terminator; `\r` is ordinary text).
+    let line_start = |pos: usize| {
+        src[..pos]
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map_or(0, |i| i + 1)
+    };
+    // End of the line containing `pos`: through its terminating `\n`,
+    // or the end of the source.
+    let line_end = |pos: usize| match src[pos..].iter().position(|&b| b == b'\n') {
+        Some(i) => pos + i + 1,
+        None => src.len(),
+    };
+    let span_line_start = line_start(start);
+
+    // With zero context the window is exactly the span; otherwise it
+    // grows to whole lines, `context_lines_before` above and
+    // `context_lines_after` below (miette's own convention).
+    let mut win_start = if context_lines_before == 0 {
+        start
+    } else {
+        span_line_start
+    };
+    if context_lines_before > 0 {
+        for _ in 0..context_lines_before {
+            if win_start == 0 {
+                break;
+            }
+            win_start = line_start(win_start - 1);
+        }
+    }
+
+    let win_end = if context_lines_after == 0 {
+        end
+    } else {
+        // Through the newline terminating the span's own line, then
+        // `context_lines_after` further lines.
+        let mut win_end = line_end(end);
+        for _ in 0..context_lines_after {
+            if win_end >= src.len() {
+                break;
+            }
+            win_end = line_end(win_end);
+        }
+        win_end
+    };
+
+    let line = src[..win_start].iter().filter(|&&b| b == b'\n').count();
+    let column = if context_lines_before == 0 {
+        start - span_line_start
+    } else {
+        0
+    };
+    let line_count = src[win_start..win_end]
+        .iter()
+        .filter(|&&b| b == b'\n')
+        .count()
+        + 1;
+
+    SpanWindow {
+        start: win_start,
+        end: win_end,
+        line,
+        column,
+        line_count,
+    }
+}
+
+impl SourceCode for ByteSource<'_> {
     fn read_span<'a>(
         &'a self,
         span: &SourceSpan,
         context_lines_before: usize,
         context_lines_after: usize,
     ) -> std::result::Result<Box<dyn SpanContents<'a> + 'a>, MietteError> {
-        let ByteSource::Owned(bytes) = self;
-        let src: &[u8] = bytes;
+        let src = self.as_slice();
         let start = span.offset();
         let end = start + span.len();
         if end > src.len() {
             return Err(MietteError::OutOfBounds);
         }
 
-        // Start of the line containing `pos` (`\n` is the only line
-        // terminator; `\r` is ordinary text).
-        let line_start = |pos: usize| {
-            src[..pos]
-                .iter()
-                .rposition(|&b| b == b'\n')
-                .map_or(0, |i| i + 1)
-        };
-        // End of the line containing `pos`: through its terminating `\n`,
-        // or the end of the source.
-        let line_end = |pos: usize| match src[pos..].iter().position(|&b| b == b'\n') {
-            Some(i) => pos + i + 1,
-            None => src.len(),
-        };
-        let span_line_start = line_start(start);
+        let window = span_window_bounds(src, span, context_lines_before, context_lines_after);
 
-        // With zero context the window is exactly the span; otherwise it
-        // grows to whole lines, `context_lines_before` above and
-        // `context_lines_after` below (miette's own convention).
-        let mut win_start = if context_lines_before == 0 {
-            start
-        } else {
-            span_line_start
-        };
-        if context_lines_before > 0 {
-            for _ in 0..context_lines_before {
-                if win_start == 0 {
-                    break;
-                }
-                win_start = line_start(win_start - 1);
-            }
-        }
-
-        let win_end = if context_lines_after == 0 {
-            end
-        } else {
-            // Through the newline terminating the span's own line, then
-            // `context_lines_after` further lines.
-            let mut win_end = line_end(end);
-            for _ in 0..context_lines_after {
-                if win_end >= src.len() {
-                    break;
-                }
-                win_end = line_end(win_end);
-            }
-            win_end
-        };
-
-        let line = src[..win_start].iter().filter(|&&b| b == b'\n').count();
-        let column = if context_lines_before == 0 {
-            start - span_line_start
-        } else {
-            0
-        };
-        let line_count = src[win_start..win_end]
-            .iter()
-            .filter(|&&b| b == b'\n')
-            .count()
-            + 1;
-
-        let data: &'a [u8] = match String::from_utf8_lossy(&src[win_start..win_end]) {
+        let data: &'a [u8] = match String::from_utf8_lossy(&src[window.start..window.end]) {
             Cow::Borrowed(valid) => valid.as_bytes(),
             // The window holds invalid UTF-8. `SpanContents<'a>` borrows from
             // `self`, so the owned decode can only be returned by leaking —
@@ -273,9 +368,13 @@ impl SourceCode for ByteSource {
             // raw-bytes impl, whose renderer applies the same lossy decode.
             Cow::Owned(decoded) => Box::leak(decoded.into_bytes().into_boxed_slice()),
         };
-        let win_span = SourceSpan::from((win_start, win_end - win_start));
+        let win_span = SourceSpan::from((window.start, window.end - window.start));
         Ok(Box::new(MietteSpanContents::new(
-            data, win_span, line, column, line_count,
+            data,
+            win_span,
+            window.line,
+            window.column,
+            window.line_count,
         )))
     }
 }
@@ -292,6 +391,7 @@ mod tests {
     /// Expected fields of a `SpanContents` returned by `ByteSource::read_span`.
     /// Each `#[test_case]` returns a `Window` built from the call; the test
     /// body asserts field-by-field for readable failure messages.
+    #[derive(Debug, PartialEq)]
     struct Window {
         data: Vec<u8>,
         offset: usize,
@@ -301,8 +401,12 @@ mod tests {
         line_count: usize,
     }
 
-    fn source(bytes: &[u8]) -> ByteSource {
+    fn source(bytes: &[u8]) -> ByteSource<'static> {
         ByteSource::Owned(Arc::from(bytes))
+    }
+
+    fn borrowed_source(bytes: &[u8]) -> ByteSource<'_> {
+        ByteSource::Borrowed(bytes)
     }
 
     fn read_window(bytes: &[u8], span: (usize, usize), before: usize, after: usize) -> Window {
@@ -368,5 +472,24 @@ mod tests {
     fn read_span_out_of_bounds_is_an_error() {
         let src = source(b"short");
         assert!(src.read_span(&(10, 5).into(), 0, 0).is_err());
+    }
+
+    #[test]
+    fn borrowed_read_span_matches_owned() {
+        let bytes = b"one\ntwo\nthree";
+        let owned = read_window(bytes, (8, 3), 1, 1);
+        let borrowed = {
+            let src = borrowed_source(bytes);
+            let contents = src.read_span(&(8, 3).into(), 1, 1).unwrap();
+            Window {
+                data: contents.data().to_vec(),
+                offset: contents.span().offset(),
+                len: contents.span().len(),
+                line: contents.line(),
+                column: contents.column(),
+                line_count: contents.line_count(),
+            }
+        };
+        assert_eq!(owned, borrowed);
     }
 }

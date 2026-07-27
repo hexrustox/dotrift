@@ -64,7 +64,7 @@ impl Template {
     ) -> Result<()> {
         for node in nodes {
             match node {
-                Node::Text(range) => writer.write_all(&self.src.bytes()[range.clone()])?,
+                Node::Text(range) => writer.write_all(&self.src.as_bytes()[range.clone()])?,
                 Node::Interpolate(expr) => {
                     // String literals escape-walk directly into the writer
                     // (zero allocation, byte-preserved). All other exprs are
@@ -72,10 +72,10 @@ impl Template {
                     // `write_top`.
                     match expr {
                         Expr::StrLit { interior, .. } => {
-                            write_string_literal(self.src.bytes(), interior.clone(), writer)?;
+                            write_string_literal(self.src.as_bytes(), interior.clone(), writer)?;
                         }
                         _ => {
-                            let value = eval(expr, self.src.bytes(), scope, functions)?;
+                            let value = eval(expr, self.src.as_bytes(), scope, functions)?;
                             value.write_top(writer)?;
                         }
                     }
@@ -86,7 +86,7 @@ impl Template {
                 } => {
                     let mut taken = false;
                     for branch in branches {
-                        let cond = eval(&branch.cond, self.src.bytes(), scope, functions)?;
+                        let cond = eval(&branch.cond, self.src.as_bytes(), scope, functions)?;
                         match cond {
                             Value::Bool(true) => {
                                 self.eval_body(&branch.body, writer, scope, functions)?;
@@ -111,7 +111,7 @@ impl Template {
                     }
                 }
                 Node::For { var, iter, body } => {
-                    let iterable = eval(iter, self.src.bytes(), scope, functions)?;
+                    let iterable = eval(iter, self.src.as_bytes(), scope, functions)?;
                     match iterable {
                         Value::List(items) => {
                             // Evaluate the iterable exactly once and consume
@@ -461,7 +461,7 @@ mod tests {
     #[test_case(b"{{ list.-1 }}" => (RenderError::NegativeListIndex { idx: -1 }, (8, 2)) ; "negative_index")]
     fn eval_render(src: &[u8]) -> (RenderError, (usize, usize)) {
         match eval_err(src) {
-            Error::Render { err, span } => (err, (span.offset(), span.len())),
+            Error::Render { err, span, .. } => (err, (span.offset(), span.len())),
             e => panic!("expected Render error, got {e:?}"),
         }
     }
@@ -472,7 +472,7 @@ mod tests {
     #[test_case(b"{{ exact1(12) }}" => (FuncError::TypeMismatch { expected: ValueType::Str, got: ValueType::Int, arg_index: 0 }, (10, 2)) ; "type_mismatch_arg")]
     fn eval_func(src: &[u8]) -> (FuncError, (usize, usize)) {
         match eval_err(src) {
-            Error::Func { err, span } => (err, (span.offset(), span.len())),
+            Error::Func { err, span, .. } => (err, (span.offset(), span.len())),
             e => panic!("expected Func error, got {e:?}"),
         }
     }
@@ -518,7 +518,7 @@ mod tests {
             .eval_body(&template.nodes, &mut out, &mut scope, &TestRegistry)
             .unwrap_err()
         {
-            Error::Render { err, span } => (err, (span.offset(), span.len())),
+            Error::Render { err, span, .. } => (err, (span.offset(), span.len())),
             e => panic!("expected Render error, got {e:?}"),
         }
     }

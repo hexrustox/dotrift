@@ -16,3 +16,4 @@ testing = []
 templater = { path = ".", features = ["testing"] }
 proptest.workspace = true
 test-case.workspace = true
+tempfile.workspace = true

@@ -1,10 +1,10 @@
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 use miette::SourceSpan;
 
 use crate::{
     ast::{Branch, Expr, Node},
-    error::{Error, ParseError},
+    error::{ByteSource, Error, ParseError},
     scanner::Token,
     util::{is_whitespace, source_span},
 };
@@ -18,7 +18,9 @@ pub(crate) fn parse(tokens: Vec<Token>, source: &[u8]) -> std::result::Result<Ve
         source,
         pos: 0,
     };
-    parser.parse_nodes(Stop::None)
+    parser
+        .parse_nodes(Stop::None)
+        .map_err(|err| err.with_source_code(ByteSource::Owned(Arc::from(source.to_vec()))))
 }
 
 /// Which block terminators `parse_nodes` may return at (leaving them
@@ -339,10 +341,10 @@ fn parse_for_binding(
     };
 
     if state.pos < bytes.len() && !is_whitespace(bytes[state.pos]) {
-        return Err(Error::Parse {
-            err: ParseError::UnexpectedToken,
-            span: state.span(state.pos..state.pos + 1),
-        });
+        return Err(Error::parse(
+            ParseError::UnexpectedToken,
+            state.span(state.pos..state.pos + 1),
+        ));
     }
 
     state.skip_ws();
@@ -575,10 +577,10 @@ impl<'s> ParserState<'s> {
                     self.pos += 1;
                 }
                 if self.pos >= bytes.len() || !bytes[self.pos].is_ascii_digit() {
-                    return Err(Error::Parse {
-                        err: ParseError::UnexpectedToken,
-                        span: self.span(dot_pos + 1..dot_pos + 2),
-                    });
+                    return Err(Error::parse(
+                        ParseError::UnexpectedToken,
+                        self.span(dot_pos + 1..dot_pos + 2),
+                    ));
                 }
                 while self.pos < bytes.len() && bytes[self.pos].is_ascii_digit() {
                     self.pos += 1;
@@ -595,10 +597,10 @@ impl<'s> ParserState<'s> {
                     idx_span,
                 };
             } else {
-                return Err(Error::Parse {
-                    err: ParseError::UnexpectedToken,
-                    span: self.span(dot_pos + 1..dot_pos + 2),
-                });
+                return Err(Error::parse(
+                    ParseError::UnexpectedToken,
+                    self.span(dot_pos + 1..dot_pos + 2),
+                ));
             }
         }
     }
@@ -1096,7 +1098,7 @@ mod tests {
     #[test_case(b"[a b]" => (ParseError::UnexpectedTokensAfterExpr, (5, 1)) ; "list_missing_comma")]
     fn parse_interp_error(src: &[u8]) -> (ParseError, (usize, usize)) {
         let src = [b"{{", src, b"}}"].concat();
-        let Error::Parse { err, span } = parse(scan(&src).unwrap(), &src).unwrap_err() else {
+        let Error::Parse { err, span, .. } = parse(scan(&src).unwrap(), &src).unwrap_err() else {
             panic!("expected parse error");
         };
         (err, (span.offset(), span.len()))
@@ -1136,7 +1138,7 @@ mod tests {
     #[test_case(b"for x in in" => (ParseError::ReservedKeyword { keyword: "in".into() }, (11, 2)) ; "for_reserved_keyword_iterable")]
     fn parse_stmt_error(src: &[u8]) -> (ParseError, (usize, usize)) {
         let src = [b"{%", src, b"%}"].concat();
-        let Error::Parse { err, span } = parse(scan(&src).unwrap(), &src).unwrap_err() else {
+        let Error::Parse { err, span, .. } = parse(scan(&src).unwrap(), &src).unwrap_err() else {
             panic!("expected parse error");
         };
         (err, (span.offset(), span.len()))
@@ -1164,7 +1166,7 @@ mod tests {
     #[test_case(b"{% if true %}{% else %}" => (ParseError::UnclosedBlock, (0, 13)) ; "if_else_missing_end")]
     #[test_case(b"{% for x in list %}{% if true %}text{% end %}" => (ParseError::UnclosedBlock, (0, 19)) ; "for_body_with_unclosed_inner_if")]
     fn parse_stmt_nodes_error(src: &[u8]) -> (ParseError, (usize, usize)) {
-        let Error::Parse { err, span } = parse(scan(src).unwrap(), src).unwrap_err() else {
+        let Error::Parse { err, span, .. } = parse(scan(src).unwrap(), src).unwrap_err() else {
             panic!("expected parse error");
         };
         (err, (span.offset(), span.len()))

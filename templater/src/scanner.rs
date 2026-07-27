@@ -1,6 +1,6 @@
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
-use crate::error::{Error, ParseError};
+use crate::error::{ByteSource, Error, ParseError};
 use crate::util::{is_whitespace, source_span};
 
 /// A whitespace-control sigil attached to an interpolation or statement
@@ -80,6 +80,10 @@ impl Cluster {
 /// interpolation and statement tags, and strips comments while leaving
 /// barrier markers for downstream `=` trimming.
 pub(crate) fn scan(src: &[u8]) -> std::result::Result<Vec<Token>, Error> {
+    scan_impl(src).map_err(|err| err.with_source_code(ByteSource::Owned(Arc::from(src.to_vec()))))
+}
+
+fn scan_impl(src: &[u8]) -> std::result::Result<Vec<Token>, Error> {
     let mut tokens = Vec::new();
     let mut text_start = 0;
 
@@ -524,7 +528,7 @@ mod tests {
     #[test_case(b"{# x -#}" => (ParseError::InvalidModifier, (5, 1)) ; "modifier_before_closing_comment")]
     #[test_case(b"{# x\n-#}" => (ParseError::InvalidModifier, (5, 1)) ; "modifier_before_comment_close_across_newline")]
     fn scan_errors(input: &[u8]) -> (ParseError, (usize, usize)) {
-        let Error::Parse { err, span } = scan(input).unwrap_err() else {
+        let Error::Parse { err, span, .. } = scan(input).unwrap_err() else {
             panic!("expected parse error");
         };
         (err, (span.offset(), span.len()))
