@@ -1,0 +1,9 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x reserved keyword `if`
+   ,----
+ 1 | {{ if }}
+   :    ^^
+   `----

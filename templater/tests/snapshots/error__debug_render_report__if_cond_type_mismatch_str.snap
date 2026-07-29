@@ -1,0 +1,9 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x expected type boolean, got string
+   ,----
+ 1 | {% if str %}x{% end %}
+   :       ^^^
+   `----

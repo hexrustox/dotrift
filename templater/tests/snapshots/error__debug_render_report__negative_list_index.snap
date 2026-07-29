@@ -1,0 +1,9 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x negative list index -1
+   ,----
+ 1 | {{ list.-1 }}
+   :         ^^
+   `----

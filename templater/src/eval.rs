@@ -244,12 +244,13 @@ fn eval(
                     }
                 }
                 other => {
+                    let span = left.span();
                     return Err(Error::render(
                         RenderError::TypeMismatch {
                             expected: crate::ValueType::Map,
                             got: other.value_type(),
                         },
-                        SourceSpan::from((field.start, field.end - field.start)),
+                        SourceSpan::from((span.start, span.end - span.start)),
                     ));
                 }
             }
@@ -282,12 +283,13 @@ fn eval(
                     list[index].clone()
                 }
                 other => {
+                    let span = left.span();
                     return Err(Error::render(
                         RenderError::TypeMismatch {
                             expected: crate::ValueType::List,
                             got: other.value_type(),
                         },
-                        span,
+                        SourceSpan::from((span.start, span.end - span.start)),
                     ));
                 }
             }
@@ -449,14 +451,13 @@ mod tests {
 
     #[test_case(b"{{ missing }}" => (RenderError::UndefinedVariable, (3, 7)) ; "undefined_variable")]
     #[test_case(b"{{ map.nope }}" => (RenderError::MapKeyNotFound { key: "nope".into() }, (7, 4)) ; "map_key_not_found")]
-    #[test_case(b"{{ str.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Str }, (7, 5)) ; "map_access_on_str")]
-    #[test_case(b"{{ num.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Int }, (7, 5)) ; "map_access_on_int")]
-    #[test_case(b"{{ yes.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Bool }, (7, 5)) ; "map_access_on_bool")]
-    #[test_case(b"{{ list.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::List }, (8, 5)) ; "map_access_on_list")]
-    #[test_case(b"{{ \"s\".0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str }, (7, 1)) ; "list_access_on_str")]
-    #[test_case(b"{{ yes.0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Bool }, (7, 1)); "index_on_bool")]
-    #[test_case(b"{{ num.0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Int }, (7, 1)); "index_on_int")]
-    #[test_case(b"{{ map.0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Map }, (7, 1)) ; "list_access_on_map")]
+    #[test_case(b"{{ num.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Int }, (3, 3)) ; "map_access_on_int")]
+    #[test_case(b"{{ yes.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Bool }, (3, 3)) ; "map_access_on_bool")]
+    #[test_case(b"{{ list.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::List }, (3, 4)) ; "map_access_on_list")]
+    #[test_case(b"{{ [str].0.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Str }, (3, 7)) ; "map_access_on_str_nested_in_literal_list")]
+    #[test_case(b"{{ \"s\".0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str }, (3, 3)) ; "list_access_on_str")]
+    #[test_case(b"{{ map.0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Map }, (3, 3)) ; "list_access_on_map")]
+    #[test_case(b"{{ map.key.0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str }, (3, 7)) ; "list_access_on_nested_map")]
     #[test_case(b"{{ list.3 }}" => (RenderError::ListIndexOutOfBounds { idx: 3, len: 3 }, (8, 1)) ; "index_out_of_bounds")]
     #[test_case(b"{{ list.-1 }}" => (RenderError::NegativeListIndex { idx: -1 }, (8, 2)) ; "negative_index")]
     fn eval_render(src: &[u8]) -> (RenderError, (usize, usize)) {

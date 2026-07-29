@@ -1,0 +1,9 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x empty interpolation
+   ,----
+ 1 | hello {{  }}
+   :       ^^^^^^
+   `----

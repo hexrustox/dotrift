@@ -1,0 +1,9 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x unexpected token
+   ,----
+ 1 | {% if true %}{% else x %}{% end %}
+   :                      ^
+   `----

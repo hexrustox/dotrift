@@ -1,0 +1,9 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x expected type map, got string
+   ,----
+ 1 | {{ str.field }}
+   :    ^^^
+   `----

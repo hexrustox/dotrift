@@ -1,0 +1,9 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x integer literal out of i64 range
+   ,----
+ 1 | {{ 9223372036854775808 }}
+   :    ^^^^^^^^^^^^^^^^^^^
+   `----

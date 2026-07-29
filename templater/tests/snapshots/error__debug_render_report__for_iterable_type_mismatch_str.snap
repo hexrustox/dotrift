@@ -1,0 +1,9 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x expected type list, got string
+   ,----
+ 1 | {% for x in str %}x{% end %}
+   :             ^^^
+   `----

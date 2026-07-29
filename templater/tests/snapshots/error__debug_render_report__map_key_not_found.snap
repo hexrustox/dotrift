@@ -1,0 +1,9 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x map key `nope` not found
+   ,----
+ 1 | {{ map.nope }}
+   :        ^^^^
+   `----

@@ -1525,6 +1525,7 @@ dependencies = [
 name = "templater"
 version = "0.1.0"
 dependencies = [
+ "insta",
  "memmap2",
  "miette",
  "proptest",

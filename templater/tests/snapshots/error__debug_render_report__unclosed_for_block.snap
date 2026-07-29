@@ -1,0 +1,9 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x unclosed block
+   ,----
+ 1 | {% for x in list %}hi
+   : ^^^^^^^^^^^^^^^^^^^
+   `----

@@ -1,0 +1,9 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x `elif` outside of an `if` block
+   ,----
+ 1 | {% elif x %}
+   : ^^^^^^^^^^^^
+   `----

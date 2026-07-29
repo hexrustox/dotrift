@@ -128,7 +128,7 @@ pub enum RenderError {
     ListIndexOutOfBounds { idx: i64, len: usize },
     #[error("negative list index {idx}")]
     NegativeListIndex { idx: i64 },
-    #[error("expects {expected}, got {got}")]
+    #[error("expected type {expected}, got {got}")]
     TypeMismatch { expected: ValueType, got: ValueType },
 }
 
@@ -137,9 +137,9 @@ pub enum RenderError {
 pub enum FuncError {
     #[error("undefined function `{name}`")]
     Undefined { name: String },
-    #[error("expects {expected} arguments, got {got}")]
+    #[error("expected {expected} arguments, got {got}")]
     ArgCount { expected: usize, got: usize },
-    #[error("expects type {expected}, got {got}")]
+    #[error("expected type {expected}, got {got}")]
     TypeMismatch {
         expected: ValueType,
         got: ValueType,

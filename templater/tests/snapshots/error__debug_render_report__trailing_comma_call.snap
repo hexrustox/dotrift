@@ -1,0 +1,9 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x trailing comma
+   ,----
+ 1 | {{ same(1,) }}
+   :          ^
+   `----
