@@ -1,10 +1,10 @@
-use std::{ops::Range, sync::Arc};
+use std::ops::Range;
 
 use miette::SourceSpan;
 
 use crate::{
     ast::{Branch, Expr, Node},
-    error::{ByteSource, Error, ParseError},
+    error::{Error, ParseError},
     scanner::Token,
     util::{is_whitespace, source_span},
 };
@@ -12,15 +12,13 @@ use crate::{
 /// Assembles already-trimmed tokens into AST nodes, recognizing `{{ expr }}`
 /// interpolations and `{% ... %}` control-flow blocks (`if`/`elif`/`else`/
 /// `for`/`end`) via recursive descent over the token stream.
-pub(crate) fn parse(tokens: Vec<Token>, source: &[u8]) -> std::result::Result<Vec<Node>, Error> {
+pub(crate) fn parse(tokens: Vec<Token>, source: &[u8]) -> Result<Vec<Node>, Error> {
     let mut parser = Parser {
         tokens,
         source,
         pos: 0,
     };
-    parser
-        .parse_nodes(Stop::None)
-        .map_err(|err| err.with_source_code(ByteSource::Owned(Arc::from(source.to_vec()))))
+    parser.parse_nodes(Stop::None)
 }
 
 /// Which block terminators `parse_nodes` may return at (leaving them

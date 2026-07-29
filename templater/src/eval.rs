@@ -5,7 +5,7 @@ use miette::SourceSpan;
 use crate::{
     Template, Value,
     ast::{Expr, Node},
-    error::{Error, FuncError, RenderError, Result},
+    error::{Error, FuncError, RenderError},
     function::FunctionRegistry,
     util::source_span,
 };
@@ -61,7 +61,7 @@ impl Template {
         writer: &mut W,
         scope: &mut Scope<'_>,
         functions: &dyn FunctionRegistry,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         for node in nodes {
             match node {
                 Node::Text(range) => writer.write_all(&self.src.as_bytes()[range.clone()])?,
@@ -175,7 +175,7 @@ fn eval(
     src: &[u8],
     scope: &Scope<'_>,
     functions: &dyn FunctionRegistry,
-) -> Result<Value> {
+) -> Result<Value, Error> {
     Ok(match expr {
         Expr::IntLit { value: n, .. } => Value::Int(*n),
         Expr::BoolLit { value: b, .. } => Value::Bool(*b),
@@ -489,16 +489,10 @@ mod tests {
     #[test_case(b"{% for str in list %}{{str}}{% end %}{{str}}" => "123foobar"; "for_restores_after_end")]
     #[test_case(b"{% for x in empty_list %}{{x}}{% end %}after" => "after"; "for_empty_iterable_silent")]
     #[test_case(b"{% if false %}{% for x in [1] %}{{ missing }}{% end %}{% end %}" => ""; "for_in_untaken_branch_silent")]
-    fn eval_body_if(src: &[u8]) -> String {
-        let template = Template {
-            nodes: parse(scan(src).unwrap(), src).unwrap(),
-            src: crate::Source::Owned(src.to_vec()),
-        };
+    fn eval_body(src: &[u8]) -> String {
         let mut out = Vec::new();
-        let vars = var_scope();
-        let mut scope = Scope::new(&vars);
-        template
-            .eval_body(&template.nodes, &mut out, &mut scope, &TestRegistry)
+        Template::from_bytes(src)
+            .render(&mut out, &var_scope(), &TestRegistry)
             .unwrap();
         String::from_utf8(out).unwrap()
     }
@@ -506,20 +500,14 @@ mod tests {
     #[test_case(b"{% if str %}x{% end %}" => (RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Str }, (6, 3)); "if_cond_str")]
     #[test_case(b"{% if no %}{% elif num %}x{% end %}" => (RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Int }, (19, 3)); "elif_cond_int")]
     #[test_case(b"{% for x in str %}{{x}}{% end %}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str }, (12, 3)); "for_iterable_str")]
-    fn eval_body_if_error(src: &[u8]) -> (RenderError, (usize, usize)) {
-        let template = Template {
-            nodes: parse(scan(src).unwrap(), src).unwrap(),
-            src: crate::Source::Owned(src.to_vec()),
-        };
+    fn eval_body_error(src: &[u8]) -> (RenderError, (usize, usize)) {
         let mut out = Vec::new();
-        let vars = var_scope();
-        let mut scope = Scope::new(&vars);
-        match template
-            .eval_body(&template.nodes, &mut out, &mut scope, &TestRegistry)
+        match Template::from_bytes(src)
+            .render(&mut out, &var_scope(), &TestRegistry)
             .unwrap_err()
         {
-            Error::Render { err, span, .. } => (err, (span.offset(), span.len())),
-            e => panic!("expected Render error, got {e:?}"),
+            Error::Render { err, span, .. } => (err.clone(), (span.offset(), span.len())),
+            _ => panic!("expected Render error"),
         }
     }
 }

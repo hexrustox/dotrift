@@ -1,6 +1,6 @@
-use std::{ops::Range, sync::Arc};
+use std::ops::Range;
 
-use crate::error::{ByteSource, Error, ParseError};
+use crate::error::{Error, ParseError};
 use crate::util::{is_whitespace, source_span};
 
 /// A whitespace-control sigil attached to an interpolation or statement
@@ -80,7 +80,7 @@ impl Cluster {
 /// interpolation and statement tags, and strips comments while leaving
 /// barrier markers for downstream `=` trimming.
 pub(crate) fn scan(src: &[u8]) -> std::result::Result<Vec<Token>, Error> {
-    scan_impl(src).map_err(|err| err.with_source_code(ByteSource::Owned(Arc::from(src.to_vec()))))
+    scan_impl(src)
 }
 
 fn scan_impl(src: &[u8]) -> std::result::Result<Vec<Token>, Error> {

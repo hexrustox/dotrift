@@ -56,10 +56,9 @@ use test_case::test_case;
 #[test_case(b"{% for x in [[1, 2], [3, 4]] %}{% for y in x %}{{y}}{% end %},{% end %}" => "12,34,"; "nested_for_shadowed_names")]
 #[test_case(b"{% if yes %}{% for x in list %}{{x}}{% end %}{% end %}" => "123"; "if_wrapping_for")]
 #[test_case(b"a{% if yes %}b{% end %}c" => "abc"; "text_around_if")]
-fn render(bytes: &[u8]) -> String {
+fn render(src: &[u8]) -> String {
     let mut out = Vec::new();
-    Template::from_bytes(bytes.to_vec())
-        .unwrap()
+    Template::from_bytes(src)
         .render(&mut out, &var_scope(), &TestRegistry)
         .unwrap();
     String::from_utf8(out).unwrap()
@@ -85,7 +84,7 @@ impl io::Write for FlushCounter {
 
 #[test]
 fn render_flushes_writer_on_success() {
-    let template = Template::from_bytes(b"hello".to_vec()).expect("parse failed");
+    let template = Template::from_bytes(b"hello");
     let mut writer = FlushCounter::default();
     template
         .render(&mut writer, &HashMap::new(), &MockRegistry)
@@ -108,8 +107,7 @@ fn from_file_renders_same_as_from_bytes() {
         .expect("render failed");
 
     let mut bytes_out = Vec::new();
-    Template::from_bytes(bytes.to_vec())
-        .unwrap()
+    Template::from_bytes(bytes)
         .render(&mut bytes_out, &var_scope(), &TestRegistry)
         .expect("render failed");
 
