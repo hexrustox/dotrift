@@ -6,7 +6,7 @@ use crate::{
     ast::{Branch, Expr, Node},
     error::{Error, ParseError},
     scanner::Token,
-    util::{is_whitespace, source_span},
+    util::{ascii_str_unchecked, is_whitespace, source_span},
 };
 
 /// Assembles already-trimmed tokens into AST nodes, recognizing `{{ expr }}`
@@ -105,8 +105,7 @@ impl<'s> Parser<'s> {
                         }
                         StmtKind::Unrecognized => {
                             let body = body.clone();
-                            let stmt = std::str::from_utf8(&self.source[body.clone()])
-                                .expect("body is ascii")
+                            let stmt = unsafe { ascii_str_unchecked(&self.source[body.clone()]) }
                                 .to_owned();
                             return Err(Error::Parse(ParseError::UnrecognizedStatement {
                                 stmt,
@@ -136,7 +135,7 @@ impl<'s> Parser<'s> {
         loop {
             if self.pos >= self.tokens.len() {
                 return Err(Error::Parse(ParseError::UnclosedBlock {
-                    span: source_span(if_tag.clone()),
+                    span: source_span(if_tag),
                 }));
             }
             let (kind, ttag, rest) = self.peek_terminator()?;
@@ -159,9 +158,9 @@ impl<'s> Parser<'s> {
                         }));
                     }
                     self.pos += 1;
-                    if has_non_ws(self.source, rest.clone()) {
+                    if has_non_ws(self.source, &rest) {
                         return Err(Error::Parse(ParseError::UnexpectedToken {
-                            span: operand_nonws_span(self.source, rest),
+                            span: operand_nonws_span(self.source, &rest),
                         }));
                     }
                     let body = self.parse_nodes(Stop::IfBlock)?;
@@ -169,9 +168,9 @@ impl<'s> Parser<'s> {
                 }
                 StmtKind::End => {
                     self.pos += 1;
-                    if has_non_ws(self.source, rest.clone()) {
+                    if has_non_ws(self.source, &rest) {
                         return Err(Error::Parse(ParseError::UnexpectedToken {
-                            span: operand_nonws_span(self.source, rest),
+                            span: operand_nonws_span(self.source, &rest),
                         }));
                     }
                     break;
@@ -200,16 +199,16 @@ impl<'s> Parser<'s> {
         let body = self.parse_nodes(Stop::ForBlock)?;
         if self.pos >= self.tokens.len() {
             return Err(Error::Parse(ParseError::UnclosedBlock {
-                span: source_span(tag.clone()),
+                span: source_span(tag),
             }));
         }
         let (kind, _, rest) = self.peek_terminator()?;
         match kind {
             StmtKind::End => {
                 self.pos += 1;
-                if has_non_ws(self.source, rest.clone()) {
+                if has_non_ws(self.source, &rest) {
                     return Err(Error::Parse(ParseError::UnexpectedToken {
-                        span: operand_nonws_span(self.source, rest),
+                        span: operand_nonws_span(self.source, &rest),
                     }));
                 }
             }
@@ -250,9 +249,7 @@ fn classify_stmt(
         }));
     }
     if !is_ident_start(bytes[0]) {
-        let stmt = std::str::from_utf8(&source[body.clone()])
-            .expect("body is ascii")
-            .to_owned();
+        let stmt = unsafe { ascii_str_unchecked(&source[body.clone()]) }.to_owned();
         return Err(Error::Parse(ParseError::UnrecognizedStatement {
             stmt,
             span: source_span(body),
@@ -283,7 +280,7 @@ fn parse_expr_from_operand(
     operand: Range<usize>,
     stmt: &str,
 ) -> std::result::Result<Expr, Error> {
-    if operand.start >= operand.end {
+    if operand.is_empty() {
         return Err(Error::Parse(ParseError::MissingCondition {
             stmt: stmt.to_string(),
             span: source_span(operand.start..operand.start + 1),
@@ -336,9 +333,7 @@ fn parse_for_binding(
     } else {
         let (range, is_keyword) = state.parse_identifier()?;
         if is_keyword {
-            let keyword = std::str::from_utf8(&state.source[range.clone()])
-                .expect("identifier is ascii")
-                .to_owned();
+            let keyword = unsafe { ascii_str_unchecked(&state.source[range.clone()]) }.to_owned();
             return Err(Error::Parse(ParseError::ReservedKeyword {
                 keyword,
                 span: source_span(range),
@@ -358,7 +353,7 @@ fn parse_for_binding(
     while state.pos < bytes.len() && !is_whitespace(bytes[state.pos]) {
         state.pos += 1;
     }
-    let range = body_range(&state.body, start..state.pos);
+    let range = state.range(start..state.pos);
     let in_bytes = &state.source[range.clone()];
     if in_bytes != b"in" {
         return Err(Error::Parse(ParseError::MissingIn {
@@ -395,15 +390,15 @@ fn parse_for_binding(
 }
 
 /// True when the byte range contains any non-whitespace byte.
-fn has_non_ws(source: &[u8], range: Range<usize>) -> bool {
-    source[range].iter().any(|&b| !is_whitespace(b))
+fn has_non_ws(source: &[u8], range: &Range<usize>) -> bool {
+    source[range.clone()].iter().any(|&b| !is_whitespace(b))
 }
 
 /// Span of the first non-whitespace byte in `range`, for error attribution on
 /// `else` operands that illegally take a condition. Falls back to an empty
 /// span at the operand start when the range is all whitespace (where the
 /// caller only calls this when there *is* a non-ws byte).
-fn operand_nonws_span(source: &[u8], range: Range<usize>) -> SourceSpan {
+fn operand_nonws_span(source: &[u8], range: &Range<usize>) -> SourceSpan {
     let bytes = &source[range.clone()];
     for (i, &b) in bytes.iter().enumerate() {
         if !is_whitespace(b) {
@@ -422,15 +417,15 @@ fn parse_interp_body(
     body: Range<usize>,
     tag: Range<usize>,
 ) -> std::result::Result<Expr, Error> {
-    if body.start >= body.end {
+    if body.is_empty() {
         return Err(Error::Parse(ParseError::EmptyInterpolation {
-            span: source_span(tag.clone()),
+            span: source_span(tag),
         }));
     }
 
     let mut state = ParserState {
         source,
-        body: body.clone(),
+        body,
         pos: 0,
     };
     let expr = state.parse_expr()?;
@@ -470,8 +465,12 @@ impl<'s> ParserState<'s> {
         &self.source[self.body.clone()]
     }
 
+    fn range(&self, rel: Range<usize>) -> Range<usize> {
+        self.body.start + rel.start..self.body.start + rel.end
+    }
+
     fn span(&self, rel: Range<usize>) -> SourceSpan {
-        source_span(self.body.start + rel.start..self.body.start + rel.end)
+        source_span(self.range(rel))
     }
 
     fn skip_ws(&mut self) -> bool {
@@ -498,10 +497,7 @@ impl<'s> ParserState<'s> {
                 let (range, is_keyword) = self.parse_identifier()?;
                 let ident =
                     &self.bytes()[range.start - self.body.start..range.end - self.body.start];
-                let lit_span = body_range(
-                    &self.body,
-                    (range.start - self.body.start)..(range.end - self.body.start),
-                );
+                let lit_span = self.range(range.start - self.body.start..range.end - self.body.start);
                 Ok(match ident {
                     b"true" => Expr::BoolLit {
                         value: true,
@@ -514,10 +510,8 @@ impl<'s> ParserState<'s> {
                     _ => {
                         if is_keyword {
                             return Err(Error::Parse(ParseError::ReservedKeyword {
-                                keyword: std::str::from_utf8(ident)
-                                    .expect("identifier is ascii")
-                                    .to_owned(),
-                                span: source_span(range.clone()),
+                                keyword: unsafe { ascii_str_unchecked(ident) }.to_owned(),
+                                span: source_span(range),
                             }));
                         }
                         // Function calls may have whitespace between the
@@ -567,7 +561,7 @@ impl<'s> ParserState<'s> {
                 while self.pos < bytes.len() && is_ident_byte(bytes[self.pos]) {
                     self.pos += 1;
                 }
-                let field = body_range(&self.body, ident_start..self.pos);
+                let field = self.range(ident_start..self.pos);
                 left = Expr::Dot {
                     left: Box::new(left),
                     field,
@@ -588,11 +582,17 @@ impl<'s> ParserState<'s> {
                     self.pos += 1;
                 }
                 let idx_bytes = &bytes[idx_start..self.pos];
-                let idx: i64 = std::str::from_utf8(idx_bytes)
-                    .expect("digits are ascii")
+                // SAFETY: `idx_bytes` contains only ASCII digits (and an optional
+                // leading `-`), so it is valid UTF-8.
+                let idx: i64 = unsafe { ascii_str_unchecked(idx_bytes) }
                     .parse()
-                    .expect("digits fit within i64 for reasonable lengths");
-                let idx_span = body_range(&self.body, idx_start..self.pos);
+                    .map_err(|_| {
+                        Error::Parse(ParseError::IntegerOutOfRange {
+                            span: self.span(idx_start..self.pos),
+                        })
+                    })?;
+
+                let idx_span = self.range(idx_start..self.pos);
                 left = Expr::Index {
                     left: Box::new(left),
                     idx,
@@ -615,9 +615,9 @@ impl<'s> ParserState<'s> {
             match bytes[self.pos] {
                 b'\\' if self.pos + 1 < bytes.len() => self.pos += 2,
                 b'"' => {
-                    let interior = body_range(&self.body, start + 1..self.pos);
+                    let interior = self.range(start + 1..self.pos);
                     self.pos += 1;
-                    let span = body_range(&self.body, start..self.pos);
+                    let span = self.range(start..self.pos);
                     return Ok(Expr::StrLit { interior, span });
                 }
                 _ => self.pos += 1,
@@ -659,7 +659,7 @@ impl<'s> ParserState<'s> {
                 }))?;
         }
 
-        let lit_span = body_range(&self.body, start..self.pos);
+        let lit_span = self.range(start..self.pos);
         Ok(Expr::IntLit {
             value: acc,
             span: lit_span,
@@ -678,7 +678,7 @@ impl<'s> ParserState<'s> {
             self.pos += 1;
         }
 
-        let range = body_range(&self.body, start..self.pos);
+        let range = self.range(start..self.pos);
         let ident = &bytes[start..self.pos];
         let is_keyword = matches!(
             ident,
@@ -749,7 +749,7 @@ impl<'s> ParserState<'s> {
             }
         }
 
-        let paren = body_range(&self.body, lparen..self.pos);
+        let paren = self.range(lparen..self.pos);
         Ok(Expr::FnCall { name, args, paren })
     }
 
@@ -816,7 +816,7 @@ impl<'s> ParserState<'s> {
             }
         }
 
-        let span = body_range(&self.body, start..self.pos);
+        let span = self.range(start..self.pos);
         Ok(Expr::List { elements, span })
     }
 }
@@ -827,12 +827,6 @@ fn is_ident_start(b: u8) -> bool {
 
 fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
-}
-
-/// Translates a body-relative `Range` into absolute source-space (used for
-/// AST node byte offsets such as `Expr::Var`).
-fn body_range(body: &Range<usize>, rel: Range<usize>) -> Range<usize> {
-    (body.start + rel.start)..(body.start + rel.end)
 }
 
 #[cfg(test)]

@@ -8,12 +8,13 @@ mod trim;
 pub mod util;
 mod value;
 
-use std::{collections::HashMap, fs::File, io, path::Path};
+use std::{collections::HashMap, fs::File, io, path::Path, sync::Arc};
+
+use memmap2::Mmap;
+use miette::{Report, SourceCode};
 
 pub use error::{Error, ParseError, RegistryError, RenderError};
 pub use function::FunctionRegistry;
-use memmap2::Mmap;
-use miette::{Report, SourceCode};
 pub use value::{Value, ValueType};
 
 /// A parsed template: the AST plus the source bytes it references.
@@ -131,7 +132,7 @@ impl Template {
         let file = File::open(path)?;
         let mmap = unsafe { Mmap::map(&file) }?;
         Ok(Self {
-            src: Source::Mapped(std::sync::Arc::new(mmap)),
+            src: Source::Mapped(Arc::new(mmap)),
         })
     }
 

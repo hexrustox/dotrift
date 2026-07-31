@@ -17,6 +17,18 @@ pub(crate) fn source_span(range: Range<usize>) -> SourceSpan {
     (range.start, range.end - range.start).into()
 }
 
+/// Interprets `bytes` as UTF-8 without checking.
+///
+/// # Safety
+/// Callers must only pass byte slices that are valid UTF-8.  Templater uses
+/// this for identifiers, keywords, and field names that the parser has
+/// already restricted to ASCII, so invalid UTF-8 is impossible here.
+pub(crate) unsafe fn ascii_str_unchecked(bytes: &[u8]) -> &str {
+    // SAFETY: caller guarantees `bytes` is valid UTF-8.  All call sites pass
+    // parser-restricted ASCII identifiers/keywords/field names.
+    unsafe { std::str::from_utf8_unchecked(bytes) }
+}
+
 #[cfg(test)]
 mod macros {
     #[macro_export]
@@ -74,8 +86,10 @@ mod test_utils {
 
     use crate::{FunctionRegistry, RegistryError, Value, ValueType};
 
-    /// Registry where every function is undefined; covers templates that never
-    /// call functions.
+    /// Registry where every function is undefined.
+    ///
+    /// Use this for templates that are expected never to call functions; any
+    /// call made through this registry will panic.
     pub struct MockRegistry;
 
     impl FunctionRegistry for MockRegistry {
@@ -84,8 +98,15 @@ mod test_utils {
         }
     }
 
-    /// Registry exposing a small set of functions for exercising function calls
-    /// and future statement logic (`if` conditions, `for` iterables, etc.).
+    /// Registry exposing a small set of deterministic functions for exercising
+    /// function calls in unit tests.
+    ///
+    /// Functions:
+    /// - `foo()` -> `"bar"`
+    /// - `same(x)` -> `x`
+    /// - `mismatch(x)` -> type mismatch error (expects `Str`)
+    /// - `one_arg(x)` -> argument-count error when not given exactly one arg
+    /// - `two_arg(x, y)` -> argument-count error when not given exactly two args
     pub struct TestRegistry;
 
     impl FunctionRegistry for TestRegistry {
@@ -113,7 +134,10 @@ mod test_utils {
         }
     }
 
-    /// A variable scope shared by several test cases.
+    /// A sample variable scope used by several test cases.
+    ///
+    /// Provides values for `str`, `num`, `neg`, `yes`, `no`, `list`,
+    /// `empty_list`, and `map` (with nested map `map.nested`).
     pub fn var_scope() -> HashMap<String, Value> {
         let nested = BTreeMap::from_iter([("nested".to_string(), Value::Str("value".to_string()))]);
         let map = BTreeMap::from_iter([

@@ -60,9 +60,15 @@ use test_case::test_case;
 #[test_case(b"line1\nline2\n{{  }}"; "empty_interp_on_later_line")]
 #[test_case(b"{{\n  @\n}}"; "unexpected_token_multiline_body")]
 fn debug_render_report(src: &[u8]) {
-    unsafe {
-        std::env::set_var("NO_COLOR", "1");
-    }
+    let _ = miette::set_hook(Box::new(|_| {
+        Box::new(
+            miette::MietteHandlerOpts::new()
+                .unicode(false)
+                .color(false)
+                .build(),
+        )
+    }));
+
     let template = Template::from_bytes(src);
     let result = template.render(&mut Vec::new(), &var_scope(), &TestRegistry);
     let report = template.report(result).unwrap_err();

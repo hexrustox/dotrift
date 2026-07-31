@@ -1,13 +1,11 @@
-use std::{borrow::Cow, collections::HashMap, io};
-
-use miette::SourceSpan;
+use std::{borrow::Cow, collections::HashMap, io, ops::Range};
 
 use crate::{
     Template, Value,
     ast::{Expr, Node},
     error::{Error, RegistryError, RenderError},
     function::FunctionRegistry,
-    util::source_span,
+    util::{ascii_str_unchecked, source_span},
 };
 
 /// A binding layer in the scope stack walked by variable resolution.
@@ -21,10 +19,7 @@ pub(crate) enum Frame<'a> {
     /// value. The loop variable shadows any outer binding of the same name
     /// for the body; the outer binding is restored when the frame is popped
     /// at `{% end %}`.
-    Loop {
-        name: std::ops::Range<usize>,
-        value: Value,
-    },
+    Loop { name: Range<usize>, value: Value },
 }
 
 /// The active scope stack: a LIFO of [`Frame`]s. Variable resolution walks
@@ -41,7 +36,7 @@ impl<'a> Scope<'a> {
         }
     }
 
-    fn push_loop(&mut self, name: std::ops::Range<usize>, value: Value) {
+    fn push_loop(&mut self, name: Range<usize>, value: Value) {
         self.frames.push(Frame::Loop { name, value });
     }
 
@@ -99,7 +94,7 @@ impl Template {
                                 return Err(Error::Render(RenderError::TypeMismatch {
                                     expected: crate::ValueType::Bool,
                                     got: other.value_type(),
-                                    span: SourceSpan::from((span.start, span.end - span.start)),
+                                    span: source_span(span),
                                 }));
                             }
                         }
@@ -127,7 +122,7 @@ impl Template {
                             return Err(Error::Render(RenderError::TypeMismatch {
                                 expected: crate::ValueType::List,
                                 got: other.value_type(),
-                                span: SourceSpan::from((span.start, span.end - span.start)),
+                                span: source_span(span),
                             }));
                         }
                     }
@@ -178,19 +173,20 @@ fn eval(
         Expr::StrLit { interior, .. } => {
             let mut out = Vec::new();
             write_string_literal(src, interior.clone(), &mut out)?;
-            Value::Str(String::from_utf8(out).expect("decoded bytes are valid UTF-8"))
+            // SAFETY: the string literal decoder only emits bytes that came
+            // directly from the source, which is valid UTF-8.
+            Value::Str(unsafe { String::from_utf8_unchecked(out) })
         }
         Expr::Var(range) => {
             let name_bytes = &src[range.clone()];
-            // Variable names are restricted to `[A-Za-z_][A-Za-z0-9_]*` by
-            // the parser, so the byte slice is ASCII (valid UTF-8).
-            let name = std::str::from_utf8(name_bytes).expect("identifier is ascii");
+            // SAFETY: identifiers are parser-restricted to ASCII.
+            let name = unsafe { ascii_str_unchecked(name_bytes) };
             match lookup(name, src, scope) {
                 Some(v) => v.into_owned(),
                 None => {
                     return Err(Error::Render(RenderError::UndefinedVariable {
                         name: name.to_string(),
-                        span: SourceSpan::from((range.start, range.end - range.start)),
+                        span: source_span(range.clone()),
                     }));
                 }
             }
@@ -207,7 +203,8 @@ fn eval(
             args,
             paren: paren_span,
         } => {
-            let name_str = std::str::from_utf8(&src[name.clone()]).expect("identifier is ascii");
+            // SAFETY: function names are parser-restricted to ASCII.
+            let name_str = unsafe { ascii_str_unchecked(&src[name.clone()]) };
             let mut values = Vec::with_capacity(args.len());
             for arg in args {
                 values.push(eval(arg, src, scope, functions)?);
@@ -243,14 +240,14 @@ fn eval(
             let receiver = eval(left, src, scope, functions)?;
             match &receiver {
                 Value::Map(map) => {
-                    let key = std::str::from_utf8(&src[field.clone()])
-                        .expect("field identifier is ascii");
+                    // SAFETY: field names are parser-restricted to ASCII.
+                    let key = unsafe { ascii_str_unchecked(&src[field.clone()]) };
                     match map.get(key) {
                         Some(v) => v.clone(),
                         None => {
                             return Err(Error::Render(RenderError::MapKeyNotFound {
                                 key: key.to_owned(),
-                                span: SourceSpan::from((field.start, field.end - field.start)),
+                                span: source_span(field.clone()),
                             }));
                         }
                     }
@@ -260,7 +257,7 @@ fn eval(
                     return Err(Error::Render(RenderError::TypeMismatch {
                         expected: crate::ValueType::Map,
                         got: other.value_type(),
-                        span: SourceSpan::from((span.start, span.end - span.start)),
+                        span: source_span(span),
                     }));
                 }
             }
@@ -271,7 +268,7 @@ fn eval(
             idx_span,
         } => {
             let receiver = eval(left, src, scope, functions)?;
-            let span = SourceSpan::from((idx_span.start, idx_span.end - idx_span.start));
+            let span = source_span(idx_span.clone());
             if *idx < 0 {
                 return Err(Error::Render(RenderError::NegativeListIndex {
                     idx: *idx,
@@ -295,7 +292,7 @@ fn eval(
                     return Err(Error::Render(RenderError::TypeMismatch {
                         expected: crate::ValueType::List,
                         got: other.value_type(),
-                        span: SourceSpan::from((span.start, span.end - span.start)),
+                        span: source_span(span),
                     }));
                 }
             }
@@ -311,9 +308,9 @@ fn eval(
 fn func_error_span(
     err: &RegistryError,
     args: &[Expr],
-    name: &std::ops::Range<usize>,
-    paren_span: &std::ops::Range<usize>,
-) -> SourceSpan {
+    name: &Range<usize>,
+    paren_span: &Range<usize>,
+) -> miette::SourceSpan {
     match err {
         RegistryError::Undefined { .. } => source_span(name.clone()),
         RegistryError::ArgCount { expected, got } => {
@@ -344,7 +341,7 @@ fn func_error_span(
 /// infallible.
 fn write_string_literal<W: io::Write>(
     src: &[u8],
-    interior: std::ops::Range<usize>,
+    interior: Range<usize>,
     writer: &mut W,
 ) -> io::Result<()> {
     let bytes = &src[interior];
