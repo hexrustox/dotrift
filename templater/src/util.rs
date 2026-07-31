@@ -72,17 +72,15 @@ mod macros {
 mod test_utils {
     use std::collections::{BTreeMap, HashMap};
 
-    use crate::{FuncError, FunctionRegistry, Value, ValueType};
+    use crate::{FunctionRegistry, RegistryError, Value, ValueType};
 
     /// Registry where every function is undefined; covers templates that never
     /// call functions.
     pub struct MockRegistry;
 
     impl FunctionRegistry for MockRegistry {
-        fn call(&self, name: &str, _args: &[Value]) -> Result<Value, FuncError> {
-            Err(FuncError::Undefined {
-                name: name.to_owned(),
-            })
+        fn call(&self, _name: &str, _args: &[Value]) -> Result<Value, RegistryError> {
+            unreachable!()
         }
     }
 
@@ -91,35 +89,24 @@ mod test_utils {
     pub struct TestRegistry;
 
     impl FunctionRegistry for TestRegistry {
-        fn call(&self, name: &str, args: &[Value]) -> Result<Value, FuncError> {
+        fn call(&self, name: &str, args: &[Value]) -> Result<Value, RegistryError> {
             match name {
-                "same" => {
-                    if args.len() != 1 {
-                        return Err(FuncError::ArgCount {
-                            expected: 1,
-                            got: args.len(),
-                        });
-                    }
-                    Ok(args[0].clone())
-                }
                 "foo" => Ok(Value::Str("bar".to_string())),
-                "exact1" => {
-                    if args.len() != 1 {
-                        return Err(FuncError::ArgCount {
-                            expected: 1,
-                            got: args.len(),
-                        });
-                    }
-                    match &args[0] {
-                        Value::Str(_) => Ok(args[0].clone()),
-                        other => Err(FuncError::TypeMismatch {
-                            expected: ValueType::Str,
-                            got: other.value_type(),
-                            arg_index: 0,
-                        }),
-                    }
-                }
-                _ => Err(FuncError::Undefined {
+                "same" => Ok(args[0].clone()),
+                "mismatch" => Err(RegistryError::TypeMismatch {
+                    expected: ValueType::Str,
+                    got: args[0].value_type(),
+                    arg_index: 0,
+                }),
+                "one_arg" => Err(RegistryError::ArgCount {
+                    expected: 1,
+                    got: args.len(),
+                }),
+                "two_arg" => Err(RegistryError::ArgCount {
+                    expected: 2,
+                    got: args.len(),
+                }),
+                _ => Err(RegistryError::Undefined {
                     name: name.to_owned(),
                 }),
             }

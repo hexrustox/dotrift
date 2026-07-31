@@ -2,8 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x empty identifier after `.`
+  x empty field name
    ,----
  1 | {{ x. }}
-   :     ^
+   :     |
+   :     `-- provide a field name after `.`
    `----

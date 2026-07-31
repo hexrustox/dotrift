@@ -5,5 +5,6 @@ expression: "format!(\"{report:?}\")"
   x trailing comma
    ,----
  1 | {{ [1,] }}
-   :      ^
+   :      |
+   :      `-- remove the trailing comma
    `----

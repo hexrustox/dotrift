@@ -2,9 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x missing condition
+  x unexpected token after expression
    ,----
- 1 | {% if %}
+ 1 | {{ a b }}
    :      |
-   :      `-- provide a condition after `if`
+   :      `-- remove or correct this token
    `----

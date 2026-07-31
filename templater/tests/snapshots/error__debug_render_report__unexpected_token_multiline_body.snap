@@ -6,6 +6,7 @@ expression: "format!(\"{report:?}\")"
    ,-[2:3]
  1 | {{
  2 |   @
-   :   ^
+   :   |
+   :   `-- remove or correct this token
  3 | }}
    `----

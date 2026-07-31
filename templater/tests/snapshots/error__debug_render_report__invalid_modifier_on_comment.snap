@@ -2,8 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x invalid modifier
+  x modifier in comment
    ,----
  1 | {#- x #}
-   :   ^
+   :   |
+   :   `-- remove the modifier
    `----

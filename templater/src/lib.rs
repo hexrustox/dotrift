@@ -10,7 +10,7 @@ mod value;
 
 use std::{collections::HashMap, fs::File, io, path::Path};
 
-pub use error::{Error, FuncError, ParseError, RenderError};
+pub use error::{Error, ParseError, RegistryError, RenderError};
 pub use function::FunctionRegistry;
 use memmap2::Mmap;
 use miette::{Report, SourceCode};

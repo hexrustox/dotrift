@@ -2,9 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x expected list, got string
+  x empty for loop
    ,----
- 1 | {{ str.0 }}
+ 1 | {% for %}
    :    ^|^
-   :     `-- provide a value of type list
+   :     `-- provide a binding like `variable in iterable`
    `----

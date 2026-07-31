@@ -5,5 +5,6 @@ expression: "format!(\"{report:?}\")"
   x empty statement
    ,----
  1 | {% %}
-   : ^^^^^
+   : ^^|^^
+   :   `-- provide a statement keyword
    `----

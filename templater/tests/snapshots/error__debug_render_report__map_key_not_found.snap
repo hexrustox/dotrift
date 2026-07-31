@@ -5,5 +5,6 @@ expression: "format!(\"{report:?}\")"
   x map key `nope` not found
    ,----
  1 | {{ map.nope }}
-   :        ^^^^
+   :        ^^|^
+   :          `-- use an existing key
    `----

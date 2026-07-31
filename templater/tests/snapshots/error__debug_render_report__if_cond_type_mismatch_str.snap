@@ -2,8 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x expected type boolean, got string
+  x expected boolean, got string
    ,----
  1 | {% if str %}x{% end %}
-   :       ^^^
+   :       ^|^
+   :        `-- provide a value of type boolean
    `----

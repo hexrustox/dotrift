@@ -135,10 +135,9 @@ fn scan_impl(src: &[u8]) -> std::result::Result<Vec<Token>, Error> {
             ClusterKind::OpenComment => {
                 let open_pos = cluster.core;
                 if src.len() > open_pos + 2 && is_modifier(src[open_pos + 2]) {
-                    return Err(Error::parse(
-                        ParseError::InvalidModifier,
-                        source_span(open_pos + 2..open_pos + 3),
-                    ));
+                    return Err(Error::Parse(ParseError::ModifierInComment {
+                        span: source_span(open_pos + 2..open_pos + 3),
+                    }));
                 }
                 let body_start = open_pos + 2;
                 let close_end = scan_comment_body(src, body_start, open_pos)?;
@@ -146,10 +145,9 @@ fn scan_impl(src: &[u8]) -> std::result::Result<Vec<Token>, Error> {
                 text_start = close_end;
             }
             ClusterKind::CloseInterp | ClusterKind::CloseStmt | ClusterKind::CloseComment => {
-                return Err(Error::parse(
-                    ParseError::StrayDelimiter,
-                    source_span(cluster.core..cluster.core + 2),
-                ));
+                return Err(Error::Parse(ParseError::StrayDelimiter {
+                    span: source_span(cluster.core..cluster.core + 2),
+                }));
             }
         }
     }
@@ -319,10 +317,15 @@ fn scan_body(
         return Ok((core, right));
     }
 
-    Err(Error::parse(
-        ParseError::UnclosedDelimiter,
-        source_span(open_pos..open_pos + 2),
-    ))
+    Err(Error::Parse(ParseError::UnclosedDelimiter {
+        delimiter: match open_kind {
+            ClusterKind::OpenInterp => "}}",
+            ClusterKind::OpenStmt => "%}",
+            _ => unreachable!(),
+        }
+        .to_string(),
+        span: source_span(open_pos..open_pos + 2),
+    }))
 }
 
 /// Returns the absolute position of the closing `"` for a string literal that
@@ -357,19 +360,18 @@ fn scan_comment_body(
                 continue;
             }
             if i > 0 && is_modifier(src[i - 1]) {
-                return Err(Error::parse(
-                    ParseError::InvalidModifier,
-                    source_span(i - 1..i),
-                ));
+                return Err(Error::Parse(ParseError::ModifierInComment {
+                    span: source_span(i - 1..i),
+                }));
             }
             return Ok(i + 2);
         }
         i += 1;
     }
-    Err(Error::parse(
-        ParseError::UnclosedDelimiter,
-        source_span(open_pos..open_pos + 2),
-    ))
+    Err(Error::Parse(ParseError::UnclosedDelimiter {
+        delimiter: "#}".to_string(),
+        span: source_span(open_pos..open_pos + 2),
+    }))
 }
 
 // -----------------------------------------------------------------------------
@@ -499,39 +501,39 @@ mod tests {
     }
 
     // Stray delimiters — basic
-    #[test_case(b"}}" => (ParseError::StrayDelimiter, (0, 2)) ; "stray_closing_interpolation")]
-    #[test_case(b"%}" => (ParseError::StrayDelimiter, (0, 2)) ; "stray_closing_statement")]
-    #[test_case(b"#}" => (ParseError::StrayDelimiter, (0, 2)) ; "stray_closing_comment")]
-    #[test_case(b"a}}" => (ParseError::StrayDelimiter, (1, 2)) ; "stray_delimiter_after_text")]
+    #[test_case(b"}}" => ParseError::StrayDelimiter { span: (0, 2).into() } ; "stray_closing_interpolation")]
+    #[test_case(b"%}" => ParseError::StrayDelimiter { span: (0, 2).into() } ; "stray_closing_statement")]
+    #[test_case(b"#}" => ParseError::StrayDelimiter { span: (0, 2).into() } ; "stray_closing_comment")]
+    #[test_case(b"a}}" => ParseError::StrayDelimiter { span: (1, 2).into() } ; "stray_delimiter_after_text")]
     // Stray delimiters — after escaped opening
-    #[test_case(b"\\{{}}" => (ParseError::StrayDelimiter, (3, 2)) ; "stray_close_after_escaped_open")]
-    #[test_case(b"\\{% %}" => (ParseError::StrayDelimiter, (4, 2)) ; "stray_close_after_escaped_statement_open")]
-    #[test_case(b"\\{{-x}}" => (ParseError::StrayDelimiter, (5, 2)) ; "stray_close_after_escaped_interpolation_open")]
+    #[test_case(b"\\{{}}" => ParseError::StrayDelimiter { span: (3, 2).into() } ; "stray_close_after_escaped_open")]
+    #[test_case(b"\\{% %}" => ParseError::StrayDelimiter { span: (4, 2).into() } ; "stray_close_after_escaped_statement_open")]
+    #[test_case(b"\\{{-x}}" => ParseError::StrayDelimiter { span: (5, 2).into() } ; "stray_close_after_escaped_interpolation_open")]
     // Stray delimiters — after valid tag
-    #[test_case(b"{{x}}%}" => (ParseError::StrayDelimiter, (5, 2)) ; "stray_statement_close_after_interpolation")]
-    #[test_case(b"{{x}}#}" => (ParseError::StrayDelimiter, (5, 2)) ; "stray_comment_close_after_interpolation")]
+    #[test_case(b"{{x}}%}" => ParseError::StrayDelimiter { span: (5, 2).into() } ; "stray_statement_close_after_interpolation")]
+    #[test_case(b"{{x}}#}" => ParseError::StrayDelimiter { span: (5, 2).into() } ; "stray_comment_close_after_interpolation")]
     // Unclosed delimiters — basic
-    #[test_case(b"{{" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_interpolation")]
-    #[test_case(b"{{ x" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_interpolation_with_content")]
-    #[test_case(b"{%" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_statement")]
-    #[test_case(b"{#" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_comment")]
-    #[test_case(b"{#}" => (ParseError::UnclosedDelimiter, (0, 2)) ; "comment_missing_second_hash")]
+    #[test_case(b"{{" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "unclosed_interpolation")]
+    #[test_case(b"{{ x" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "unclosed_interpolation_with_content")]
+    #[test_case(b"{%" => ParseError::UnclosedDelimiter { delimiter: "%}".to_string(), span: (0, 2).into() } ; "unclosed_statement")]
+    #[test_case(b"{#" => ParseError::UnclosedDelimiter { delimiter: "#}".to_string(), span: (0, 2).into() } ; "unclosed_comment")]
+    #[test_case(b"{#}" => ParseError::UnclosedDelimiter { delimiter: "#}".to_string(), span: (0, 2).into() } ; "comment_missing_second_hash")]
     // Unclosed delimiters — string / modifier edge cases
-    #[test_case(b"{{ \"unterminated" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_string_in_interpolation")]
-    #[test_case(b"{% \"unterminated" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_string_in_statement")]
-    #[test_case(b"{{-x" => (ParseError::UnclosedDelimiter, (0, 2)) ; "unclosed_with_left_dash_modifier")]
-    #[test_case(b"{{ x \\-}}" => (ParseError::UnclosedDelimiter, (0, 2)) ; "escaped_modifier_close_unclosed")]
-    #[test_case(b"{# \\#}" => (ParseError::UnclosedDelimiter, (0, 2)) ; "escaped_comment_close_at_eof")]
+    #[test_case(b"{{ \"unterminated" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "unclosed_string_in_interpolation")]
+    #[test_case(b"{% \"unterminated" => ParseError::UnclosedDelimiter { delimiter: "%}".to_string(), span: (0, 2).into() } ; "unclosed_string_in_statement")]
+    #[test_case(b"{{-x" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "unclosed_with_left_dash_modifier")]
+    #[test_case(b"{{ x \\-}}" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "escaped_modifier_close_unclosed")]
+    #[test_case(b"{# \\#}" => ParseError::UnclosedDelimiter { delimiter: "#}".to_string(), span: (0, 2).into() } ; "escaped_comment_close_at_eof")]
     // Invalid modifiers — comment
-    #[test_case(b"{#- x #}" => (ParseError::InvalidModifier, (2, 1)) ; "modifier_after_opening_comment")]
-    #[test_case(b"{#= =#}" => (ParseError::InvalidModifier, (2, 1)) ; "equal_modifier_after_opening_comment")]
-    #[test_case(b"{# x -#}" => (ParseError::InvalidModifier, (5, 1)) ; "modifier_before_closing_comment")]
-    #[test_case(b"{# x\n-#}" => (ParseError::InvalidModifier, (5, 1)) ; "modifier_before_comment_close_across_newline")]
-    fn scan_errors(input: &[u8]) -> (ParseError, (usize, usize)) {
-        let Error::Parse { err, span, .. } = scan(input).unwrap_err() else {
+    #[test_case(b"{#- x #}" => ParseError::ModifierInComment { span: (2, 1).into() } ; "modifier_after_opening_comment")]
+    #[test_case(b"{#= =#}" => ParseError::ModifierInComment { span: (2, 1).into() } ; "equal_modifier_after_opening_comment")]
+    #[test_case(b"{# x -#}" => ParseError::ModifierInComment { span: (5, 1).into() } ; "modifier_before_closing_comment")]
+    #[test_case(b"{# x\n-#}" => ParseError::ModifierInComment { span: (5, 1).into() } ; "modifier_before_comment_close_across_newline")]
+    fn scan_errors(input: &[u8]) -> ParseError {
+        let Error::Parse(err) = scan(input).unwrap_err() else {
             panic!("expected parse error");
         };
-        (err, (span.offset(), span.len()))
+        err
     }
 
     /// Printable ASCII bytes that cannot form or modify a delimiter, nor act

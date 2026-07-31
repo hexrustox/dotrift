@@ -2,8 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x reserved keyword `if`
+  x `if` is a reserved keyword
    ,----
  1 | {{ if }}
-   :    ^^
+   :    ^|
+   :     `-- rename `if`
    `----

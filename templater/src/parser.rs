@@ -89,28 +89,29 @@ impl<'s> Parser<'s> {
                             return Ok(nodes);
                         }
                         StmtKind::Elif => {
-                            return Err(Error::parse(
-                                ParseError::ElifOutsideIf,
-                                source_span(tag.clone()),
-                            ));
+                            return Err(Error::Parse(ParseError::ElifOutsideIf {
+                                span: source_span(tag.clone()),
+                            }));
                         }
                         StmtKind::Else => {
-                            return Err(Error::parse(
-                                ParseError::ElseOutsideIf,
-                                source_span(tag.clone()),
-                            ));
+                            return Err(Error::Parse(ParseError::ElseOutsideIf {
+                                span: source_span(tag.clone()),
+                            }));
                         }
                         StmtKind::End => {
-                            return Err(Error::parse(
-                                ParseError::OrphanEnd,
-                                source_span(tag.clone()),
-                            ));
+                            return Err(Error::Parse(ParseError::OrphanEnd {
+                                span: source_span(tag.clone()),
+                            }));
                         }
                         StmtKind::Unrecognized => {
-                            return Err(Error::parse(
-                                ParseError::UnrecognizedStatement,
-                                source_span(body.clone()),
-                            ));
+                            let body = body.clone();
+                            let stmt = std::str::from_utf8(&self.source[body.clone()])
+                                .expect("body is ascii")
+                                .to_owned();
+                            return Err(Error::Parse(ParseError::UnrecognizedStatement {
+                                stmt,
+                                span: source_span(body),
+                            }));
                         }
                     }
                 }
@@ -127,39 +128,41 @@ impl<'s> Parser<'s> {
         cond_operand: Range<usize>,
         if_tag: Range<usize>,
     ) -> std::result::Result<Node, Error> {
-        let cond = parse_expr_from_operand(self.source, cond_operand)?;
+        let cond = parse_expr_from_operand(self.source, cond_operand, "if")?;
         let body = self.parse_nodes(Stop::IfBlock)?;
         let mut branches = vec![Branch { cond, body }];
         let mut else_body = None;
 
         loop {
             if self.pos >= self.tokens.len() {
-                return Err(Error::parse(
-                    ParseError::UnclosedBlock,
-                    source_span(if_tag.clone()),
-                ));
+                return Err(Error::Parse(ParseError::UnclosedBlock {
+                    span: source_span(if_tag.clone()),
+                }));
             }
             let (kind, ttag, rest) = self.peek_terminator()?;
             match kind {
                 StmtKind::Elif => {
                     if else_body.is_some() {
-                        return Err(Error::parse(ParseError::ElifOutsideIf, source_span(ttag)));
+                        return Err(Error::Parse(ParseError::ElifOutsideIf {
+                            span: source_span(ttag),
+                        }));
                     }
                     self.pos += 1;
-                    let cond = parse_expr_from_operand(self.source, rest)?;
+                    let cond = parse_expr_from_operand(self.source, rest, "elif")?;
                     let body = self.parse_nodes(Stop::IfBlock)?;
                     branches.push(Branch { cond, body });
                 }
                 StmtKind::Else => {
                     if else_body.is_some() {
-                        return Err(Error::parse(ParseError::ElseOutsideIf, source_span(ttag)));
+                        return Err(Error::Parse(ParseError::ElseOutsideIf {
+                            span: source_span(ttag),
+                        }));
                     }
                     self.pos += 1;
                     if has_non_ws(self.source, rest.clone()) {
-                        return Err(Error::parse(
-                            ParseError::UnexpectedToken,
-                            operand_nonws_span(self.source, rest),
-                        ));
+                        return Err(Error::Parse(ParseError::UnexpectedToken {
+                            span: operand_nonws_span(self.source, rest),
+                        }));
                     }
                     let body = self.parse_nodes(Stop::IfBlock)?;
                     else_body = Some(body);
@@ -167,10 +170,9 @@ impl<'s> Parser<'s> {
                 StmtKind::End => {
                     self.pos += 1;
                     if has_non_ws(self.source, rest.clone()) {
-                        return Err(Error::parse(
-                            ParseError::UnexpectedToken,
-                            operand_nonws_span(self.source, rest),
-                        ));
+                        return Err(Error::Parse(ParseError::UnexpectedToken {
+                            span: operand_nonws_span(self.source, rest),
+                        }));
                     }
                     break;
                 }
@@ -197,20 +199,18 @@ impl<'s> Parser<'s> {
         let (var, iter) = parse_for_binding(self.source, operand, body)?;
         let body = self.parse_nodes(Stop::ForBlock)?;
         if self.pos >= self.tokens.len() {
-            return Err(Error::parse(
-                ParseError::UnclosedBlock,
-                source_span(tag.clone()),
-            ));
+            return Err(Error::Parse(ParseError::UnclosedBlock {
+                span: source_span(tag.clone()),
+            }));
         }
         let (kind, _, rest) = self.peek_terminator()?;
         match kind {
             StmtKind::End => {
                 self.pos += 1;
                 if has_non_ws(self.source, rest.clone()) {
-                    return Err(Error::parse(
-                        ParseError::UnexpectedToken,
-                        operand_nonws_span(self.source, rest),
-                    ));
+                    return Err(Error::Parse(ParseError::UnexpectedToken {
+                        span: operand_nonws_span(self.source, rest),
+                    }));
                 }
             }
             _ => unreachable!("parse_nodes(ForBlock) stops only at terminators"),
@@ -245,13 +245,18 @@ fn classify_stmt(
 ) -> std::result::Result<(StmtKind, Range<usize>, Range<usize>), Error> {
     let bytes = &source[body.clone()];
     if bytes.is_empty() {
-        return Err(Error::parse(ParseError::EmptyStatement, source_span(tag)));
+        return Err(Error::Parse(ParseError::EmptyStatement {
+            span: source_span(tag),
+        }));
     }
     if !is_ident_start(bytes[0]) {
-        return Err(Error::parse(
-            ParseError::UnrecognizedStatement,
-            source_span(body),
-        ));
+        let stmt = std::str::from_utf8(&source[body.clone()])
+            .expect("body is ascii")
+            .to_owned();
+        return Err(Error::Parse(ParseError::UnrecognizedStatement {
+            stmt,
+            span: source_span(body),
+        }));
     }
     let mut i = 0;
     while i < bytes.len() && is_ident_byte(bytes[i]) {
@@ -276,12 +281,13 @@ fn classify_stmt(
 fn parse_expr_from_operand(
     source: &[u8],
     operand: Range<usize>,
+    stmt: &str,
 ) -> std::result::Result<Expr, Error> {
     if operand.start >= operand.end {
-        return Err(Error::parse(
-            ParseError::MissingCondition,
-            source_span(operand.start..operand.start + 1),
-        ));
+        return Err(Error::Parse(ParseError::MissingCondition {
+            stmt: stmt.to_string(),
+            span: source_span(operand.start..operand.start + 1),
+        }));
     }
     let mut state = ParserState {
         source,
@@ -291,14 +297,16 @@ fn parse_expr_from_operand(
     let expr = state.parse_expr()?;
     let skipped = state.skip_ws();
     if state.has_remaining() {
-        return Err(Error::parse(
-            if skipped {
-                ParseError::UnexpectedTokensAfterExpr
-            } else {
-                ParseError::UnexpectedToken
-            },
-            state.span(state.pos..state.pos + 1),
-        ));
+        let err = if skipped {
+            ParseError::UnexpectedTokenAfterExpr {
+                span: state.span(state.pos..state.pos + 1),
+            }
+        } else {
+            ParseError::UnexpectedToken {
+                span: state.span(state.pos..state.pos + 1),
+            }
+        };
+        return Err(Error::Parse(err));
     }
     Ok(expr)
 }
@@ -318,31 +326,31 @@ fn parse_for_binding(
     let bytes = state.bytes();
 
     let var = if state.pos >= bytes.len() {
-        return Err(Error::parse(ParseError::EmptyFor, source_span(body)));
+        return Err(Error::Parse(ParseError::EmptyFor {
+            span: source_span(body),
+        }));
     } else if !is_ident_start(bytes[state.pos]) {
-        return Err(Error::parse(
-            ParseError::InvalidVariable,
-            state.span(state.pos..state.pos + 1),
-        ));
+        return Err(Error::Parse(ParseError::InvalidVariable {
+            span: state.span(state.pos..state.pos + 1),
+        }));
     } else {
         let (range, is_keyword) = state.parse_identifier()?;
         if is_keyword {
             let keyword = std::str::from_utf8(&state.source[range.clone()])
                 .expect("identifier is ascii")
                 .to_owned();
-            return Err(Error::parse(
-                ParseError::ReservedKeyword { keyword },
-                source_span(range),
-            ));
+            return Err(Error::Parse(ParseError::ReservedKeyword {
+                keyword,
+                span: source_span(range),
+            }));
         }
         range
     };
 
     if state.pos < bytes.len() && !is_whitespace(bytes[state.pos]) {
-        return Err(Error::parse(
-            ParseError::UnexpectedToken,
-            state.span(state.pos..state.pos + 1),
-        ));
+        return Err(Error::Parse(ParseError::UnexpectedToken {
+            span: state.span(state.pos..state.pos + 1),
+        }));
     }
 
     state.skip_ws();
@@ -353,35 +361,35 @@ fn parse_for_binding(
     let range = body_range(&state.body, start..state.pos);
     let in_bytes = &state.source[range.clone()];
     if in_bytes != b"in" {
-        return Err(Error::parse(
-            ParseError::MissingIn,
-            source_span(if range.is_empty() {
+        return Err(Error::Parse(ParseError::MissingIn {
+            span: source_span(if range.is_empty() {
                 range.start..range.start + 1
             } else {
                 range
             }),
-        ));
+        }));
     }
 
     state.skip_ws();
     if state.pos >= bytes.len() {
-        return Err(Error::parse(
-            ParseError::MissingIterable,
-            state.span(state.pos..state.pos + 1),
-        ));
+        return Err(Error::Parse(ParseError::MissingIterable {
+            span: state.span(state.pos..state.pos + 1),
+        }));
     }
     let iter = state.parse_expr()?;
 
     let skipped = state.skip_ws();
     if state.has_remaining() {
-        return Err(Error::parse(
-            if skipped {
-                ParseError::UnexpectedTokensAfterExpr
-            } else {
-                ParseError::UnexpectedToken
-            },
-            state.span(state.pos..state.pos + 1),
-        ));
+        let err = if skipped {
+            ParseError::UnexpectedTokenAfterExpr {
+                span: state.span(state.pos..state.pos + 1),
+            }
+        } else {
+            ParseError::UnexpectedToken {
+                span: state.span(state.pos..state.pos + 1),
+            }
+        };
+        return Err(Error::Parse(err));
     }
     Ok((var, iter))
 }
@@ -415,10 +423,9 @@ fn parse_interp_body(
     tag: Range<usize>,
 ) -> std::result::Result<Expr, Error> {
     if body.start >= body.end {
-        return Err(Error::parse(
-            ParseError::EmptyInterpolation,
-            source_span(tag.clone()),
-        ));
+        return Err(Error::Parse(ParseError::EmptyInterpolation {
+            span: source_span(tag.clone()),
+        }));
     }
 
     let mut state = ParserState {
@@ -429,14 +436,16 @@ fn parse_interp_body(
     let expr = state.parse_expr()?;
     let skipped = state.skip_ws();
     if state.pos < state.len() {
-        return Err(Error::parse(
-            if skipped {
-                ParseError::UnexpectedTokensAfterExpr
-            } else {
-                ParseError::UnexpectedToken
-            },
-            state.span(state.pos..state.pos + 1),
-        ));
+        let err = if skipped {
+            ParseError::UnexpectedTokenAfterExpr {
+                span: state.span(state.pos..state.pos + 1),
+            }
+        } else {
+            ParseError::UnexpectedToken {
+                span: state.span(state.pos..state.pos + 1),
+            }
+        };
+        return Err(Error::Parse(err));
     }
     Ok(expr)
 }
@@ -504,14 +513,12 @@ impl<'s> ParserState<'s> {
                     },
                     _ => {
                         if is_keyword {
-                            return Err(Error::parse(
-                                ParseError::ReservedKeyword {
-                                    keyword: std::str::from_utf8(ident)
-                                        .expect("identifier is ascii")
-                                        .to_owned(),
-                                },
-                                source_span(range.clone()),
-                            ));
+                            return Err(Error::Parse(ParseError::ReservedKeyword {
+                                keyword: std::str::from_utf8(ident)
+                                    .expect("identifier is ascii")
+                                    .to_owned(),
+                                span: source_span(range.clone()),
+                            }));
                         }
                         // Function calls may have whitespace between the
                         // name and `(`. Dot access may not; preserve the
@@ -529,10 +536,9 @@ impl<'s> ParserState<'s> {
                 })
             }
             b'[' => self.parse_list_literal(),
-            _ => Err(Error::parse(
-                ParseError::UnexpectedToken,
-                self.span(self.pos..self.pos + 1),
-            )),
+            _ => Err(Error::Parse(ParseError::UnexpectedToken {
+                span: self.span(self.pos..self.pos + 1),
+            })),
         }
     }
 
@@ -551,10 +557,9 @@ impl<'s> ParserState<'s> {
 
             let bytes = self.bytes();
             if self.pos >= bytes.len() {
-                return Err(Error::parse(
-                    ParseError::EmptyField,
-                    self.span(dot_pos..dot_pos + 1),
-                ));
+                return Err(Error::Parse(ParseError::EmptyField {
+                    span: self.span(dot_pos..dot_pos + 1),
+                }));
             }
 
             if is_ident_start(bytes[self.pos]) {
@@ -575,10 +580,9 @@ impl<'s> ParserState<'s> {
                     self.pos += 1;
                 }
                 if self.pos >= bytes.len() || !bytes[self.pos].is_ascii_digit() {
-                    return Err(Error::parse(
-                        ParseError::UnexpectedToken,
-                        self.span(dot_pos + 1..dot_pos + 2),
-                    ));
+                    return Err(Error::Parse(ParseError::UnexpectedToken {
+                        span: self.span(dot_pos + 1..dot_pos + 2),
+                    }));
                 }
                 while self.pos < bytes.len() && bytes[self.pos].is_ascii_digit() {
                     self.pos += 1;
@@ -595,10 +599,9 @@ impl<'s> ParserState<'s> {
                     idx_span,
                 };
             } else {
-                return Err(Error::parse(
-                    ParseError::UnexpectedToken,
-                    self.span(dot_pos + 1..dot_pos + 2),
-                ));
+                return Err(Error::Parse(ParseError::UnexpectedToken {
+                    span: self.span(dot_pos + 1..dot_pos + 2),
+                }));
             }
         }
     }
@@ -620,10 +623,9 @@ impl<'s> ParserState<'s> {
                 _ => self.pos += 1,
             }
         }
-        Err(Error::parse(
-            ParseError::UnclosedString,
-            source_span(self.body.start + start..self.body.start + start + 1),
-        ))
+        Err(Error::Parse(ParseError::UnclosedString {
+            span: source_span(self.body.start + start..self.body.start + start + 1),
+        }))
     }
 
     fn parse_integer_literal(&mut self) -> std::result::Result<Expr, Error> {
@@ -652,10 +654,9 @@ impl<'s> ParserState<'s> {
                         n.checked_add(d)
                     }
                 })
-                .ok_or(Error::parse(
-                    ParseError::IntegerOutOfRange,
-                    self.span(start..self.pos),
-                ))?;
+                .ok_or(Error::Parse(ParseError::IntegerOutOfRange {
+                    span: self.span(start..self.pos),
+                }))?;
         }
 
         let lit_span = body_range(&self.body, start..self.pos);
@@ -697,10 +698,9 @@ impl<'s> ParserState<'s> {
             self.skip_ws();
             let bytes = self.bytes();
             if self.pos >= bytes.len() {
-                return Err(Error::parse(
-                    ParseError::UnclosedFunction,
-                    self.span(lparen..lparen + 1),
-                ));
+                return Err(Error::Parse(ParseError::UnclosedFunction {
+                    span: self.span(lparen..lparen + 1),
+                }));
             }
             if bytes[self.pos] == b')' {
                 self.pos += 1;
@@ -712,10 +712,9 @@ impl<'s> ParserState<'s> {
             let skipped = self.skip_ws();
             let bytes = self.bytes();
             if self.pos >= bytes.len() {
-                return Err(Error::parse(
-                    ParseError::UnclosedFunction,
-                    self.span(lparen..lparen + 1),
-                ));
+                return Err(Error::Parse(ParseError::UnclosedFunction {
+                    span: self.span(lparen..lparen + 1),
+                }));
             }
             match bytes[self.pos] {
                 b',' => {
@@ -726,10 +725,9 @@ impl<'s> ParserState<'s> {
                     self.skip_ws();
                     let bytes = self.bytes();
                     if self.pos < bytes.len() && bytes[self.pos] == b')' {
-                        return Err(Error::parse(
-                            ParseError::TrailingComma,
-                            self.span(comma_pos..comma_pos + 1),
-                        ));
+                        return Err(Error::Parse(ParseError::TrailingComma {
+                            span: self.span(comma_pos..comma_pos + 1),
+                        }));
                     }
                 }
                 b')' => {
@@ -737,14 +735,16 @@ impl<'s> ParserState<'s> {
                     break;
                 }
                 _ => {
-                    return Err(Error::parse(
-                        if skipped {
-                            ParseError::UnexpectedTokensAfterExpr
-                        } else {
-                            ParseError::UnexpectedToken
-                        },
-                        self.span(self.pos..self.pos + 1),
-                    ));
+                    let err = if skipped {
+                        ParseError::UnexpectedTokenAfterExpr {
+                            span: self.span(self.pos..self.pos + 1),
+                        }
+                    } else {
+                        ParseError::UnexpectedToken {
+                            span: self.span(self.pos..self.pos + 1),
+                        }
+                    };
+                    return Err(Error::Parse(err));
                 }
             }
         }
@@ -765,10 +765,9 @@ impl<'s> ParserState<'s> {
             self.skip_ws();
             let bytes = self.bytes();
             if self.pos >= bytes.len() {
-                return Err(Error::parse(
-                    ParseError::UnclosedList,
-                    self.span(lbracket..lbracket + 1),
-                ));
+                return Err(Error::Parse(ParseError::UnclosedList {
+                    span: self.span(lbracket..lbracket + 1),
+                }));
             }
             if bytes[self.pos] == b']' {
                 self.pos += 1;
@@ -780,10 +779,9 @@ impl<'s> ParserState<'s> {
             let skipped = self.skip_ws();
             let bytes = self.bytes();
             if self.pos >= bytes.len() {
-                return Err(Error::parse(
-                    ParseError::UnclosedList,
-                    self.span(lbracket..lbracket + 1),
-                ));
+                return Err(Error::Parse(ParseError::UnclosedList {
+                    span: self.span(lbracket..lbracket + 1),
+                }));
             }
             match bytes[self.pos] {
                 b',' => {
@@ -794,10 +792,9 @@ impl<'s> ParserState<'s> {
                     self.skip_ws();
                     let bytes = self.bytes();
                     if self.pos < bytes.len() && bytes[self.pos] == b']' {
-                        return Err(Error::parse(
-                            ParseError::TrailingComma,
-                            self.span(comma_pos..comma_pos + 1),
-                        ));
+                        return Err(Error::Parse(ParseError::TrailingComma {
+                            span: self.span(comma_pos..comma_pos + 1),
+                        }));
                     }
                 }
                 b']' => {
@@ -805,14 +802,16 @@ impl<'s> ParserState<'s> {
                     break;
                 }
                 _ => {
-                    return Err(Error::parse(
-                        if skipped {
-                            ParseError::UnexpectedTokensAfterExpr
-                        } else {
-                            ParseError::UnexpectedToken
-                        },
-                        self.span(self.pos..self.pos + 1),
-                    ));
+                    let err = if skipped {
+                        ParseError::UnexpectedTokenAfterExpr {
+                            span: self.span(self.pos..self.pos + 1),
+                        }
+                    } else {
+                        ParseError::UnexpectedToken {
+                            span: self.span(self.pos..self.pos + 1),
+                        }
+                    };
+                    return Err(Error::Parse(err));
                 }
             }
         }
@@ -1048,125 +1047,125 @@ mod tests {
     }
 
     // -- empty / whitespace --
-    #[test_case(b"" => (ParseError::EmptyInterpolation, (0, 4)) ; "empty_interp")]
-    #[test_case(b" " => (ParseError::EmptyInterpolation, (0, 5)) ; "empty_interp_spaces")]
-    #[test_case(b" \n " => (ParseError::EmptyInterpolation, (0, 7)) ; "empty_interp_newlines")]
+    #[test_case(b"" => ParseError::EmptyInterpolation { span: (0, 4).into() } ; "empty_interp")]
+    #[test_case(b" " => ParseError::EmptyInterpolation { span: (0, 5).into() } ; "empty_interp_spaces")]
+    #[test_case(b" \n " => ParseError::EmptyInterpolation { span: (0, 7).into() } ; "empty_interp_newlines")]
     // -- integer errors --
-    #[test_case(b"9223372036854775808" => (ParseError::IntegerOutOfRange, (2, 19)) ; "int_overflow_pos")]
-    #[test_case(b" -9223372036854775809" => (ParseError::IntegerOutOfRange, (3, 20)) ; "int_overflow_neg")]
-    #[test_case(b"+7" => (ParseError::UnexpectedToken, (2, 1)) ; "plus_prefixed_integer")]
-    #[test_case(b" - 7" => (ParseError::UnexpectedTokensAfterExpr, (5, 1)) ; "minus_sign_separated_from_digits")]
-    #[test_case(b"42x" => (ParseError::UnexpectedToken, (4, 1)) ; "int_immediately_followed_by_ident")]
+    #[test_case(b"9223372036854775808" => ParseError::IntegerOutOfRange { span: (2, 19).into() } ; "int_overflow_pos")]
+    #[test_case(b" -9223372036854775809" => ParseError::IntegerOutOfRange { span: (3, 20).into() } ; "int_overflow_neg")]
+    #[test_case(b"+7" => ParseError::UnexpectedToken { span: (2, 1).into() } ; "plus_prefixed_integer")]
+    #[test_case(b" - 7" => ParseError::UnexpectedTokenAfterExpr { span: (5, 1).into() } ; "minus_sign_separated_from_digits")]
+    #[test_case(b"42x" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "int_immediately_followed_by_ident")]
     // -- string errors --
-    #[test_case(b"\"unterminated" => (ParseError::UnclosedString, (2, 1)) ; "unclosed_string")]
+    #[test_case(b"\"unterminated" => ParseError::UnclosedString { span: (2, 1).into() } ; "unclosed_string")]
     // -- reserved keywords --
-    #[test_case(b"if" => (ParseError::ReservedKeyword{ keyword: "if".into() }, (2, 2)) ; "keyword_if")]
-    #[test_case(b"end" => (ParseError::ReservedKeyword{ keyword: "end".into() }, (2, 3)) ; "keyword_end")]
-    #[test_case(b"in" => (ParseError::ReservedKeyword { keyword: "in".into() }, (2, 2)) ; "keyword_in_expr")]
-    #[test_case(b"elif" => (ParseError::ReservedKeyword { keyword: "elif".into() }, (2, 4)) ; "keyword_elif_expr")]
-    #[test_case(b"else" => (ParseError::ReservedKeyword { keyword: "else".into() }, (2, 4)) ; "keyword_else_expr")]
-    #[test_case(b"for" => (ParseError::ReservedKeyword { keyword: "for".into() }, (2, 3)) ; "keyword_for_expr")]
-    #[test_case(b"if()" => (ParseError::ReservedKeyword{ keyword: "if".into() }, (2, 2)) ; "keyword_in_call_position")]
-    #[test_case(b"if(x)" => (ParseError::ReservedKeyword { keyword: "if".into() }, (2, 2)) ; "keyword_function_name")]
-    #[test_case(b"f(in)" => (ParseError::ReservedKeyword { keyword: "in".into() }, (4, 2)) ; "keyword_as_call_arg")]
-    #[test_case(b"[if]" => (ParseError::ReservedKeyword { keyword: "if".into() }, (3, 2)) ; "keyword_as_list_element")]
+    #[test_case(b"if" => ParseError::ReservedKeyword { keyword: "if".into(), span: (2, 2).into() } ; "keyword_if")]
+    #[test_case(b"end" => ParseError::ReservedKeyword { keyword: "end".into(), span: (2, 3).into() } ; "keyword_end")]
+    #[test_case(b"in" => ParseError::ReservedKeyword { keyword: "in".into(), span: (2, 2).into() } ; "keyword_in_expr")]
+    #[test_case(b"elif" => ParseError::ReservedKeyword { keyword: "elif".into(), span: (2, 4).into() } ; "keyword_elif_expr")]
+    #[test_case(b"else" => ParseError::ReservedKeyword { keyword: "else".into(), span: (2, 4).into() } ; "keyword_else_expr")]
+    #[test_case(b"for" => ParseError::ReservedKeyword { keyword: "for".into(), span: (2, 3).into() } ; "keyword_for_expr")]
+    #[test_case(b"if()" => ParseError::ReservedKeyword { keyword: "if".into(), span: (2, 2).into() } ; "keyword_in_call_position")]
+    #[test_case(b"if(x)" => ParseError::ReservedKeyword { keyword: "if".into(), span: (2, 2).into() } ; "keyword_function_name")]
+    #[test_case(b"f(in)" => ParseError::ReservedKeyword { keyword: "in".into(), span: (4, 2).into() } ; "keyword_as_call_arg")]
+    #[test_case(b"[if]" => ParseError::ReservedKeyword { keyword: "if".into(), span: (3, 2).into() } ; "keyword_as_list_element")]
     // -- dot / index errors --
-    #[test_case(b"a." => (ParseError::EmptyField, (3, 1)) ; "trailing_dot")]
-    #[test_case(b"a.- " => (ParseError::UnexpectedToken, (4, 1)) ; "dash_space_after_dot")]
-    #[test_case(b"a.@" => (ParseError::UnexpectedToken, (4, 1)) ; "invalid_at_after_dot")]
+    #[test_case(b"a." => ParseError::EmptyField { span: (3, 1).into() } ; "trailing_dot")]
+    #[test_case(b"a.- " => ParseError::UnexpectedToken { span: (4, 1).into() } ; "dash_space_after_dot")]
+    #[test_case(b"a.@" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "invalid_at_after_dot")]
     // -- unexpected tokens after expression --
-    #[test_case(b"a b" => (ParseError::UnexpectedTokensAfterExpr, (4, 1)) ; "unexpected_after_expr_var")]
-    #[test_case(b"42 7" => (ParseError::UnexpectedTokensAfterExpr, (5, 1)) ; "unexpected_after_expr_int")]
-    #[test_case(b"@" => (ParseError::UnexpectedToken, (2, 1)) ; "unexpected_token")]
-    #[test_case(b"var@" => (ParseError::UnexpectedToken, (5, 1)) ; "unexpected_token_var_at")]
+    #[test_case(b"a b" => ParseError::UnexpectedTokenAfterExpr { span: (4, 1).into() } ; "unexpected_after_expr_var")]
+    #[test_case(b"42 7" => ParseError::UnexpectedTokenAfterExpr { span: (5, 1).into() } ; "unexpected_after_expr_int")]
+    #[test_case(b"@" => ParseError::UnexpectedToken { span: (2, 1).into() } ; "unexpected_token")]
+    #[test_case(b"var@" => ParseError::UnexpectedToken { span: (5, 1).into() } ; "unexpected_token_var_at")]
     // -- unclosed function calls --
-    #[test_case(b"f(" => (ParseError::UnclosedFunction, (3, 1)) ; "unclosed_call_empty")]
-    #[test_case(b"f(a" => (ParseError::UnclosedFunction, (3, 1)) ; "unclosed_call_paren")]
-    #[test_case(b"f(a, b" => (ParseError::UnclosedFunction, (3, 1)) ; "unclosed_call_with_args")]
-    #[test_case(b"f(a@" => (ParseError::UnexpectedToken, (5, 1)) ; "unexpected_token_in_call")]
-    #[test_case(b"f(,)" => (ParseError::UnexpectedToken, (4, 1)) ; "call_comma_with_no_arg")]
-    #[test_case(b"f(a b" => (ParseError::UnexpectedTokensAfterExpr, (6, 1)) ; "call_missing_paren_with_extra_token")]
-    #[test_case(b"f(a,)" => (ParseError::TrailingComma, (5, 1)) ; "trailing_comma_call")]
+    #[test_case(b"f(" => ParseError::UnclosedFunction { span: (3, 1).into() } ; "unclosed_call_empty")]
+    #[test_case(b"f(a" => ParseError::UnclosedFunction { span: (3, 1).into() } ; "unclosed_call_paren")]
+    #[test_case(b"f(a, b" => ParseError::UnclosedFunction { span: (3, 1).into() } ; "unclosed_call_with_args")]
+    #[test_case(b"f(a@" => ParseError::UnexpectedToken { span: (5, 1).into() } ; "unexpected_token_in_call")]
+    #[test_case(b"f(,)" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "call_comma_with_no_arg")]
+    #[test_case(b"f(a b" => ParseError::UnexpectedTokenAfterExpr { span: (6, 1).into() } ; "call_missing_paren_with_extra_token")]
+    #[test_case(b"f(a,)" => ParseError::TrailingComma { span: (5, 1).into() } ; "trailing_comma_call")]
     // -- unclosed lists --
-    #[test_case(b"[" => (ParseError::UnclosedList, (2, 1)) ; "unclosed_list_empty")]
-    #[test_case(b"[a" => (ParseError::UnclosedList, (2, 1)) ; "unclosed_list_with_element")]
-    #[test_case(b"[a, b" => (ParseError::UnclosedList, (2, 1)) ; "unclosed_list_with_multiple_elements")]
-    #[test_case(b"[a@" => (ParseError::UnexpectedToken, (4, 1)) ; "unexpected_token_in_list")]
-    #[test_case(b"[a,]" => (ParseError::TrailingComma, (4, 1)) ; "trailing_comma_list")]
-    #[test_case(b"[a b]" => (ParseError::UnexpectedTokensAfterExpr, (5, 1)) ; "list_missing_comma")]
-    fn parse_interp_error(src: &[u8]) -> (ParseError, (usize, usize)) {
+    #[test_case(b"[" => ParseError::UnclosedList { span: (2, 1).into() } ; "unclosed_list_empty")]
+    #[test_case(b"[a" => ParseError::UnclosedList { span: (2, 1).into() } ; "unclosed_list_with_element")]
+    #[test_case(b"[a, b" => ParseError::UnclosedList { span: (2, 1).into() } ; "unclosed_list_with_multiple_elements")]
+    #[test_case(b"[a@" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "unexpected_token_in_list")]
+    #[test_case(b"[a,]" => ParseError::TrailingComma { span: (4, 1).into() } ; "trailing_comma_list")]
+    #[test_case(b"[a b]" => ParseError::UnexpectedTokenAfterExpr { span: (5, 1).into() } ; "list_missing_comma")]
+    fn parse_interp_error(src: &[u8]) -> ParseError {
         let src = [b"{{", src, b"}}"].concat();
-        let Error::Parse { err, span, .. } = parse(scan(&src).unwrap(), &src).unwrap_err() else {
+        let Error::Parse(err) = parse(scan(&src).unwrap(), &src).unwrap_err() else {
             panic!("expected parse error");
         };
-        (err, (span.offset(), span.len()))
+        err
     }
 
     // -- empty / invalid statements --
-    #[test_case(b"" => (ParseError::EmptyStatement, (0, 4)) ; "empty_statement")]
-    #[test_case(b" " => (ParseError::EmptyStatement, (0, 5)) ; "whitespace_statement")]
-    #[test_case(b"@" => (ParseError::UnrecognizedStatement, (2, 1)) ; "unrecognized_statement_at")]
-    #[test_case(b"ifx" => (ParseError::UnrecognizedStatement, (2, 3)) ; "unrecognized_statement_ifx")]
-    #[test_case(b"forx in y" => (ParseError::UnrecognizedStatement, (2, 9)) ; "unrecognized_statement_forx")]
-    #[test_case(b"123" => (ParseError::UnrecognizedStatement, (2, 3)) ; "statement_starts_with_digit")]
-    #[test_case(b"IF x" => (ParseError::UnrecognizedStatement, (2, 4)) ; "statement_uppercase_keyword")]
+    #[test_case(b"" => ParseError::EmptyStatement { span: (0, 4).into() } ; "empty_statement")]
+    #[test_case(b" " => ParseError::EmptyStatement { span: (0, 5).into() } ; "whitespace_statement")]
+    #[test_case(b"@" => ParseError::UnrecognizedStatement { stmt: "@".into(), span: (2, 1).into() } ; "unrecognized_statement_at")]
+    #[test_case(b"ifx" => ParseError::UnrecognizedStatement { stmt: "ifx".into(), span: (2, 3).into() } ; "unrecognized_statement_ifx")]
+    #[test_case(b"forx in y" => ParseError::UnrecognizedStatement { stmt: "forx in y".into(), span: (2, 9).into() } ; "unrecognized_statement_forx")]
+    #[test_case(b"123" => ParseError::UnrecognizedStatement { stmt: "123".into(), span: (2, 3).into() } ; "statement_starts_with_digit")]
+    #[test_case(b"IF x" => ParseError::UnrecognizedStatement { stmt: "IF x".into(), span: (2, 4).into() } ; "statement_uppercase_keyword")]
     // -- if errors --
-    #[test_case(b"if" => (ParseError::MissingCondition, (4, 1)) ; "if_missing_condition")]
-    #[test_case(b"if!" => (ParseError::UnexpectedToken, (4, 1)) ; "if_unexpected_token_bang")]
-    #[test_case(b"if x y" => (ParseError::UnexpectedTokensAfterExpr, (7, 1)) ; "if_unexpected_tokens_after_condition")]
-    #[test_case(b"if \"unclosed" => (ParseError::UnclosedString, (5, 1)) ; "if_unclosed_string_condition")]
-    #[test_case(b"if 9223372036854775808" => (ParseError::IntegerOutOfRange, (5, 19)) ; "if_int_overflow_condition")]
-    #[test_case(b"if in" => (ParseError::ReservedKeyword { keyword: "in".into() }, (5, 2)) ; "if_reserved_keyword_condition")]
-    #[test_case(b"if a." => (ParseError::EmptyField, (6, 1)) ; "if_trailing_dot_in_condition")]
-    #[test_case(b"if a@" => (ParseError::UnexpectedToken, (6, 1)) ; "if_unexpected_token_at")]
+    #[test_case(b"if" => ParseError::MissingCondition { stmt: "if".to_string(), span: (4, 1).into() } ; "if_missing_condition")]
+    #[test_case(b"if!" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "if_unexpected_token_bang")]
+    #[test_case(b"if x y" => ParseError::UnexpectedTokenAfterExpr { span: (7, 1).into() } ; "if_unexpected_tokens_after_condition")]
+    #[test_case(b"if \"unclosed" => ParseError::UnclosedString { span: (5, 1).into() } ; "if_unclosed_string_condition")]
+    #[test_case(b"if 9223372036854775808" => ParseError::IntegerOutOfRange { span: (5, 19).into() } ; "if_int_overflow_condition")]
+    #[test_case(b"if in" => ParseError::ReservedKeyword { keyword: "in".into(), span: (5, 2).into() } ; "if_reserved_keyword_condition")]
+    #[test_case(b"if a." => ParseError::EmptyField { span: (6, 1).into() } ; "if_trailing_dot_in_condition")]
+    #[test_case(b"if a@" => ParseError::UnexpectedToken { span: (6, 1).into() } ; "if_unexpected_token_at")]
     // -- for errors --
-    #[test_case(b"for" => (ParseError::EmptyFor, (2, 3)) ; "for_missing_binding")]
-    #[test_case(b"for $" => (ParseError::InvalidVariable, (6, 1)) ; "for_invalid_variable_dollar")]
-    #[test_case(b"for x$" => (ParseError::UnexpectedToken, (7, 1)) ; "for_invalid_variable_trailing")]
-    #[test_case(b"for x" => (ParseError::MissingIn, (7, 1)) ; "for_missing_in")]
-    #[test_case(b"for x x" => (ParseError::MissingIn, (8, 1)) ; "for_missing_in_second_word")]
-    #[test_case(b"for x on list" => (ParseError::MissingIn, (8, 2)) ; "for_wrong_word_instead_of_in")]
-    #[test_case(b"for x in" => (ParseError::MissingIterable, (10, 1)) ; "for_missing_iterable")]
-    #[test_case(b"for x in   " => (ParseError::MissingIterable, (10, 1)) ; "for_missing_iterable_with_trailing_ws")]
-    #[test_case(b"for x in y x" => (ParseError::UnexpectedTokensAfterExpr, (13, 1)) ; "for_unexpected_tokens_after_iterable")]
-    #[test_case(b"for x in y$" => (ParseError::UnexpectedToken, (12, 1)) ; "for_unexpected_token_in_iterable")]
-    #[test_case(b"for if in list" => (ParseError::ReservedKeyword { keyword: "if".into() }, (6, 2)) ; "for_reserved_keyword_var")]
-    #[test_case(b"for true in list" => (ParseError::ReservedKeyword { keyword: "true".into() }, (6, 4)) ; "for_bool_literal_var")]
-    #[test_case(b"for 1 in list" => (ParseError::InvalidVariable, (6, 1)) ; "for_digit_start_var")]
-    #[test_case(b"for x in in" => (ParseError::ReservedKeyword { keyword: "in".into() }, (11, 2)) ; "for_reserved_keyword_iterable")]
-    fn parse_stmt_error(src: &[u8]) -> (ParseError, (usize, usize)) {
+    #[test_case(b"for" => ParseError::EmptyFor { span: (2, 3).into() } ; "for_missing_binding")]
+    #[test_case(b"for $" => ParseError::InvalidVariable { span: (6, 1).into() } ; "for_invalid_variable_dollar")]
+    #[test_case(b"for x$" => ParseError::UnexpectedToken { span: (7, 1).into() } ; "for_invalid_variable_trailing")]
+    #[test_case(b"for x" => ParseError::MissingIn { span: (7, 1).into() } ; "for_missing_in")]
+    #[test_case(b"for x x" => ParseError::MissingIn { span: (8, 1).into() } ; "for_missing_in_second_word")]
+    #[test_case(b"for x on list" => ParseError::MissingIn { span: (8, 2).into() } ; "for_wrong_word_instead_of_in")]
+    #[test_case(b"for x in" => ParseError::MissingIterable { span: (10, 1).into() } ; "for_missing_iterable")]
+    #[test_case(b"for x in   " => ParseError::MissingIterable { span: (10, 1).into() } ; "for_missing_iterable_with_trailing_ws")]
+    #[test_case(b"for x in y x" => ParseError::UnexpectedTokenAfterExpr { span: (13, 1).into() } ; "for_unexpected_tokens_after_iterable")]
+    #[test_case(b"for x in y$" => ParseError::UnexpectedToken { span: (12, 1).into() } ; "for_unexpected_token_in_iterable")]
+    #[test_case(b"for if in list" => ParseError::ReservedKeyword { keyword: "if".into(), span: (6, 2).into() } ; "for_reserved_keyword_var")]
+    #[test_case(b"for true in list" => ParseError::ReservedKeyword { keyword: "true".into(), span: (6, 4).into() } ; "for_bool_literal_var")]
+    #[test_case(b"for 1 in list" => ParseError::InvalidVariable { span: (6, 1).into() } ; "for_digit_start_var")]
+    #[test_case(b"for x in in" => ParseError::ReservedKeyword { keyword: "in".into(), span: (11, 2).into() } ; "for_reserved_keyword_iterable")]
+    fn parse_stmt_error(src: &[u8]) -> ParseError {
         let src = [b"{%", src, b"%}"].concat();
-        let Error::Parse { err, span, .. } = parse(scan(&src).unwrap(), &src).unwrap_err() else {
+        let Error::Parse(err) = parse(scan(&src).unwrap(), &src).unwrap_err() else {
             panic!("expected parse error");
         };
-        (err, (span.offset(), span.len()))
+        err
     }
 
     // -- orphan terminators --
-    #[test_case(b"{%end%}" => (ParseError::OrphanEnd, (0, 7)) ; "orphan_end")]
-    #[test_case(b"{%elif%}" => (ParseError::ElifOutsideIf, (0, 8)) ; "orphan_elif")]
-    #[test_case(b"{%else%}" => (ParseError::ElseOutsideIf, (0, 8)) ; "orphan_else")]
-    #[test_case(b"{% if a %}{% end %}{% elif b %}{% end %}" => (ParseError::ElifOutsideIf, (19, 12)) ; "elif_after_closed_if")]
-    #[test_case(b"{% if a %}A{% else %}B{% end %}{% end %}" => (ParseError::OrphanEnd, (31, 9)) ; "extra_end_after_closed_if")]
+    #[test_case(b"{%end%}" => ParseError::OrphanEnd { span: (0, 7).into() } ; "orphan_end")]
+    #[test_case(b"{%elif%}" => ParseError::ElifOutsideIf { span: (0, 8).into() } ; "orphan_elif")]
+    #[test_case(b"{%else%}" => ParseError::ElseOutsideIf { span: (0, 8).into() } ; "orphan_else")]
+    #[test_case(b"{% if a %}{% end %}{% elif b %}{% end %}" => ParseError::ElifOutsideIf { span: (19, 12).into() } ; "elif_after_closed_if")]
+    #[test_case(b"{% if a %}A{% else %}B{% end %}{% end %}" => ParseError::OrphanEnd { span: (31, 9).into() } ; "extra_end_after_closed_if")]
     // -- elif / else in wrong blocks --
-    #[test_case(b"{% if a %}A{% else %}B{% elif c %}C{% end %}" => (ParseError::ElifOutsideIf, (22, 12)) ; "elif_after_else")]
-    #[test_case(b"{% if a %}A{% else %}B{% else %}C{% end %}" => (ParseError::ElseOutsideIf, (22, 10)) ; "else_after_else")]
-    #[test_case(b"{% for x in list %}{% elif y %}{% end %}" => (ParseError::ElifOutsideIf, (19, 12)) ; "elif_in_for")]
-    #[test_case(b"{% for x in list %}{% else %}{% end %}" => (ParseError::ElseOutsideIf, (19, 10)) ; "else_in_for")]
+    #[test_case(b"{% if a %}A{% else %}B{% elif c %}C{% end %}" => ParseError::ElifOutsideIf { span: (22, 12).into() } ; "elif_after_else")]
+    #[test_case(b"{% if a %}A{% else %}B{% else %}C{% end %}" => ParseError::ElseOutsideIf { span: (22, 10).into() } ; "else_after_else")]
+    #[test_case(b"{% for x in list %}{% elif y %}{% end %}" => ParseError::ElifOutsideIf { span: (19, 12).into() } ; "elif_in_for")]
+    #[test_case(b"{% for x in list %}{% else %}{% end %}" => ParseError::ElseOutsideIf { span: (19, 10).into() } ; "else_in_for")]
     // -- unexpected tokens on terminators --
-    #[test_case(b"{%if true%}{%end x%}" => (ParseError::UnexpectedToken, (17, 1)) ; "end_with_operand")]
-    #[test_case(b"{% for x in list %}{% end x %}" => (ParseError::UnexpectedToken, (26, 1)) ; "for_end_with_operand")]
-    #[test_case(b"{%if true%}{%else x%}" => (ParseError::UnexpectedToken, (18, 1)) ; "else_with_operand")]
-    #[test_case(b"{%if true%}{%else a b c%}" => (ParseError::UnexpectedToken, (18, 1)) ; "else_with_multiple_operands")]
+    #[test_case(b"{%if true%}{%end x%}" => ParseError::UnexpectedToken { span: (17, 1).into() } ; "end_with_operand")]
+    #[test_case(b"{% for x in list %}{% end x %}" => ParseError::UnexpectedToken { span: (26, 1).into() } ; "for_end_with_operand")]
+    #[test_case(b"{%if true%}{%else x%}" => ParseError::UnexpectedToken { span: (18, 1).into() } ; "else_with_operand")]
+    #[test_case(b"{%if true%}{%else a b c%}" => ParseError::UnexpectedToken { span: (18, 1).into() } ; "else_with_multiple_operands")]
     // -- unclosed blocks --
-    #[test_case(b"{% if true %}text" => (ParseError::UnclosedBlock, (0, 13)) ; "unclosed_if")]
-    #[test_case(b"{% for x in list %}text" => (ParseError::UnclosedBlock, (0, 19)) ; "unclosed_for")]
-    #[test_case(b"{% if true %}{% else %}" => (ParseError::UnclosedBlock, (0, 13)) ; "if_else_missing_end")]
-    #[test_case(b"{% for x in list %}{% if true %}text{% end %}" => (ParseError::UnclosedBlock, (0, 19)) ; "for_body_with_unclosed_inner_if")]
-    fn parse_stmt_nodes_error(src: &[u8]) -> (ParseError, (usize, usize)) {
-        let Error::Parse { err, span, .. } = parse(scan(src).unwrap(), src).unwrap_err() else {
+    #[test_case(b"{% if true %}text" => ParseError::UnclosedBlock { span: (0, 13).into() } ; "unclosed_if")]
+    #[test_case(b"{% for x in list %}text" => ParseError::UnclosedBlock { span: (0, 19).into() } ; "unclosed_for")]
+    #[test_case(b"{% if true %}{% else %}" => ParseError::UnclosedBlock { span: (0, 13).into() } ; "if_else_missing_end")]
+    #[test_case(b"{% for x in list %}{% if true %}text{% end %}" => ParseError::UnclosedBlock { span: (0, 19).into() } ; "for_body_with_unclosed_inner_if")]
+    fn parse_stmt_nodes_error(src: &[u8]) -> ParseError {
+        let Error::Parse(err) = parse(scan(src).unwrap(), src).unwrap_err() else {
             panic!("expected parse error");
         };
-        (err, (span.offset(), span.len()))
+        err
     }
 }

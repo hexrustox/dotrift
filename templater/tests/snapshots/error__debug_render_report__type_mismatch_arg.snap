@@ -2,8 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x expected type string, got integer
+  x expected string, got integer
    ,----
- 1 | {{ exact1(42) }}
-   :           ^^
+ 1 | {{ mismatch(42) }}
+   :             ^|
+   :              `-- provide a value of type string
    `----

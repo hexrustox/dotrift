@@ -2,8 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x unrecognized statement
+  x unrecognized statement `endif`
    ,----
  1 | {% endif %}
-   :    ^^^^^
+   :    ^^|^^
+   :      `-- use a valid statement keyword
    `----

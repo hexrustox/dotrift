@@ -5,5 +5,6 @@ expression: "format!(\"{report:?}\")"
   x unexpected token
    ,----
  1 | {{ @ }}
-   :    ^
+   :    |
+   :    `-- remove or correct this token
    `----

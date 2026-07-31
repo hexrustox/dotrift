@@ -2,8 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x undefined variable
+  x undefined variable `missing`
    ,----
  1 | {{ missing }}
-   :    ^^^^^^^
+   :    ^^^|^^^
+   :       `-- define this variable or fix the name
    `----

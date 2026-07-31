@@ -5,7 +5,7 @@ use miette::SourceSpan;
 use crate::{
     Template, Value,
     ast::{Expr, Node},
-    error::{Error, FuncError, RenderError},
+    error::{Error, RegistryError, RenderError},
     function::FunctionRegistry,
     util::source_span,
 };
@@ -96,13 +96,11 @@ impl Template {
                             Value::Bool(false) => {} // skip this branch
                             other => {
                                 let span = branch.cond.span();
-                                return Err(Error::render(
-                                    RenderError::TypeMismatch {
-                                        expected: crate::ValueType::Bool,
-                                        got: other.value_type(),
-                                    },
-                                    SourceSpan::from((span.start, span.end - span.start)),
-                                ));
+                                return Err(Error::Render(RenderError::TypeMismatch {
+                                    expected: crate::ValueType::Bool,
+                                    got: other.value_type(),
+                                    span: SourceSpan::from((span.start, span.end - span.start)),
+                                }));
                             }
                         }
                     }
@@ -126,13 +124,11 @@ impl Template {
                         }
                         other => {
                             let span = iter.span();
-                            return Err(Error::render(
-                                RenderError::TypeMismatch {
-                                    expected: crate::ValueType::List,
-                                    got: other.value_type(),
-                                },
-                                SourceSpan::from((span.start, span.end - span.start)),
-                            ));
+                            return Err(Error::Render(RenderError::TypeMismatch {
+                                expected: crate::ValueType::List,
+                                got: other.value_type(),
+                                span: SourceSpan::from((span.start, span.end - span.start)),
+                            }));
                         }
                     }
                 }
@@ -192,10 +188,10 @@ fn eval(
             match lookup(name, src, scope) {
                 Some(v) => v.into_owned(),
                 None => {
-                    return Err(Error::render(
-                        RenderError::UndefinedVariable,
-                        SourceSpan::from((range.start, range.end - range.start)),
-                    ));
+                    return Err(Error::Render(RenderError::UndefinedVariable {
+                        name: name.to_string(),
+                        span: SourceSpan::from((range.start, range.end - range.start)),
+                    }));
                 }
             }
         }
@@ -221,7 +217,25 @@ fn eval(
                 Ok(value) => value,
                 Err(err) => {
                     let span = func_error_span(&err, args, name, paren_span);
-                    return Err(Error::func(err, span));
+                    return Err(Error::Render(match err {
+                        RegistryError::Undefined { name: n } => {
+                            RenderError::FunctionUndefined { name: n, span }
+                        }
+                        RegistryError::ArgCount { expected, got } => {
+                            RenderError::FunctionArgCount {
+                                expected,
+                                got,
+                                span,
+                            }
+                        }
+                        RegistryError::TypeMismatch { expected, got, .. } => {
+                            RenderError::TypeMismatch {
+                                expected,
+                                got,
+                                span,
+                            }
+                        }
+                    }));
                 }
             }
         }
@@ -234,24 +248,20 @@ fn eval(
                     match map.get(key) {
                         Some(v) => v.clone(),
                         None => {
-                            return Err(Error::render(
-                                RenderError::MapKeyNotFound {
-                                    key: key.to_owned(),
-                                },
-                                SourceSpan::from((field.start, field.end - field.start)),
-                            ));
+                            return Err(Error::Render(RenderError::MapKeyNotFound {
+                                key: key.to_owned(),
+                                span: SourceSpan::from((field.start, field.end - field.start)),
+                            }));
                         }
                     }
                 }
                 other => {
                     let span = left.span();
-                    return Err(Error::render(
-                        RenderError::TypeMismatch {
-                            expected: crate::ValueType::Map,
-                            got: other.value_type(),
-                        },
-                        SourceSpan::from((span.start, span.end - span.start)),
-                    ));
+                    return Err(Error::Render(RenderError::TypeMismatch {
+                        expected: crate::ValueType::Map,
+                        got: other.value_type(),
+                        span: SourceSpan::from((span.start, span.end - span.start)),
+                    }));
                 }
             }
         }
@@ -263,34 +273,30 @@ fn eval(
             let receiver = eval(left, src, scope, functions)?;
             let span = SourceSpan::from((idx_span.start, idx_span.end - idx_span.start));
             if *idx < 0 {
-                return Err(Error::render(
-                    RenderError::NegativeListIndex { idx: *idx },
+                return Err(Error::Render(RenderError::NegativeListIndex {
+                    idx: *idx,
                     span,
-                ));
+                }));
             }
             match receiver {
                 Value::List(list) => {
                     let index = *idx as usize;
                     if index >= list.len() {
-                        return Err(Error::render(
-                            RenderError::ListIndexOutOfBounds {
-                                idx: *idx,
-                                len: list.len(),
-                            },
+                        return Err(Error::Render(RenderError::ListIndexOutOfBounds {
+                            idx: *idx,
+                            len: list.len(),
                             span,
-                        ));
+                        }));
                     }
                     list[index].clone()
                 }
                 other => {
                     let span = left.span();
-                    return Err(Error::render(
-                        RenderError::TypeMismatch {
-                            expected: crate::ValueType::List,
-                            got: other.value_type(),
-                        },
-                        SourceSpan::from((span.start, span.end - span.start)),
-                    ));
+                    return Err(Error::Render(RenderError::TypeMismatch {
+                        expected: crate::ValueType::List,
+                        got: other.value_type(),
+                        span: SourceSpan::from((span.start, span.end - span.start)),
+                    }));
                 }
             }
         }
@@ -303,28 +309,23 @@ fn eval(
 ///   args, the empty parenthesized argument list `()`.
 /// - `TypeMismatch`: the offending argument.
 fn func_error_span(
-    err: &FuncError,
+    err: &RegistryError,
     args: &[Expr],
     name: &std::ops::Range<usize>,
     paren_span: &std::ops::Range<usize>,
 ) -> SourceSpan {
     match err {
-        FuncError::Undefined { .. } => source_span(name.clone()),
-        FuncError::ArgCount { .. } => {
+        RegistryError::Undefined { .. } => source_span(name.clone()),
+        RegistryError::ArgCount { expected, got } => {
             if args.is_empty() {
                 source_span(paren_span.clone())
+            } else if got > expected {
+                source_span(args[*expected - 1].span().end..args[*got - 1].span().end)
             } else {
-                source_span(args.first().unwrap().span().start..args.last().unwrap().span().end)
+                source_span(args[got - 1].span().end..args[got - 1].span().end + 1)
             }
         }
-        FuncError::TypeMismatch { arg_index, .. } => {
-            if let Some(arg) = args.get(*arg_index) {
-                source_span(arg.span())
-            } else {
-                // unreachable
-                source_span(name.clone())
-            }
-        }
+        RegistryError::TypeMismatch { arg_index, .. } => source_span(args[*arg_index].span()),
     }
 }
 
@@ -390,15 +391,6 @@ mod tests {
 
     use super::*;
 
-    fn eval_err(src: &[u8]) -> Error {
-        let Node::Interpolate(expr) = parse(scan(src).unwrap(), src).unwrap().pop().unwrap() else {
-            panic!("expected Interpolate")
-        };
-        let vars = var_scope();
-        let scope = Scope::new(&vars);
-        eval(&expr, src, &scope, &TestRegistry).unwrap_err()
-    }
-
     #[test_case(br#"a\"b"# => "a\"b"; "escaped_double_quote")]
     #[test_case(br#"a\\b"# => "a\\b"; "escaped_backslash")]
     #[test_case(br#"a\nb"# => "a\\nb"; "other_backslash_verbatim")]
@@ -414,7 +406,7 @@ mod tests {
     fn write_string_literal_round_trips(src: &[u8]) -> String {
         let mut out = Vec::new();
         write_string_literal(src, 0..src.len(), &mut out).unwrap();
-        String::from_utf8_lossy(&out).to_string()
+        String::from_utf8(out).unwrap()
     }
 
     #[test_case(b"{{ 42 }}" => Value::Int(42) ; "int_pos")]
@@ -449,32 +441,31 @@ mod tests {
         eval(&expr, src, &scope, &TestRegistry).unwrap()
     }
 
-    #[test_case(b"{{ missing }}" => (RenderError::UndefinedVariable, (3, 7)) ; "undefined_variable")]
-    #[test_case(b"{{ map.nope }}" => (RenderError::MapKeyNotFound { key: "nope".into() }, (7, 4)) ; "map_key_not_found")]
-    #[test_case(b"{{ num.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Int }, (3, 3)) ; "map_access_on_int")]
-    #[test_case(b"{{ yes.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Bool }, (3, 3)) ; "map_access_on_bool")]
-    #[test_case(b"{{ list.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::List }, (3, 4)) ; "map_access_on_list")]
-    #[test_case(b"{{ [str].0.field }}" => (RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Str }, (3, 7)) ; "map_access_on_str_nested_in_literal_list")]
-    #[test_case(b"{{ \"s\".0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str }, (3, 3)) ; "list_access_on_str")]
-    #[test_case(b"{{ map.0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Map }, (3, 3)) ; "list_access_on_map")]
-    #[test_case(b"{{ map.key.0 }}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str }, (3, 7)) ; "list_access_on_nested_map")]
-    #[test_case(b"{{ list.3 }}" => (RenderError::ListIndexOutOfBounds { idx: 3, len: 3 }, (8, 1)) ; "index_out_of_bounds")]
-    #[test_case(b"{{ list.-1 }}" => (RenderError::NegativeListIndex { idx: -1 }, (8, 2)) ; "negative_index")]
-    fn eval_render(src: &[u8]) -> (RenderError, (usize, usize)) {
-        match eval_err(src) {
-            Error::Render { err, span, .. } => (err, (span.offset(), span.len())),
+    #[test_case(b"{{ missing }}" => RenderError::UndefinedVariable { name:"missing".to_string(), span: (3, 7).into() } ; "undefined_variable")]
+    #[test_case(b"{{ map.nope }}" => RenderError::MapKeyNotFound { key: "nope".into(), span: (7, 4).into() } ; "map_key_not_found")]
+    #[test_case(b"{{ num.field }}" => RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Int, span: (3, 3).into() } ; "map_access_on_int")]
+    #[test_case(b"{{ yes.field }}" => RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Bool, span: (3, 3).into() } ; "map_access_on_bool")]
+    #[test_case(b"{{ list.field }}" => RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::List, span: (3, 4).into() } ; "map_access_on_list")]
+    #[test_case(b"{{ [str].0.field }}" => RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Str, span: (3, 7).into() } ; "map_access_on_str_nested_in_literal_list")]
+    #[test_case(b"{{ \"s\".0 }}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str, span: (3, 3).into() } ; "list_access_on_str")]
+    #[test_case(b"{{ map.0 }}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Map, span: (3, 3).into() } ; "list_access_on_map")]
+    #[test_case(b"{{ map.key.0 }}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str, span: (3, 7).into() } ; "list_access_on_nested_map")]
+    #[test_case(b"{{ list.3 }}" => RenderError::ListIndexOutOfBounds { idx: 3, len: 3, span: (8, 1).into() } ; "index_out_of_bounds")]
+    #[test_case(b"{{ list.-1 }}" => RenderError::NegativeListIndex { idx: -1, span: (8, 2).into() } ; "negative_index")]
+    #[test_case(b"{{ nope() }}" => RenderError::FunctionUndefined { name: "nope".into(), span: (3, 4).into() } ; "undefined_function")]
+    #[test_case(b"{{ one_arg() }}" => RenderError::FunctionArgCount { expected: 1, got: 0, span: (10, 2).into() } ; "zero_in_one_arg")]
+    #[test_case(b"{{ one_arg(1, 2) }}" => RenderError::FunctionArgCount { expected: 1, got: 2, span: (12, 3).into() } ; "two_in_one_arg")]
+    #[test_case(b"{{ two_arg(1) }}" => RenderError::FunctionArgCount { expected: 2, got: 1, span: (12, 1).into() } ; "one_in_two_arg")]
+    #[test_case(b"{{ mismatch(12) }}" => RenderError::TypeMismatch { expected: ValueType::Str, got: ValueType::Int, span: (12, 2).into() } ; "type_mismatch_arg")]
+    fn eval_render(src: &[u8]) -> RenderError {
+        let Node::Interpolate(expr) = parse(scan(src).unwrap(), src).unwrap().pop().unwrap() else {
+            panic!("expected Interpolate")
+        };
+        let vars = var_scope();
+        let scope = Scope::new(&vars);
+        match eval(&expr, src, &scope, &TestRegistry).unwrap_err() {
+            Error::Render(err) => err,
             e => panic!("expected Render error, got {e:?}"),
-        }
-    }
-
-    #[test_case(b"{{ nope() }}" => (FuncError::Undefined { name: "nope".into() }, (3, 4)) ; "undefined_function")]
-    #[test_case(b"{{ same() }}" => (FuncError::ArgCount { expected: 1, got: 0 }, (7, 2)) ; "arg_count_zero_args")]
-    #[test_case(b"{{ exact1(\"a\", \"b\") }}" => (FuncError::ArgCount { expected: 1, got: 2 }, (10, 8)) ; "arg_count_multi_args")]
-    #[test_case(b"{{ exact1(12) }}" => (FuncError::TypeMismatch { expected: ValueType::Str, got: ValueType::Int, arg_index: 0 }, (10, 2)) ; "type_mismatch_arg")]
-    fn eval_func(src: &[u8]) -> (FuncError, (usize, usize)) {
-        match eval_err(src) {
-            Error::Func { err, span, .. } => (err, (span.offset(), span.len())),
-            e => panic!("expected Func error, got {e:?}"),
         }
     }
 
@@ -498,16 +489,16 @@ mod tests {
         String::from_utf8(out).unwrap()
     }
 
-    #[test_case(b"{% if str %}x{% end %}" => (RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Str }, (6, 3)); "if_cond_str")]
-    #[test_case(b"{% if no %}{% elif num %}x{% end %}" => (RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Int }, (19, 3)); "elif_cond_int")]
-    #[test_case(b"{% for x in str %}{{x}}{% end %}" => (RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str }, (12, 3)); "for_iterable_str")]
-    fn eval_body_error(src: &[u8]) -> (RenderError, (usize, usize)) {
+    #[test_case(b"{% if str %}x{% end %}" => RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Str, span: (6, 3).into() } ; "if_cond_str")]
+    #[test_case(b"{% if no %}{% elif num %}x{% end %}" => RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Int, span: (19, 3).into() } ; "elif_cond_int")]
+    #[test_case(b"{% for x in str %}{{x}}{% end %}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str, span: (12, 3).into() } ; "for_iterable_str")]
+    fn eval_body_error(src: &[u8]) -> RenderError {
         let mut out = Vec::new();
         match Template::from_bytes(src)
             .render(&mut out, &var_scope(), &TestRegistry)
             .unwrap_err()
         {
-            Error::Render { err, span, .. } => (err.clone(), (span.offset(), span.len())),
+            Error::Render(err) => err,
             _ => panic!("expected Render error"),
         }
     }

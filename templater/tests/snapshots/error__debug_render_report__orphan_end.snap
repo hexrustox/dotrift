@@ -5,5 +5,6 @@ expression: "format!(\"{report:?}\")"
   x orphan `end`
    ,----
  1 | {% end %}
-   : ^^^^^^^^^
+   : ^^^^|^^^^
+   :     `-- remove this `end`
    `----

@@ -2,8 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x expected type map, got string
+  x expected map, got string
    ,----
  1 | {{ str.field }}
-   :    ^^^
+   :    ^|^
+   :     `-- provide a value of type map
    `----

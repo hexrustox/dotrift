@@ -26,12 +26,15 @@ use test_case::test_case;
 #[test_case(b"{{ same(1,) }}"; "trailing_comma_call")]
 #[test_case(b"{{ same(1 }}"; "unclosed_function")]
 #[test_case(b"{{ @ }}"; "unexpected_token")]
+#[test_case(b"{{ a b }}"; "unexpected_token_after_expr")]
 // statement / block parse errors
 #[test_case(b"{% endif %}"; "unrecognized_statement")]
 #[test_case(b"{% end %}"; "orphan_end")]
 #[test_case(b"{% elif x %}"; "orphan_elif")]
 #[test_case(b"{% else %}"; "orphan_else")]
 #[test_case(b"{% if %}"; "missing_condition")]
+#[test_case(b"{% for %}"; "empty_for")]
+#[test_case(b"{% for $ %}"; "invalid_variable")]
 #[test_case(b"{% for x %}"; "missing_in")]
 #[test_case(b"{% for x in %}"; "missing_iterable")]
 #[test_case(b"{% if true %}hi"; "unclosed_if_block")]
@@ -48,8 +51,10 @@ use test_case::test_case;
 #[test_case(b"{{ str.0 }}"; "index_access_on_non_list")]
 // function errors
 #[test_case(b"{{ nope() }}"; "undefined_function")]
-#[test_case(b"{{ same() }}"; "arg_count_zero")]
-#[test_case(b"{{ exact1(42) }}"; "type_mismatch_arg")]
+#[test_case(b"{{ one_arg() }}"; "arg_count_zero")]
+#[test_case(b"{{ one_arg(1, 2) }}"; "arg_count_two")]
+#[test_case(b"{{ two_arg(1) }}"; "arg_count_one")]
+#[test_case(b"{{ mismatch(42) }}"; "type_mismatch_arg")]
 // span / source-window edge cases
 #[test_case(b"hello {{  }}"; "empty_interp_after_text")]
 #[test_case(b"line1\nline2\n{{  }}"; "empty_interp_on_later_line")]

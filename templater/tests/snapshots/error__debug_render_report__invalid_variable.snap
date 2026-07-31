@@ -2,9 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x unclosed delimiter
+  x invalid loop variable
    ,----
- 1 | {# comment
-   : ^|
-   :  `-- close the tag with `#}`
+ 1 | {% for $ %}
+   :        |
+   :        `-- use a valid identifier
    `----

@@ -2,8 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x unclosed function
+  x unclosed function call
    ,----
  1 | {{ same(1 }}
-   :        ^
+   :        |
+   :        `-- close the function call with `)`
    `----

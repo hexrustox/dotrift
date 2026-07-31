@@ -2,8 +2,9 @@
 source: templater/tests/error.rs
 expression: "format!(\"{report:?}\")"
 ---
-  x expected 1 arguments, got 0
+  x expected 1 argument, got 0
    ,----
- 1 | {{ same() }}
-   :        ^^
+ 1 | {{ one_arg() }}
+   :           ^|
+   :            `-- add 1 argument
    `----
