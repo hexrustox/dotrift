@@ -84,7 +84,7 @@ mod macros {
 mod test_utils {
     use std::collections::{BTreeMap, HashMap};
 
-    use crate::{FunctionRegistry, RegistryError, Value, ValueType};
+    use crate::{FunctionRegistry, RegistryError, Value, value::ValueType};
 
     /// Registry where every function is undefined.
     ///

@@ -6,6 +6,7 @@ use crate::{
     error::{Error, RegistryError, RenderError},
     function::FunctionRegistry,
     util::{ascii_str_unchecked, source_span},
+    value::ValueType,
 };
 
 /// A binding layer in the scope stack walked by variable resolution.
@@ -92,7 +93,7 @@ impl Template {
                             other => {
                                 let span = branch.cond.span();
                                 return Err(Error::Render(RenderError::TypeMismatch {
-                                    expected: crate::ValueType::Bool,
+                                    expected: ValueType::Bool,
                                     got: other.value_type(),
                                     span: source_span(span),
                                 }));
@@ -120,7 +121,7 @@ impl Template {
                         other => {
                             let span = iter.span();
                             return Err(Error::Render(RenderError::TypeMismatch {
-                                expected: crate::ValueType::List,
+                                expected: ValueType::List,
                                 got: other.value_type(),
                                 span: source_span(span),
                             }));
@@ -255,7 +256,7 @@ fn eval(
                 other => {
                     let span = left.span();
                     return Err(Error::Render(RenderError::TypeMismatch {
-                        expected: crate::ValueType::Map,
+                        expected: ValueType::Map,
                         got: other.value_type(),
                         span: source_span(span),
                     }));
@@ -290,7 +291,7 @@ fn eval(
                 other => {
                     let span = left.span();
                     return Err(Error::Render(RenderError::TypeMismatch {
-                        expected: crate::ValueType::List,
+                        expected: ValueType::List,
                         got: other.value_type(),
                         span: source_span(span),
                     }));
@@ -380,7 +381,6 @@ mod tests {
     use test_case::test_case;
 
     use crate::{
-        ValueType,
         parser::parse,
         scanner::scan,
         util::{TestRegistry, var_scope},

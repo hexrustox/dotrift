@@ -19,7 +19,7 @@ use std::io;
 
 use miette::{Diagnostic, SourceSpan};
 
-use crate::ValueType;
+use crate::value::ValueType;
 
 /// Errors raised while constructing or rendering a [`Template`](crate::Template).
 #[derive(Debug, thiserror::Error, Diagnostic)]

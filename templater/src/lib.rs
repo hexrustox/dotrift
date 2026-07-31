@@ -1,37 +1,37 @@
 mod ast;
-mod error;
+pub mod error;
 mod eval;
-mod function;
+pub mod function;
 mod parser;
 mod scanner;
 mod trim;
 pub mod util;
-mod value;
+pub mod value;
 
 use std::{collections::HashMap, fs::File, io, path::Path, sync::Arc};
 
 use memmap2::Mmap;
 use miette::{Report, SourceCode};
 
-pub use error::{Error, ParseError, RegistryError, RenderError};
-pub use function::FunctionRegistry;
-pub use value::{Value, ValueType};
+use error::{Error, RegistryError};
+
+use crate::{function::FunctionRegistry, value::Value};
 
 /// A parsed template: the AST plus the source bytes it references.
 #[derive(Debug)]
 pub struct Template {
-    pub(crate) src: Source,
+    src: Source,
 }
 
 /// The backing bytes of a [`Template`].
 #[derive(Debug, Clone)]
-pub enum Source {
+enum Source {
     Bytes(Vec<u8>),
     Mapped(std::sync::Arc<Mmap>),
 }
 
 impl Source {
-    pub(crate) fn as_bytes(&self) -> &[u8] {
+    fn as_bytes(&self) -> &[u8] {
         match self {
             Source::Bytes(bytes) => bytes,
             Source::Mapped(mmap) => mmap,

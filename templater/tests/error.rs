@@ -3,7 +3,7 @@ mod common;
 use std::collections::HashMap;
 
 use common::{MockRegistry, var_scope};
-use templater::{Error, Template, util::TestRegistry};
+use templater::{Template, error::Error, util::TestRegistry};
 use test_case::test_case;
 
 // scanner parse errors
