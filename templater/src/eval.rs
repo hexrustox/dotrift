@@ -135,8 +135,9 @@ impl Template {
 }
 
 /// Looks up `name` against the active scope stack, walking from innermost
-/// outward. Returns a borrowed `Cow` for Var/Loop frames (no clone until the
-/// caller asks for `into_owned`).
+/// outward. The Var frame holds borrowed variables from the host, while a Loop
+/// frame owns the current iteration value; both are returned as a borrowed
+/// `Cow` so the caller can cheaply take ownership with `into_owned`.
 fn lookup<'v>(name: &str, src: &[u8], scope: &'v Scope<'v>) -> Option<Cow<'v, Value>> {
     for frame in scope.frames.iter().rev() {
         match frame {
@@ -158,10 +159,12 @@ fn lookup<'v>(name: &str, src: &[u8], scope: &'v Scope<'v>) -> Option<Cow<'v, Va
     None
 }
 
-/// Evaluates one expression to an owned `Value`. Per decision E1 the lookup
-/// path clones the underlying value out of the borrowed scope (`StrLit` at
-/// top-level interpolation is handled separately in `eval_body` for the
-/// zero-allocation fast path, but nested string literals evaluate here).
+/// Evaluates one expression to an owned `Value`.
+///
+/// Variable and loop-variable lookups clone the underlying value out of the
+/// borrowed scope. Top-level string interpolations in `eval_body` are handled
+/// separately so the literal bytes can be written directly, but nested string
+/// literals evaluate here.
 fn eval(
     expr: &Expr,
     src: &[u8],
@@ -334,8 +337,7 @@ fn func_error_span(
 /// - `\"` → `"`, `\\` → `\`.
 /// - Any other `\X` → both bytes verbatim (no interpretation).
 /// - Raw newlines and other bytes pass through unchanged, byte-for-byte
-///   (no `char`-cast — non-ASCII bytes such as those inside `{{ "café" }}`
-///   survive intact even though they aren't valid standalone UTF-8).
+///   (no `char`-cast; multibyte UTF-8 sequences are preserved intact).
 ///
 /// The range is guaranteed to be the interior of a *closed* string literal
 /// (the parser rejects unclosed strings at parse time), so the loop is

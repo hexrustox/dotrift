@@ -497,7 +497,8 @@ impl<'s> ParserState<'s> {
                 let (range, is_keyword) = self.parse_identifier()?;
                 let ident =
                     &self.bytes()[range.start - self.body.start..range.end - self.body.start];
-                let lit_span = self.range(range.start - self.body.start..range.end - self.body.start);
+                let lit_span =
+                    self.range(range.start - self.body.start..range.end - self.body.start);
                 Ok(match ident {
                     b"true" => Expr::BoolLit {
                         value: true,
