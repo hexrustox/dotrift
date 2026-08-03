@@ -8,7 +8,6 @@ source directory to a target directory via `dotrift.toml`.
 - [Testing conventions](docs/agents/testing.md)
 - [Issue tracker](docs/agents/issue-tracker.md)
 - [Domain docs](docs/agents/domain.md)
-- [Templater crate](templater/AGENTS.md)
 
 **Authoritative behavior contract:** `spec/*.md` (root) and `<workspace>/spec/*.md` (per workspace member). Consult them before changing CLI, config, DB schema, templater syntax, or pager behavior.
 
@@ -38,9 +37,6 @@ Source files under `legacy/` are archived from a prior implementation. New code 
 - Tests: `cargo test` (all workspace); `cargo test -p templater` or `-p tui`
   for a single crate; `cargo test --test apply` for one integration file.
 - Lint/format: `cargo fmt`, `cargo clippy`
-- Accept changed insta snapshots: `cargo insta review` (snapshots are stored
-  relative to the directory of the unit test that produced them — e.g.
-  `src/command/snapshots/`, `tui/src/pager/snapshots/`)
 - Unused deps: `cargo machete` · Supply chain: `cargo deny check` · TOML
   formatting: `taplo format`
 
