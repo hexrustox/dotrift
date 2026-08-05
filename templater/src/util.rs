@@ -86,6 +86,11 @@ mod test_utils {
 
     use crate::{FunctionRegistry, RegistryError, Value, value::ValueType};
 
+    /// Re-export of the parser's reserved keyword list so integration tests
+    /// can filter generated identifiers against the same source of truth the
+    /// parser enforces. See `parser::RESERVED_KEYWORDS`.
+    pub use crate::parser::RESERVED_KEYWORDS;
+
     /// Registry where every function is undefined.
     ///
     /// Use this for templates that are expected never to call functions; any

@@ -681,10 +681,7 @@ impl<'s> ParserState<'s> {
 
         let range = self.range(start..self.pos);
         let ident = &bytes[start..self.pos];
-        let is_keyword = matches!(
-            ident,
-            b"true" | b"false" | b"if" | b"elif" | b"else" | b"for" | b"in" | b"end"
-        );
+        let is_keyword = RESERVED_KEYWORDS.iter().any(|kw| ident == kw.as_bytes());
         Ok((range, is_keyword))
     }
 
@@ -829,6 +826,12 @@ fn is_ident_start(b: u8) -> bool {
 fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
+
+/// Reserved keywords that cannot appear as identifiers (variables, function
+/// names, or map keys). `true`/`false` are included because the parser treats
+/// them as `BoolLit`, not identifiers — any identifier-shaped byte sequence
+/// matching one of these is rejected or consumed as a literal.
+pub const RESERVED_KEYWORDS: &[&str] = &["if", "elif", "else", "for", "in", "end", "true", "false"];
 
 #[cfg(test)]
 mod tests {

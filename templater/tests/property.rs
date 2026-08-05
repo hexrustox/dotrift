@@ -1,10 +1,15 @@
 mod common;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write;
 
 use common::MockRegistry;
 use proptest::prelude::*;
 use templater::Template;
+use templater::error::RegistryError;
+use templater::function::FunctionRegistry;
+use templater::util::RESERVED_KEYWORDS;
+use templater::value::Value;
 
 /// Escapes a byte payload so it can be placed inside a template string literal.
 ///
@@ -20,6 +25,254 @@ fn string_literal_safe_bytes(bytes: &[u8]) -> Vec<u8> {
         escaped.push(b);
     }
     escaped
+}
+
+/// Serializes a primitive `Value` to its template source-syntax literal form —
+/// the inverse of parse+eval: parsing this form yields the same `Value`. Used
+/// to embed generated args back into the function-call source.
+///
+/// - `Str(s)` → `"s"` with `"` and `\` byte-escaped via `string_literal_safe_bytes`
+/// - `Int(n)` → decimal i64 (matching `IntLit` parse)
+/// - `Bool(b)` → `true` / `false` (matching `BoolLit` parse)
+fn value_literal_bytes(value: &Value) -> Vec<u8> {
+    match value {
+        Value::Str(s) => {
+            let mut bytes = vec![b'"'];
+            bytes.extend(string_literal_safe_bytes(s.as_bytes()));
+            bytes.push(b'"');
+            bytes
+        }
+        Value::Int(n) => n.to_string().into_bytes(),
+        Value::Bool(b) => b.to_string().into_bytes(),
+        // The strategy only ever generates primitive values; lists/maps never
+        // reach here.
+        _ => unreachable!(),
+    }
+}
+
+/// Wraps an interpolation body in `{{ ` ... ` }}` delimiters.
+fn wrap_interp(body: &[u8]) -> Vec<u8> {
+    let mut src = Vec::with_capacity(6 + body.len());
+    src.extend_from_slice(b"{{ ");
+    src.extend_from_slice(body);
+    src.extend_from_slice(b" }}");
+    src
+}
+
+/// Registry exposing one variadic function named `name` that joins the
+/// canonical render of each argument with a single ASCII space and returns
+/// `Value::Str(joined)`.
+///
+/// Stringification mirrors `Value::write_top` byte-for-byte (`Str` verbatim,
+/// `Int` decimal, `Bool` lowercase keyword) so the property test can predict
+/// the rendered output without reaching into the engine's `pub(crate)`
+/// renderer. The top-level render of `Value::Str(joined)` is `joined`
+/// verbatim (`value.rs:61`), so `output == joined.as_bytes()`.
+struct JoinRegistry {
+    name: String,
+}
+
+impl FunctionRegistry for JoinRegistry {
+    fn call(&self, name: &str, args: &[Value]) -> Result<Value, RegistryError> {
+        debug_assert_eq!(name, self.name);
+        let mut joined = String::new();
+        for (i, arg) in args.iter().enumerate() {
+            if i > 0 {
+                joined.push(' ');
+            }
+            match arg {
+                Value::Str(s) => joined.push_str(s),
+                Value::Int(n) => {
+                    let _ = write!(joined, "{n}");
+                }
+                Value::Bool(b) => {
+                    let _ = write!(joined, "{b}");
+                }
+                // Strategy only ever generates primitives; lists/maps never
+                // reach the registry.
+                _ => unreachable!(),
+            }
+        }
+        Ok(Value::Str(joined))
+    }
+}
+
+/// Builds a strategy for a list literal whose source bytes are identical to its
+/// rendered output, with element nesting up to `max_depth` levels deep.
+///
+/// - depth 0 elements: string, integer, or bool leaf
+/// - depth > 0 elements: any leaf OR a nested list at depth - 1
+///
+/// Each list picks `n` in `0..8` elements, joins them with `", "`, and wraps
+/// in `[` ... `]`. Since the canonical render form matches the source syntax
+/// byte-for-byte, the same payload serves as template body and expected output.
+fn list_literal(max_depth: u32) -> BoxedStrategy<Vec<u8>> {
+    fn element(depth: u32) -> BoxedStrategy<Vec<u8>> {
+        let str_leaf = proptest::collection::vec(any::<u8>(), 0..64).prop_map(|bytes| {
+            let mut s = Vec::with_capacity(bytes.len() + 2);
+            s.push(b'"');
+            s.extend(string_literal_safe_bytes(&bytes));
+            s.push(b'"');
+            s
+        });
+        let int_leaf = any::<i64>().prop_map(|n| value_literal_bytes(&Value::Int(n)));
+        let bool_leaf = any::<bool>().prop_map(|b| value_literal_bytes(&Value::Bool(b)));
+
+        if depth == 0 {
+            prop_oneof![str_leaf, int_leaf, bool_leaf].boxed()
+        } else {
+            prop_oneof![str_leaf, int_leaf, bool_leaf, list_at_depth(depth - 1)].boxed()
+        }
+    }
+
+    fn list_at_depth(depth: u32) -> BoxedStrategy<Vec<u8>> {
+        proptest::collection::vec(element(depth), 0..8)
+            .prop_map(|elems| {
+                let mut s = Vec::new();
+                s.push(b'[');
+                for (i, e) in elems.iter().enumerate() {
+                    if i > 0 {
+                        s.extend_from_slice(b", ");
+                    }
+                    s.extend_from_slice(e);
+                }
+                s.push(b']');
+                s
+            })
+            .boxed()
+    }
+
+    list_at_depth(max_depth)
+}
+
+/// Reserved keywords that cannot appear as identifiers (variables or map keys)
+/// because the parser would reject them. Re-exported from `templater::util`
+/// so the test filters against the same source of truth the parser enforces.
+///
+/// Generates a valid identifier `[A-Za-z_][A-Za-z0-9_]*` of length 1..=8,
+/// excluding reserved keywords. Returns the identifier bytes.
+fn ident_bytes() -> BoxedStrategy<Vec<u8>> {
+    // ASCII alphabetic first char, ASCII alphanumeric subsequent chars.
+    // Pattern guarantees a non-empty identifier (1..=8 chars).
+    proptest::string::string_regex("[A-Za-z_][A-Za-z0-9_]{0,7}")
+        .unwrap()
+        .prop_map(|s| {
+            let bytes = s.into_bytes();
+            // Reject reserved keywords; regenerated automatically by the
+            // `prop_filter_map` wrapper below.
+            bytes
+        })
+        .prop_filter("reject reserved keywords", |b| {
+            !RESERVED_KEYWORDS.iter().any(|kw| b == kw.as_bytes())
+        })
+        .boxed()
+}
+
+/// Generates a leaf primitive `Value` alongside its canonical top-level render
+/// bytes: unquoted string, decimal int, or lowercase bool. Top-level string
+/// values are emitted verbatim by the engine, so the expected output for a
+/// `Str` leaf is the raw payload bytes (no quoting, no escaping).
+fn primitive_value() -> BoxedStrategy<(Value, Vec<u8>)> {
+    let str_leaf = proptest::string::string_regex("[A-Za-z0-9_]{0,64}")
+        .unwrap()
+        .prop_map(|s| (Value::Str(s.clone()), s.into_bytes()));
+    let int_leaf = any::<i64>().prop_map(|n| (Value::Int(n), n.to_string().into_bytes()));
+    let bool_leaf = any::<bool>().prop_map(|b| (Value::Bool(b), b.to_string().into_bytes()));
+
+    prop_oneof![str_leaf, int_leaf, bool_leaf].boxed()
+}
+
+/// Generates a nested `Value` paired with the path suffix leading from this
+/// value down to a primitive leaf, and the primitive's expected render bytes.
+///
+/// Recurses up to `max_depth` levels of wrapping; the actual depth is drawn
+/// uniformly from `[0, max_depth]`, so `max_depth = 2` may yield a bare leaf
+/// (suffix `""`), a single wrap (`foo.bar` / `foo.0`), or a double wrap
+/// (`foo.bar.0.baz`). Each wrap is either a single-element `List` (target at
+/// index 0, suffix `.0`) or a single-key `Map` (target at the key, suffix
+/// `.<ident>`). The composition guarantees no `MapKeyNotFound`,
+/// `ListIndexOutOfBounds`, `NegativeListIndex`, or `TypeMismatch` errors at
+/// render time.
+fn nested_value_at_depth(max_depth: u32) -> BoxedStrategy<(Value, Vec<u8>, Vec<u8>)> {
+    fn element(depth: u32) -> BoxedStrategy<(Value, Vec<u8>, Vec<u8>)> {
+        let leaf = primitive_value().prop_map(|(v, expected)| (v, Vec::new(), expected));
+
+        if depth == 0 {
+            leaf.boxed()
+        } else {
+            let inner = element(depth - 1);
+            let list_wrap = inner.clone().prop_map(|(v, mut suffix, expected)| {
+                let mut new_suffix = Vec::with_capacity(2 + suffix.len());
+                new_suffix.extend_from_slice(b".0");
+                new_suffix.append(&mut suffix);
+                (Value::List(vec![v]), new_suffix, expected)
+            });
+            let map_wrap = (ident_bytes(), inner).prop_map(|(key, (v, mut suffix, expected))| {
+                let mut new_suffix = Vec::with_capacity(1 + key.len() + suffix.len());
+                new_suffix.push(b'.');
+                new_suffix.extend_from_slice(&key);
+                new_suffix.append(&mut suffix);
+                let map = BTreeMap::from([(String::from_utf8(key).unwrap(), v)]);
+                (Value::Map(map), new_suffix, expected)
+            });
+
+            prop_oneof![leaf, list_wrap, map_wrap].boxed()
+        }
+    }
+
+    element(max_depth)
+}
+
+type AccessPathFixture = (HashMap<String, Value>, Vec<u8>, Vec<u8>);
+
+/// Generates the full fixture for a variable-access property test:
+/// `(scope, path_bytes, expected_render_bytes)`.
+///
+/// The `scope` is a one-entry `HashMap` whose single `Value` is a nested
+/// structure; `path_bytes` is the access expression (e.g. `foo.bar.0.baz`)
+/// that navigates down to a primitive leaf; `expected_render_bytes` is the
+/// canonical top-level render of that leaf (unquoted strings allowed).
+///
+/// The dot-only access form (no `[]`) matches the templater grammar in
+/// `templater/spec/syntax.md`: `postfix = primary ( ("." identifier) | ("." integer) )*`.
+fn access_path(max_depth: u32) -> BoxedStrategy<AccessPathFixture> {
+    (ident_bytes(), nested_value_at_depth(max_depth))
+        .prop_map(|(root, (value, suffix, expected))| {
+            let mut path = Vec::with_capacity(root.len() + suffix.len());
+            path.extend_from_slice(&root);
+            path.extend_from_slice(&suffix);
+            let scope = HashMap::from([(String::from_utf8(root).unwrap(), value)]);
+            (scope, path, expected)
+        })
+        .boxed()
+}
+
+/// Generates the fixture for the function-call property test:
+/// `(function_name, args, expected_render_bytes)`.
+///
+/// `function_name` is a valid identifier `[A-Za-z_][A-Za-z0-9_]*` (excluding
+/// reserved keywords) — used both as the name in the source call and as the
+/// name the `JoinRegistry` matches against. `args` is 0..=`max_args`
+/// primitive `Value`s. `expected_render_bytes` is the args' canonical renders
+/// joined by `" "` — identical to what the `JoinRegistry` produces and what
+/// `Value::write_top` then renders verbatim at top level.
+fn join_call(max_args: usize) -> BoxedStrategy<(String, Vec<Value>, Vec<u8>)> {
+    (
+        ident_bytes().prop_map(String::from_utf8),
+        proptest::collection::vec(primitive_value(), 0..=max_args),
+    )
+        .prop_map(|(name, args): (Result<String, _>, Vec<(Value, Vec<u8>)>)| {
+            let mut expected = Vec::new();
+            for (i, (_, render)) in args.iter().enumerate() {
+                if i > 0 {
+                    expected.push(b' ');
+                }
+                expected.extend_from_slice(render);
+            }
+            let args: Vec<Value> = args.into_iter().map(|(v, _)| v).collect();
+            (name.unwrap(), args, expected)
+        })
+        .boxed()
 }
 
 proptest! {
@@ -40,7 +293,7 @@ proptest! {
     fn string_literal_renders_identity(bytes in proptest::collection::vec(any::<u8>(), 0..1024)) {
         let escaped = string_literal_safe_bytes(&bytes);
 
-        let mut src = Vec::with_capacity(4 + escaped.len() + 4);
+        let mut src = Vec::new();
         src.extend_from_slice(br#"{{ ""#);
         src.extend_from_slice(&escaped);
         src.extend_from_slice(br#"" }}"#);
@@ -50,37 +303,101 @@ proptest! {
             .render(&mut out, &HashMap::new(), &MockRegistry)
             .unwrap();
 
-        assert_eq!(out, bytes);
+        prop_assert_eq!(out, bytes);
     }
 
     // Any i64 integer literal renders as its canonical decimal form.
     #[test]
     fn int_literal_renders_identity(n in any::<i64>()) {
-        let mut src = Vec::new();
-        src.extend_from_slice(b"{{ ");
-        src.extend_from_slice(n.to_string().as_bytes());
-        src.extend_from_slice(b" }}");
+        let lit = value_literal_bytes(&Value::Int(n));
+        let src = wrap_interp(&lit);
 
         let mut out = Vec::new();
         Template::from_bytes(src)
             .render(&mut out, &HashMap::new(), &MockRegistry)
             .unwrap();
 
-        assert_eq!(String::from_utf8(out).unwrap(), n.to_string());
+        prop_assert_eq!(out, lit);
     }
 
     #[test]
-    fn bool_literal_renders_identity(bool in prop_oneof!["true", "false"]) {
-        let mut src = Vec::new();
-        src.extend_from_slice(b"{{ ");
-        src.extend_from_slice(bool.as_bytes());
-        src.extend_from_slice(b" }}");
+    fn bool_literal_renders_identity(b in any::<bool>()) {
+        let lit = value_literal_bytes(&Value::Bool(b));
+        let src = wrap_interp(&lit);
 
         let mut out = Vec::new();
         Template::from_bytes(src)
             .render(&mut out, &HashMap::new(), &MockRegistry)
             .unwrap();
 
-        assert_eq!(out, bool.as_bytes());
+        prop_assert_eq!(out, lit);
+    }
+
+    // A list literal of strings, integers, bools, and nested lists (up to two
+    // levels of nesting) renders back to its own canonical byte form: `[`
+    // followed by `, `-joined elements followed by `]`, where strings are
+    // quoted, ints are decimal, and bools are `true`/`false`.
+    #[test]
+    fn list_literal_renders_identity(list in list_literal(2)) {
+        let src = wrap_interp(&list);
+
+        let mut out = Vec::new();
+        Template::from_bytes(src)
+            .render(&mut out, &HashMap::new(), &MockRegistry)
+            .unwrap();
+
+        prop_assert_eq!(out, list);
+    }
+
+    // A variable-access path navigates a nested Value (up to two levels of
+    // List/Map wrapping) down to a primitive leaf and renders the leaf's
+    // canonical top-level form: unquoted string, decimal int, or lowercase
+    // bool. Exercises variable lookup, dot (Map key) access, and dot-index
+    // (List) access in mixed chains such as `foo.bar.0.baz.0.qux`.
+    #[test]
+    fn variable_access_renders_identity(
+        (scope, path, expected) in access_path(2)
+    ) {
+        let src = wrap_interp(&path);
+
+        let mut out = Vec::new();
+        Template::from_bytes(src)
+            .render(&mut out, &scope, &MockRegistry)
+            .unwrap();
+
+        prop_assert_eq!(out, expected);
+    }
+
+    // A function call with 0..=4 primitive arguments (string, int, or bool)
+    // renders as the args' canonical forms joined by a single ASCII space.
+    // Each arg is parsed, evaluated to a `Value`, passed to the registry as
+    // `&[Value]`; the registry joins the args' `write_top` forms into a
+    // `Value::Str`, which `write_top` then emits verbatim at top level.
+    // Exercises function-name resolution, arg evaluation, variadic arity
+    // (including the 0-arg edge case), and the `FnCall → write_top` render
+    // path for all three primitive value types.
+    #[test]
+    fn function_call_renders_identity(
+        (name, args, expected) in join_call(4)
+    ) {
+        let mut body = Vec::new();
+        body.extend_from_slice(name.as_bytes());
+        body.push(b'(');
+        for (i, arg) in args.iter().enumerate() {
+            if i > 0 {
+                body.extend_from_slice(b", ");
+            }
+            body.extend_from_slice(&value_literal_bytes(arg));
+        }
+        body.push(b')');
+        let src = wrap_interp(&body);
+
+        let registry = JoinRegistry { name: name.clone() };
+        let mut out = Vec::new();
+        Template::from_bytes(src)
+            .render(&mut out, &HashMap::new(), &registry)
+            .unwrap();
+
+        prop_assert_eq!(out, expected);
     }
 }
