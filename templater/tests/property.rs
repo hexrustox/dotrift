@@ -469,4 +469,43 @@ proptest! {
         let expected = vec![b'0' + t as u8];
         prop_assert_eq!(out, expected);
     }
+
+    // A for-loop over a List renders each item's top-level form in order: the
+    // body `{{ x }}` per iteration emits the item's `write_top` bytes, so the
+    // rendered output equals the concatenation of those renders. An empty List
+    // short-circuits — the body never runs and no Loop frame is pushed (per
+    // `eval.rs:113-119`), so output is empty. Uses `primitive_value()` items
+    // whose top-level render (unquoted string / decimal int / lowercase bool)
+    // is identical whether standalone or iterated through a `for` body.
+    #[test]
+    fn for_loop_renders_each_item(
+        items in proptest::collection::vec(primitive_value(), 0..8)
+    ) {
+        let mut iter_src = Vec::new();
+        iter_src.push(b'[');
+        for (i, (v, _)) in items.iter().enumerate() {
+            if i > 0 {
+                iter_src.extend_from_slice(b", ");
+            }
+            iter_src.extend_from_slice(&value_literal_bytes(v));
+        }
+        iter_src.push(b']');
+
+        let mut src = Vec::new();
+        src.extend_from_slice(b"{% for x in ");
+        src.extend_from_slice(&iter_src);
+        src.extend_from_slice(b" %}{{ x }}{% end %}");
+
+        let mut expected = Vec::new();
+        for (_, render) in &items {
+            expected.extend_from_slice(render);
+        }
+
+        let mut out = Vec::new();
+        Template::from_bytes(src)
+            .render(&mut out, &HashMap::new(), &MockRegistry)
+            .unwrap();
+
+        prop_assert_eq!(out, expected);
+    }
 }
