@@ -275,6 +275,25 @@ fn join_call(max_args: usize) -> BoxedStrategy<(String, Vec<Value>, Vec<u8>)> {
         .boxed()
 }
 
+/// Generates a fixture for the `if`/`elif`/`else` property test:
+/// `(n, has_else, t)` where `n ∈ [1, 8]` is the number of `if`/`elif`
+/// conditions, `has_else` ∈ {false, true} governs whether an `{% else %}`
+/// arm exists, and `t ∈ [0, n + has_else as usize)` is the index of the
+/// branch that should fire.
+///
+/// `t < n` means the `t`-th `if`/`elif` condition is `true` (and conditions
+/// after it are arbitrary — never evaluated by the engine, which short-circuits
+/// at the first `Bool(true)`). `t == n` (only when `has_else`) means all
+/// conditions are `false` and the `else` arm fires.
+fn if_chain_fixture() -> BoxedStrategy<(usize, bool, usize)> {
+    (1u32..=8, any::<bool>())
+        .prop_flat_map(|(n, has_else)| {
+            let max_t = if has_else { n } else { n - 1 };
+            (0u32..=max_t).prop_map(move |t| (n as usize, has_else, t as usize))
+        })
+        .boxed()
+}
+
 proptest! {
     // Generate arbitrary byte buffers up to 1 KiB. Delimiters, invalid UTF-8,
     // embedded NULs, and binary garbage are all fair game: the engine must
@@ -398,6 +417,56 @@ proptest! {
             .render(&mut out, &HashMap::new(), &registry)
             .unwrap();
 
+        prop_assert_eq!(out, expected);
+    }
+
+    // An if/elif/else chain picks exactly one branch to fire. Branches before
+    // the firing one have `false` conditions; the firing `if`/`elif` branch is
+    // `true`; conditions after the firing one are random (the engine short-
+    // circuits at the first `Bool(true)` and never evaluates them, per
+    // `templater/spec/syntax.md` §`if` and `eval.rs:79-91`). If no `if`/`elif`
+    // fires, the optional `{% else %}` arm (m ∈ {0, 1}) supplies the taken
+    // body. Each branch body is a single ASCII digit `b'0' + branch_index`
+    // written as plain text, so the rendered output must equal exactly
+    // `[b'0' + t]`. Total branches ≤ 9 fits the 0..9 digit range.
+    #[test]
+    fn if_elif_else_branches_match_taken(
+        (n, has_else, t) in if_chain_fixture(),
+        trailing in proptest::collection::vec(any::<bool>(), 0..8)
+    ) {
+        let mut src = Vec::new();
+        let mut trailing_iter = trailing.into_iter();
+        for i in 0..n {
+            let head: &[u8] = if i == 0 { b"if " } else { b"elif " };
+            src.extend_from_slice(b"{% ");
+            src.extend_from_slice(head);
+            let cond = if i < t {
+                // Before the firing branch: must be false.
+                false
+            } else if i == t {
+                // The firing if/elif condition.
+                true
+            } else {
+                // After the firing branch: never evaluated; randomize to
+                // stress the short-circuit guarantee.
+                trailing_iter.next().unwrap_or(false)
+            };
+            src.extend_from_slice(cond.to_string().as_bytes());
+            src.extend_from_slice(b" %}");
+            src.push(b'0' + i as u8);
+        }
+        if has_else {
+            src.extend_from_slice(b"{% else %}");
+            src.push(b'0' + n as u8);
+        }
+        src.extend_from_slice(b"{% end %}");
+
+        let mut out = Vec::new();
+        Template::from_bytes(src)
+            .render(&mut out, &HashMap::new(), &MockRegistry)
+            .unwrap();
+
+        let expected = vec![b'0' + t as u8];
         prop_assert_eq!(out, expected);
     }
 }
