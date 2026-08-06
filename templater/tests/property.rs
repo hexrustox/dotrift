@@ -11,6 +11,14 @@ use templater::function::FunctionRegistry;
 use templater::util::RESERVED_KEYWORDS;
 use templater::value::Value;
 
+const MAX_NESTING_DEPTH: usize = 2;
+const MAX_LIST_LEN: usize = 8;
+const MAX_STRING_BYTES: usize = 64;
+const MAX_CALL_ARGS: usize = 4;
+const MAX_CHAIN_CONDITIONS: usize = 6;
+const MAX_BUFFER_BYTES: usize = 1024;
+const MAX_IDENT_LEN: usize = 10;
+
 /// Escapes a byte payload so it can be placed inside a template string literal.
 ///
 /// Each `"` becomes `\"` and each `\\` becomes `\\\\`. All other bytes pass
@@ -103,18 +111,20 @@ impl FunctionRegistry for JoinRegistry {
 /// - depth 0 elements: string, integer, or bool leaf
 /// - depth > 0 elements: any leaf OR a nested list at depth - 1
 ///
-/// Each list picks `n` in `0..8` elements, joins them with `", "`, and wraps
-/// in `[` ... `]`. Since the canonical render form matches the source syntax
+/// Each list picks `n` in `0..MAX_LIST_LEN` elements, joins them with `", "`,
+/// and wraps in `[` ... `]`. Since the canonical render form matches the source
+/// syntax
 /// byte-for-byte, the same payload serves as template body and expected output.
-fn list_literal(max_depth: u32) -> BoxedStrategy<Vec<u8>> {
-    fn element(depth: u32) -> BoxedStrategy<Vec<u8>> {
-        let str_leaf = proptest::collection::vec(any::<u8>(), 0..64).prop_map(|bytes| {
-            let mut s = Vec::with_capacity(bytes.len() + 2);
-            s.push(b'"');
-            s.extend(string_literal_safe_bytes(&bytes));
-            s.push(b'"');
-            s
-        });
+fn list_literal(max_depth: usize) -> BoxedStrategy<Vec<u8>> {
+    fn element(depth: usize) -> BoxedStrategy<Vec<u8>> {
+        let str_leaf =
+            proptest::collection::vec(any::<u8>(), 0..MAX_STRING_BYTES).prop_map(|bytes| {
+                let mut s = Vec::with_capacity(bytes.len() + 2);
+                s.push(b'"');
+                s.extend(string_literal_safe_bytes(&bytes));
+                s.push(b'"');
+                s
+            });
         let int_leaf = any::<i64>().prop_map(|n| value_literal_bytes(&Value::Int(n)));
         let bool_leaf = any::<bool>().prop_map(|b| value_literal_bytes(&Value::Bool(b)));
 
@@ -125,8 +135,8 @@ fn list_literal(max_depth: u32) -> BoxedStrategy<Vec<u8>> {
         }
     }
 
-    fn list_at_depth(depth: u32) -> BoxedStrategy<Vec<u8>> {
-        proptest::collection::vec(element(depth), 0..8)
+    fn list_at_depth(depth: usize) -> BoxedStrategy<Vec<u8>> {
+        proptest::collection::vec(element(depth), 0..MAX_LIST_LEN)
             .prop_map(|elems| {
                 let mut s = Vec::new();
                 s.push(b'[');
@@ -149,12 +159,13 @@ fn list_literal(max_depth: u32) -> BoxedStrategy<Vec<u8>> {
 /// because the parser would reject them. Re-exported from `templater::util`
 /// so the test filters against the same source of truth the parser enforces.
 ///
-/// Generates a valid identifier `[A-Za-z_][A-Za-z0-9_]*` of length 1..=8,
-/// excluding reserved keywords. Returns the identifier bytes.
+/// Generates a valid identifier `[A-Za-z_][A-Za-z0-9_]*` of length
+/// 1..=`MAX_IDENT_LEN`, excluding reserved keywords. Returns the identifier
+/// bytes.
 fn ident_bytes() -> BoxedStrategy<Vec<u8>> {
     // ASCII alphabetic first char, ASCII alphanumeric subsequent chars.
-    // Pattern guarantees a non-empty identifier (1..=8 chars).
-    proptest::string::string_regex("[A-Za-z_][A-Za-z0-9_]{0,7}")
+    // Pattern guarantees a non-empty identifier (1..=MAX_IDENT_LEN chars).
+    proptest::string::string_regex(&format!("[A-Za-z_][A-Za-z0-9_]{{0,{}}}", MAX_IDENT_LEN - 1))
         .unwrap()
         .prop_map(|s| {
             let bytes = s.into_bytes();
@@ -173,7 +184,7 @@ fn ident_bytes() -> BoxedStrategy<Vec<u8>> {
 /// values are emitted verbatim by the engine, so the expected output for a
 /// `Str` leaf is the raw payload bytes (no quoting, no escaping).
 fn primitive_value() -> BoxedStrategy<(Value, Vec<u8>)> {
-    let str_leaf = proptest::string::string_regex("[A-Za-z0-9_]{0,64}")
+    let str_leaf = proptest::string::string_regex(&format!("[A-Za-z0-9_]{{0,{MAX_STRING_BYTES}}}"))
         .unwrap()
         .prop_map(|s| (Value::Str(s.clone()), s.into_bytes()));
     let int_leaf = any::<i64>().prop_map(|n| (Value::Int(n), n.to_string().into_bytes()));
@@ -193,20 +204,25 @@ fn primitive_value() -> BoxedStrategy<(Value, Vec<u8>)> {
 /// `.<ident>`). The composition guarantees no `MapKeyNotFound`,
 /// `ListIndexOutOfBounds`, `NegativeListIndex`, or `TypeMismatch` errors at
 /// render time.
-fn nested_value_at_depth(max_depth: u32) -> BoxedStrategy<(Value, Vec<u8>, Vec<u8>)> {
-    fn element(depth: u32) -> BoxedStrategy<(Value, Vec<u8>, Vec<u8>)> {
+fn nested_value_at_depth(max_depth: usize) -> BoxedStrategy<(Value, Vec<u8>, Vec<u8>)> {
+    fn element(depth: usize) -> BoxedStrategy<(Value, Vec<u8>, Vec<u8>)> {
         let leaf = primitive_value().prop_map(|(v, expected)| (v, Vec::new(), expected));
 
         if depth == 0 {
             leaf.boxed()
         } else {
             let inner = element(depth - 1);
-            let list_wrap = inner.clone().prop_map(|(v, mut suffix, expected)| {
-                let mut new_suffix = Vec::with_capacity(2 + suffix.len());
-                new_suffix.extend_from_slice(b".0");
-                new_suffix.append(&mut suffix);
-                (Value::List(vec![v]), new_suffix, expected)
-            });
+            let list_wrap =
+                (0..MAX_LIST_LEN, inner.clone()).prop_map(|(index, (v, mut suffix, expected))| {
+                    let mut list = vec![Value::Str("".to_string()); MAX_LIST_LEN];
+                    list[index] = v;
+
+                    let mut new_suffix = Vec::with_capacity(2 + suffix.len());
+                    new_suffix.extend_from_slice(b".");
+                    new_suffix.extend_from_slice(index.to_string().as_bytes());
+                    new_suffix.append(&mut suffix);
+                    (Value::List(list), new_suffix, expected)
+                });
             let map_wrap = (ident_bytes(), inner).prop_map(|(key, (v, mut suffix, expected))| {
                 let mut new_suffix = Vec::with_capacity(1 + key.len() + suffix.len());
                 new_suffix.push(b'.');
@@ -235,7 +251,7 @@ type AccessPathFixture = (HashMap<String, Value>, Vec<u8>, Vec<u8>);
 ///
 /// The dot-only access form (no `[]`) matches the templater grammar in
 /// `templater/spec/syntax.md`: `postfix = primary ( ("." identifier) | ("." integer) )*`.
-fn access_path(max_depth: u32) -> BoxedStrategy<AccessPathFixture> {
+fn access_path(max_depth: usize) -> BoxedStrategy<AccessPathFixture> {
     (ident_bytes(), nested_value_at_depth(max_depth))
         .prop_map(|(root, (value, suffix, expected))| {
             let mut path = Vec::with_capacity(root.len() + suffix.len());
@@ -276,35 +292,36 @@ fn join_call(max_args: usize) -> BoxedStrategy<(String, Vec<Value>, Vec<u8>)> {
 }
 
 /// Generates a fixture for the `if`/`elif`/`else` property test:
-/// `(n, has_else, t)` where `n ∈ [1, 8]` is the number of `if`/`elif`
-/// conditions, `has_else` ∈ {false, true} governs whether an `{% else %}`
-/// arm exists, and `t ∈ [0, n + has_else as usize)` is the index of the
-/// branch that should fire.
+/// `(n, has_else, t)` where `n ∈ [1, MAX_CHAIN_CONDITIONS]` is the number of
+/// `if`/`elif` conditions, `has_else` ∈ {false, true} governs whether an
+/// `{% else %}` arm exists, and `t ∈ [0, n + has_else as usize)` is the index
+/// of the branch that should fire.
 ///
 /// `t < n` means the `t`-th `if`/`elif` condition is `true` (and conditions
 /// after it are arbitrary — never evaluated by the engine, which short-circuits
 /// at the first `Bool(true)`). `t == n` (only when `has_else`) means all
 /// conditions are `false` and the `else` arm fires.
 fn if_chain_fixture() -> BoxedStrategy<(usize, bool, usize)> {
-    (1u32..=8, any::<bool>())
+    (1..=MAX_CHAIN_CONDITIONS, any::<bool>())
         .prop_flat_map(|(n, has_else)| {
             let max_t = if has_else { n } else { n - 1 };
-            (0u32..=max_t).prop_map(move |t| (n as usize, has_else, t as usize))
+            (0..=max_t).prop_map(move |t| (n, has_else, t))
         })
         .boxed()
 }
 
-/// Generates an arbitrary byte buffer up to 1 KiB with every `{` and `}`
-/// removed, so the payload can never contain a tag delimiter. Used by the
-/// brace-free property tests to build inputs that are pure plain text (and,
-/// inside `{# ... #}` delimiters, comment bodies that cannot close early).
+/// Generates an arbitrary byte buffer up to `MAX_BUFFER_BYTES` with every `{`
+/// and `}` removed, so the payload can never contain a tag delimiter. Used by
+/// the brace-free property tests to build inputs that are pure plain text
+/// (and, inside `{# ... #}` delimiters, comment bodies that cannot close
+/// early).
 ///
 /// Rejecting braces in the generated bytes (0.78% of u8 values) keeps
 /// shrinking intact, unlike a `prop_filter` over the whole buffer which would
 /// reject ~99.97% of 1 KiB samples and exhaust the retry budget.
 fn brace_free_bytes() -> BoxedStrategy<Vec<u8>> {
     let byte = any::<u8>().prop_filter("exclude '{' and '}'", |b| *b != b'{' && *b != b'}');
-    proptest::collection::vec(byte, 0..1024).boxed()
+    proptest::collection::vec(byte, 0..MAX_BUFFER_BYTES).boxed()
 }
 
 proptest! {
@@ -312,7 +329,7 @@ proptest! {
     // embedded NULs, and binary garbage are all fair game: the engine must
     // reject malformed input with an error, never panic.
     #[test]
-    fn random_bytes_do_not_panic(src in proptest::collection::vec(any::<u8>(), 0..1024)) {
+    fn random_bytes_do_not_panic(src in proptest::collection::vec(any::<u8>(), 0..MAX_BUFFER_BYTES)) {
         let template = Template::from_bytes(src.clone());
         let mut out = Vec::new();
         let _ = template.render(&mut out, &HashMap::new(), &MockRegistry);
@@ -354,7 +371,7 @@ proptest! {
     // original payload: escape processing inverts the escaping applied by
     // `literal_safe_bytes`, and top-level strings are emitted verbatim.
     #[test]
-    fn string_literal_renders_identity(bytes in proptest::collection::vec(any::<u8>(), 0..1024)) {
+    fn string_literal_renders_identity(bytes in proptest::collection::vec(any::<u8>(), 0..MAX_BUFFER_BYTES)) {
         let escaped = string_literal_safe_bytes(&bytes);
 
         let mut src = Vec::new();
@@ -397,12 +414,12 @@ proptest! {
         prop_assert_eq!(out, lit);
     }
 
-    // A list literal of strings, integers, bools, and nested lists (up to two
-    // levels of nesting) renders back to its own canonical byte form: `[`
+    // A list literal of strings, integers, bools, and nested lists (up to
+    // `MAX_NESTING_DEPTH` levels of nesting) renders back to its own canonical byte form: `[`
     // followed by `, `-joined elements followed by `]`, where strings are
     // quoted, ints are decimal, and bools are `true`/`false`.
     #[test]
-    fn list_literal_renders_identity(list in list_literal(2)) {
+    fn list_literal_renders_identity(list in list_literal(MAX_NESTING_DEPTH)) {
         let src = wrap_interp(&list);
 
         let mut out = Vec::new();
@@ -413,14 +430,14 @@ proptest! {
         prop_assert_eq!(out, list);
     }
 
-    // A variable-access path navigates a nested Value (up to two levels of
-    // List/Map wrapping) down to a primitive leaf and renders the leaf's
-    // canonical top-level form: unquoted string, decimal int, or lowercase
-    // bool. Exercises variable lookup, dot (Map key) access, and dot-index
-    // (List) access in mixed chains such as `foo.bar.0.baz.0.qux`.
+    // A variable-access path navigates a nested Value (up to `MAX_NESTING_DEPTH`
+    // levels of List/Map wrapping) down to a primitive leaf and renders the
+    // leaf's canonical top-level form: unquoted string, decimal int, or
+    // lowercase bool. Exercises variable lookup, dot (Map key) access, and
+    // dot-index (List) access in mixed chains such as `foo.bar.0.baz.0.qux`.
     #[test]
     fn variable_access_renders_identity(
-        (scope, path, expected) in access_path(2)
+        (scope, path, expected) in access_path(MAX_NESTING_DEPTH)
     ) {
         let src = wrap_interp(&path);
 
@@ -442,7 +459,7 @@ proptest! {
     // path for all three primitive value types.
     #[test]
     fn function_call_renders_identity(
-        (name, args, expected) in join_call(4)
+        (name, args, expected) in join_call(MAX_CALL_ARGS)
     ) {
         let mut body = Vec::new();
         body.extend_from_slice(name.as_bytes());
@@ -477,7 +494,7 @@ proptest! {
     #[test]
     fn if_elif_else_branches_match_taken(
         (n, has_else, t) in if_chain_fixture(),
-        trailing in proptest::collection::vec(any::<bool>(), 0..8)
+        trailing in proptest::collection::vec(any::<bool>(), 0..MAX_CHAIN_CONDITIONS)
     ) {
         let mut src = Vec::new();
         let mut trailing_iter = trailing.into_iter();
@@ -524,7 +541,7 @@ proptest! {
     // is identical whether standalone or iterated through a `for` body.
     #[test]
     fn for_loop_renders_each_item(
-        items in proptest::collection::vec(primitive_value(), 0..8)
+        items in proptest::collection::vec(primitive_value(), 0..MAX_LIST_LEN)
     ) {
         let mut iter_src = Vec::new();
         iter_src.push(b'[');
