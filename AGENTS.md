@@ -14,15 +14,16 @@ source directory to a target directory via `dotrift.toml`.
 ## Workspace overview
 
 Cargo workspace (Cargo.toml):
-- `dotrift` (root, bin + lib): `src/main.rs` entrypoint, `src/lib.rs` reexport.
-  Subcommands live in `src/command/`; shared helpers in `src/command/util.rs`.
-- `tui` (member): interactive prompt + ratatui-based conflict pager, invoked
-  on `[d]iff` collisions.
-- `templater` (member): the standalone template *engine* (scanner/parser/eval).
+- `dotrift` (root, bin): `src/main.rs` entrypoint.
+- `tui` (member): interactive prompt library.
+- `templater` (member): the standalone template engine.
 
 ### Legacy code
 
-Source files under `legacy/` are archived from a prior implementation. New code may read them for reference but must never copy from them.
+Source files under `legacy/` are archived from a prior implementation. New code
+may read them for reference but must never copy from them. The same applies to
+specs archived under `legacy/` — reference only, never authoritative; new specs
+live in `spec/`.
 
 ## Toolchain
 
