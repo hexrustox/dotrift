@@ -17,6 +17,8 @@ const MAX_STRING_BYTES: usize = 64;
 const MAX_CALL_ARGS: usize = 4;
 const MAX_CHAIN_CONDITIONS: usize = 6;
 const MAX_BUFFER_BYTES: usize = 1024;
+const MAX_NEST_BLOCK_DEPTH: usize = 3;
+const MAX_FOR_ITERS: u8 = 4;
 const MAX_IDENT_LEN: usize = 10;
 
 /// Escapes a byte payload so it can be placed inside a template string literal.
@@ -324,6 +326,164 @@ fn brace_free_bytes() -> BoxedStrategy<Vec<u8>> {
     proptest::collection::vec(byte, 0..MAX_BUFFER_BYTES).boxed()
 }
 
+/// A generated nested block tree of `if`/`for` nodes terminated by leaf
+/// bodies. One shared shape for both nested-block property tests:
+///   - `block_tree_a` forces `cond = true` and `else_body = None`.
+///   - `block_tree_b` draws `cond` and an optional `else_body` randomly.
+///
+/// Each `Leaf` carries a single-byte tag assigned post-generation by
+/// `assign_tags`, distinct per leaf position in emission order so the
+/// oracle's output fingerprints which path through the tree executed.
+#[derive(Clone, Debug)]
+enum Block {
+    Leaf(u8),
+    If {
+        cond: bool,
+        body: Box<Block>,
+        else_body: Option<Box<Block>>,
+    },
+    For {
+        iters: u8,
+        body: Box<Block>,
+    },
+}
+
+/// Number of distinct `Leaf` nodes in the tree. With `MAX_NEST_BLOCK_DEPTH`
+/// the true max is `2^MAX_NEST_BLOCK_DEPTH` (Strategy B, every `If` has both
+/// arms) or 1 (Strategy A, no `else` branch exists); the `MAX_LEAF_FILTER`
+/// guard is purely defensive.
+fn leaf_count(b: &Block) -> usize {
+    match b {
+        Block::Leaf(_) => 1,
+        Block::If {
+            body, else_body, ..
+        } => leaf_count(body) + else_body.as_ref().map_or(0, |eb| leaf_count(eb)),
+        Block::For { body, .. } => leaf_count(body),
+    }
+}
+
+const MAX_LEAF_FILTER: usize = 200;
+
+/// Walks the tree in emission order and assigns each `Leaf` a successive
+/// counter byte. Returns `false` (to trigger regeneration) if more than
+/// `MAX_LEAF_FILTER` leaves would be tagged — never triggered at
+/// `MAX_NEST_BLOCK_DEPTH`, kept as a defensive cap.
+fn assign_tags(b: &mut Block, counter: &mut u8) -> bool {
+    match b {
+        Block::Leaf(slot) => {
+            *slot = *counter;
+            *counter = counter.wrapping_add(1);
+            (*counter as usize) <= MAX_LEAF_FILTER
+        }
+        Block::If {
+            body, else_body, ..
+        } => {
+            assign_tags(body, counter)
+                && else_body.as_mut().is_none_or(|eb| assign_tags(eb, counter))
+        }
+        Block::For { body, .. } => assign_tags(body, counter),
+    }
+}
+
+/// Oracle: interprets the tree exactly as the templater should, appending
+/// each executed leaf's tag to `out`. Pure, deterministic, no registry or
+/// scope. Mirrors `eval.rs:79-130` block-stack semantics: untaken `if`
+/// arms and empty iterables skip their body.
+fn run(b: &Block, out: &mut Vec<u8>) {
+    match b {
+        Block::Leaf(tag) => out.push(*tag),
+        Block::If {
+            cond,
+            body,
+            else_body,
+        } => {
+            if *cond {
+                run(body, out);
+            } else if let Some(eb) = else_body {
+                run(eb, out);
+            }
+        }
+        Block::For { iters, body } => {
+            for _ in 0..*iters {
+                run(body, out);
+            }
+        }
+    }
+}
+
+/// Emits valid template source for the tree, left-to-right, matching
+/// `run`'s traversal. `for` loops use `[0, 1, ..., iters-1]` as the
+/// iterable; the loop variable `x` is never referenced (this test is
+/// purely about block structure, not loop-variable scoping).
+fn emit(b: &Block, src: &mut Vec<u8>) {
+    match b {
+        Block::Leaf(tag) => src.push(*tag),
+        Block::If {
+            cond,
+            body,
+            else_body,
+        } => {
+            src.extend_from_slice(b"{% if ");
+            src.extend_from_slice(if *cond { b"true" } else { b"false" });
+            src.extend_from_slice(b" %}");
+            emit(body, src);
+            if let Some(eb) = else_body {
+                src.extend_from_slice(b"{% else %}");
+                emit(eb, src);
+            }
+            src.extend_from_slice(b"{% end %}");
+        }
+        Block::For { iters, body } => {
+            src.extend_from_slice(b"{% for x in [");
+            for i in 0..*iters {
+                if i > 0 {
+                    src.extend_from_slice(b", ");
+                }
+                src.extend_from_slice(i.to_string().as_bytes());
+            }
+            src.extend_from_slice(b"] %}");
+            emit(body, src);
+            src.extend_from_slice(b"{% end %}");
+        }
+    }
+}
+
+/// randomized `if` conditions with optional `else` arms. Adds
+/// branch short-circuit coverage across nesting: a `false` `if` body inside
+/// a taken `for` must be skipped (and its `else`, if any, taken) without
+/// error, mirroring the tree interpreter. The `else` arm gives the tree up
+/// to 2 children per `If`, so leaf tags become a real fingerprint of which
+/// path executed.
+fn block_tree(max_depth: u32) -> BoxedStrategy<Block> {
+    fn node(depth: u32) -> BoxedStrategy<Block> {
+        if depth == 0 {
+            Just(Block::Leaf(0)).boxed()
+        } else {
+            let if_branch = (
+                any::<bool>(),
+                node(depth - 1),
+                proptest::option::of(node(depth - 1)),
+            )
+                .prop_map(|(cond, body, else_body)| Block::If {
+                    cond,
+                    body: Box::new(body),
+                    else_body: else_body.map(Box::new),
+                });
+            let for_branch =
+                (0u8..=MAX_FOR_ITERS, node(depth - 1)).prop_map(|(iters, b)| Block::For {
+                    iters,
+                    body: Box::new(b),
+                });
+            prop_oneof![Just(Block::Leaf(0)), if_branch, for_branch].boxed()
+        }
+    }
+    node(max_depth)
+        .prop_filter("at most MAX_LEAF_FILTER leaves", |t| {
+            leaf_count(t) <= MAX_LEAF_FILTER
+        })
+        .boxed()
+}
+
 proptest! {
     // Generate arbitrary byte buffers up to 1 KiB. Delimiters, invalid UTF-8,
     // embedded NULs, and binary garbage are all fair game: the engine must
@@ -562,6 +722,34 @@ proptest! {
         for (_, render) in &items {
             expected.extend_from_slice(render);
         }
+
+        let mut out = Vec::new();
+        Template::from_bytes(src)
+            .render(&mut out, &HashMap::new(), &MockRegistry)
+            .unwrap();
+
+        prop_assert_eq!(out, expected);
+    }
+
+    // randomized `if` conditions with optional `else` arms add
+    // branch short-circuit coverage across nesting: a `false` `if` body
+    // inside a taken `for` must be skipped (and its `else`, if any, taken)
+    // without error, mirroring the tree interpreter. Leaf tags fingerprint
+    // which path executed, so the rendered output must equal the oracle's
+    // byte-for-byte.
+    #[test]
+    fn nested_blocks_random_conditions_render_match_interpreter(
+        tree in block_tree(MAX_NEST_BLOCK_DEPTH as u32)
+    ) {
+        let mut tree = tree;
+        let mut counter = 0u8;
+        prop_assume!(assign_tags(&mut tree, &mut counter));
+
+        let mut src = Vec::new();
+        emit(&tree, &mut src);
+
+        let mut expected = Vec::new();
+        run(&tree, &mut expected);
 
         let mut out = Vec::new();
         Template::from_bytes(src)
