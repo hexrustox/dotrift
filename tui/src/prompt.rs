@@ -165,8 +165,8 @@ where
                 stdout.flush()?;
                 Err(PromptError::Cancelled)
             };
-            if let Event::Key(key) = event::read()? {
-                match key.code {
+            match event::read()? {
+                Event::Key(key) => match key.code {
                     KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => {
                         return cancel();
                     }
@@ -194,7 +194,9 @@ where
                         return Ok(option.value.clone());
                     }
                     _ => {}
-                }
+                },
+                Event::Resize(..) => {}
+                _ => (),
             }
         }
     }
@@ -301,14 +303,13 @@ fn render<E>(
     previous_lines: usize,
 ) -> io::Result<usize> {
     clear_prompt(stdout, previous_lines)?;
-    let (columns, rows) = terminal::size()?;
+    let (_, rows) = terminal::size()?;
     let visible_count = usize::from(rows).saturating_sub(3).max(1);
     let start = state
         .selected
         .saturating_sub(visible_count.saturating_sub(1))
         .min(state.options.len().saturating_sub(visible_count));
     let end = (start + visible_count).min(state.options.len());
-    let label_width = usize::from(columns).saturating_sub(8);
     writeln!(stdout, "{}:", question.with(style.question))?;
     queue!(stdout, cursor::MoveToColumn(0))?;
     let (selected, unselected) = if unicode { ('●', '○') } else { ('*', ' ') };
@@ -330,12 +331,7 @@ fn render<E>(
             stdout,
             "  {}{}",
             marker.with(marker_color),
-            format!(
-                " [{}] {}",
-                option.hotkey,
-                truncate(&option.label, label_width)
-            )
-            .with(row_color)
+            format!(" [{}] {}", option.hotkey, option.label).with(row_color)
         )?;
         queue!(stdout, cursor::MoveToColumn(0))?;
     }
@@ -345,10 +341,6 @@ fn render<E>(
         "\n  ↑/↓ navigate  Enter select  A-Z jump  Esc cancel".with(style.help)
     )?;
     Ok(end - start + 3)
-}
-
-fn truncate(value: &str, width: usize) -> String {
-    value.chars().take(width).collect()
 }
 
 fn clear_prompt(stdout: &mut impl Write, lines: usize) -> io::Result<()> {

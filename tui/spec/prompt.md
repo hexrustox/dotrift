@@ -116,7 +116,6 @@ alternate screen.
 - The selected row is additionally highlighted (e.g. bold or reverse video) so
   the marker is not the only selection indicator.
 - A concise help line lists the available keys.
-- Long labels are truncated to the available width, never wrapped.
 
 ### Confirmation
 
