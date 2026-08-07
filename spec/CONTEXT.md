@@ -68,3 +68,27 @@ _Avoid_: dotignore, gitignore (when meaning the dotrift file)
 One line of the ignore file, in standard gitignore syntax, matched against a
 resolved target path. Patterns are evaluated in order; the last match decides.
 _Avoid_: ignore rule (distinct from *rule*)
+
+**Base variables**:
+The key-value bindings under `[variable]` in `dotrift_data.toml`. The initial
+layer of the variable context. Distinct from *profile* and from the resolved
+*variable context*.
+_Avoid_: defaults, root variables
+
+**Profile**:
+A named overlay definition under `[profile.<name>]` in `dotrift_data.toml`,
+carrying variable bindings that override the base variables. Distinct from an
+*active profile*, which is the persisted selector referencing it.
+_Avoid_: layer (a profile is a definition, not the layering itself)
+
+**Active profile**:
+A profile selected for inclusion in the variable context, recorded in the
+persisted active-profile state as `(name, activated_at)`. May reference a
+profile missing from the current data file, in which case it is ignored.
+_Avoid_: selected profile, enabled profile
+
+**Variable context**:
+The resolved bindings passed to the templater for evaluation: base variables
+overlaid by active profiles in `activated_at` order, most recently activated
+winning, with lexicographic profile-name tie-breaking.
+_Avoid_: scope, environment (overloaded terms in the templater spec)
