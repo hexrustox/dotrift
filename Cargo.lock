@@ -1529,6 +1529,7 @@ dependencies = [
  "memmap2",
  "miette",
  "proptest",
+ "rand",
  "tempfile",
  "templater",
  "test-case",

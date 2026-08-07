@@ -50,6 +50,7 @@ similar = "2"
 strum = { version = "0.28", features = ["derive"] }
 tempfile = "3"
 proptest = "1"
+rand = "0.9"
 test-case = "3"
 toml = "1"
 toml_edit = "0.25"
