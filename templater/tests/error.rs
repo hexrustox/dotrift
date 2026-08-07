@@ -55,6 +55,8 @@ use test_case::test_case;
 #[test_case(b"{{ one_arg(1, 2) }}"; "arg_count_two")]
 #[test_case(b"{{ two_arg(1) }}"; "arg_count_one")]
 #[test_case(b"{{ mismatch(42) }}"; "type_mismatch_arg")]
+#[test_case(b"{{ custom(1, 2) }}"; "custom_function_error")]
+#[test_case(b"{{ custom_empty() }}"; "custom_function_error_no_arg_indexes")]
 // span / source-window edge cases
 #[test_case(b"hello {{  }}"; "empty_interp_after_text")]
 #[test_case(b"line1\nline2\n{{  }}"; "empty_interp_on_later_line")]

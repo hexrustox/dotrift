@@ -112,6 +112,8 @@ mod test_utils {
     /// - `mismatch(x)` -> type mismatch error (expects `Str`)
     /// - `one_arg(x)` -> argument-count error when not given exactly one arg
     /// - `two_arg(x, y)` -> argument-count error when not given exactly two args
+    /// - `custom(x, y)` -> custom error flagging arguments 0 and 1
+    /// - `custom_empty()` -> custom error with no flagged arguments
     pub struct TestRegistry;
 
     impl FunctionRegistry for TestRegistry {
@@ -131,6 +133,14 @@ mod test_utils {
                 "two_arg" => Err(RegistryError::ArgCount {
                     expected: 2,
                     got: args.len(),
+                }),
+                "custom" => Err(RegistryError::Custom {
+                    msg: "arguments must not match".to_string(),
+                    indexes: args.iter().enumerate().map(|(i, _)| i).collect(),
+                }),
+                "custom_empty" => Err(RegistryError::Custom {
+                    msg: "custom error with no flagged arguments".to_string(),
+                    indexes: vec![],
                 }),
                 _ => Err(RegistryError::Undefined {
                     name: name.to_owned(),

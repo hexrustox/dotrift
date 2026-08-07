@@ -1,0 +1,11 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x arguments must not match
+   ,----
+ 1 | {{ custom(1, 2) }}
+   :           |  |
+   :           |  `-- fix this argument
+   :           `-- fix this argument
+   `----

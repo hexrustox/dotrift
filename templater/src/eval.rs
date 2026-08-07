@@ -216,28 +216,35 @@ fn eval(
 
             match functions.call(name_str, &values) {
                 Ok(value) => value,
-                Err(err) => {
-                    let span = func_error_span(&err, args, name, paren_span);
-                    return Err(Error::Render(match err {
-                        RegistryError::Undefined { name: n } => {
-                            RenderError::FunctionUndefined { name: n, span }
-                        }
-                        RegistryError::ArgCount { expected, got } => {
-                            RenderError::FunctionArgCount {
-                                expected,
-                                got,
-                                span,
+                Err(err) => match err {
+                    RegistryError::Custom { msg, indexes } => {
+                        let spans = custom_spans(&indexes, args, name, paren_span);
+                        return Err(Error::Render(RenderError::Function { msg, spans }));
+                    }
+                    err => {
+                        let span = func_error_span(&err, args, name, paren_span);
+                        return Err(Error::Render(match err {
+                            RegistryError::Undefined { name: n } => {
+                                RenderError::FunctionUndefined { name: n, span }
                             }
-                        }
-                        RegistryError::TypeMismatch { expected, got, .. } => {
-                            RenderError::TypeMismatch {
-                                expected,
-                                got,
-                                span,
+                            RegistryError::ArgCount { expected, got } => {
+                                RenderError::FunctionArgCount {
+                                    expected,
+                                    got,
+                                    span,
+                                }
                             }
-                        }
-                    }));
-                }
+                            RegistryError::TypeMismatch { expected, got, .. } => {
+                                RenderError::TypeMismatch {
+                                    expected,
+                                    got,
+                                    span,
+                                }
+                            }
+                            RegistryError::Custom { .. } => unreachable!(),
+                        }));
+                    }
+                },
             }
         }
         Expr::Dot { left, field } => {
@@ -309,6 +316,8 @@ fn eval(
 /// - `ArgCount`: all arguments (first arg start → last arg end); for zero
 ///   args, the empty parenthesized argument list `()`.
 /// - `TypeMismatch`: the offending argument.
+/// - `Custom`: handled separately by [`custom_spans`], which flags multiple
+///   arguments.
 fn func_error_span(
     err: &RegistryError,
     args: &[Expr],
@@ -327,7 +336,26 @@ fn func_error_span(
             }
         }
         RegistryError::TypeMismatch { arg_index, .. } => source_span(args[*arg_index].span()),
+        RegistryError::Custom { .. } => unreachable!(),
     }
+}
+
+/// Computes the spans for a host-defined [`RegistryError::Custom`]: one span
+/// per flagged argument index. With no indexes, falls back to the full
+/// function-call span so the error always has something to underline.
+fn custom_spans(
+    indexes: &[usize],
+    args: &[Expr],
+    name: &Range<usize>,
+    paren_span: &Range<usize>,
+) -> Vec<miette::SourceSpan> {
+    if indexes.is_empty() {
+        return vec![source_span(name.start..paren_span.end)];
+    }
+    indexes
+        .iter()
+        .map(|&i| source_span(args[i].span()))
+        .collect()
 }
 
 /// Walks the interior of a `"..."` literal (the byte range between the
@@ -456,6 +484,8 @@ mod tests {
     #[test_case(b"{{ one_arg(1, 2) }}" => RenderError::FunctionArgCount { expected: 1, got: 2, span: (12, 3).into() } ; "two_in_one_arg")]
     #[test_case(b"{{ two_arg(1) }}" => RenderError::FunctionArgCount { expected: 2, got: 1, span: (12, 1).into() } ; "one_in_two_arg")]
     #[test_case(b"{{ mismatch(12) }}" => RenderError::TypeMismatch { expected: ValueType::Str, got: ValueType::Int, span: (12, 2).into() } ; "type_mismatch_arg")]
+    #[test_case(b"{{ custom(1, 2) }}" => RenderError::Function { msg: "arguments must not match".into(), spans: vec![(10, 1).into(), (13, 1).into()] } ; "custom_error")]
+    #[test_case(b"{{ custom_empty() }}" => RenderError::Function { msg: "custom error with no flagged arguments".into(), spans: vec![(3, 14).into()] } ; "custom_error_no_arg_indexes")]
     fn eval_render(src: &[u8]) -> RenderError {
         let Node::Interpolate(expr) = parse(scan(src).unwrap(), src).unwrap().pop().unwrap() else {
             panic!("expected Interpolate")

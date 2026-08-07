@@ -1,0 +1,10 @@
+---
+source: templater/tests/error.rs
+expression: "format!(\"{report:?}\")"
+---
+  x custom error with no flagged arguments
+   ,----
+ 1 | {{ custom_empty() }}
+   :    ^^^^^^^|^^^^^^
+   :           `-- fix this argument
+   `----

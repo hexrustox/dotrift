@@ -213,6 +213,12 @@ pub enum RenderError {
         })]
         span: SourceSpan,
     },
+    #[error("{msg}")]
+    Function {
+        msg: String,
+        #[label(collection, "fix this argument")]
+        spans: Vec<SourceSpan>,
+    },
 }
 
 /// Errors returned by [`FunctionRegistry::call`] — no source spans, used
@@ -230,5 +236,12 @@ pub enum RegistryError {
         expected: ValueType,
         got: ValueType,
         arg_index: usize,
+    },
+    /// A host-defined error with its own message. `indexes` are indices into
+    /// the call's argument list to flag with labels; empty means no argument
+    /// is specifically at fault.
+    Custom {
+        msg: String,
+        indexes: Vec<usize>,
     },
 }
