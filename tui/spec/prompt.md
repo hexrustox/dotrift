@@ -67,6 +67,31 @@ trait PromptOption {
   configured or first default immediately, without rendering or entering raw
   mode.
 
+## Styling
+
+The prompt accepts an optional `.style(PromptStyle)` configuration. `PromptStyle`
+is a plain struct with one `Color` per rendered element:
+
+| Element                      | Field                | Default      |
+|------------------------------|----------------------|--------------|
+| Question title               | `question`           | `Reset`      |
+| Selected option row          | `selected`           | `Green`      |
+| Selected option's marker     | `marker_selected`    | `Green`      |
+| Unselected options' markers  | `marker_unselected`  | `Reset`      |
+| Confirmation line (on Enter) | `confirm`            | `Green`      |
+| Help line                    | `help`               | `Reset`      |
+
+By default the selected option row and the confirmation line are rendered in
+green. Callers override individual elements with struct update syntax:
+
+```rust
+SelectPrompt::new()
+    .style(PromptStyle { selected: Color::Blue, ..Default::default() })
+```
+
+Any future stylable element follows this pattern: a sensible default in
+`PromptStyle::default()`, overridable by the caller.
+
 ## Rendering
 
 The prompt renders inline in the current terminal — it does not use an
@@ -82,7 +107,7 @@ alternate screen.
     ○ [d] diff
     ○ [q] quit
 
-    ↑/↓/Tab navigate  Enter select  A-Z jump  Esc cancel
+    ↑/↓ navigate  Enter select  A-Z jump  Esc cancel
   ```
 
 - **Markers** depend on locale UTF-8 support:
@@ -109,20 +134,25 @@ answer to question: (skip) ✓
 
 ## Keyboard Controls
 
-| Key            | Action                                   |
-|----------------|------------------------------------------|
-| Up / Left      | Move to the previous option              |
-| Down / Right   | Move to the next option                  |
-| Tab            | Move to the next option                  |
-| Shift+Tab      | Move to the previous option              |
-| A-Z (either case) | Jump to the option with that hotkey  |
-| Enter          | Confirm the selected option and return it |
-| Esc / Ctrl+C   | Cancel the prompt                        |
+| Key      | Action                                    |
+|----------|-------------------------------------------|
+| Up / Left | Move to the previous option              |
+| Down / Right | Move to the next option              |
+| A-Z      | Jump to the option with that hotkey       |
+| Enter    | Confirm the selected option and return it |
+| Esc      | Cancel the prompt                         |
+| Ctrl+C   | Cancel the prompt                         |
 
 - Navigation wraps at both ends: next from the last option returns to the
   first, and previous from the first option returns to the last.
 - Hotkey presses **move the selection only**; they do not confirm. `Enter` is
   the sole confirmation key.
+- **Modifier matching is strict.**
+  - Movement, hotkey jumps, `Enter`, and `Esc` respond only to unmodified key
+    presses (`KeyModifiers::NONE`); any Shift/Alt/Ctrl combination is ignored.
+  - `Ctrl+C` cancels only for the exact key `Char('c')` carrying exactly the
+    `CONTROL` modifier. No other key or modifier combination cancels the
+    prompt.
 
 ## Terminal Lifecycle
 

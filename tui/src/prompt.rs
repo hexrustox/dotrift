@@ -8,7 +8,7 @@ use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
     queue,
-    style::{Attribute, SetAttribute},
+    style::{Attribute, Color, SetAttribute, Stylize},
     terminal::{self, ClearType},
 };
 use strum::IntoEnumIterator;
@@ -23,6 +23,40 @@ pub trait PromptOption {
     /// Returns a replacement hotkey, or `None` to derive it from the variant name.
     fn hotkey(&self) -> Option<char> {
         None
+    }
+}
+
+/// Configurable colors for the prompt's rendered elements.
+///
+/// The defaults render the selected option row and the confirmation line in
+/// green; everything else is unstyled. Build on the defaults with struct
+/// update syntax to change only the elements you care about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PromptStyle {
+    /// Color of the question title line.
+    pub question: Color,
+    /// Color of the currently selected option row.
+    pub selected: Color,
+    /// Color of the selected option's marker.
+    pub marker_selected: Color,
+    /// Color of the unselected options' markers.
+    pub marker_unselected: Color,
+    /// Color of the confirmation line printed after `Enter`.
+    pub done: Color,
+    /// Color of the help line.
+    pub help: Color,
+}
+
+impl Default for PromptStyle {
+    fn default() -> Self {
+        Self {
+            question: Color::Reset,
+            selected: Color::Green,
+            marker_selected: Color::Green,
+            marker_unselected: Color::Reset,
+            done: Color::Green,
+            help: Color::Reset,
+        }
     }
 }
 
@@ -52,6 +86,7 @@ struct OptionEntry<E> {
 pub struct SelectPrompt<E> {
     question: String,
     default: Option<E>,
+    style: PromptStyle,
 }
 
 impl<E> SelectPrompt<E> {
@@ -60,6 +95,7 @@ impl<E> SelectPrompt<E> {
         Self {
             question: String::new(),
             default: None,
+            style: PromptStyle::default(),
         }
     }
 
@@ -72,6 +108,12 @@ impl<E> SelectPrompt<E> {
     /// Sets the option initially selected by the prompt.
     pub fn default(mut self, value: E) -> Self {
         self.default = Some(value);
+        self
+    }
+
+    /// Sets the colors used when rendering the prompt.
+    pub fn style(mut self, style: PromptStyle) -> Self {
+        self.style = style;
         self
     }
 }
@@ -108,28 +150,43 @@ where
         let mut state = SelectionState::new(options, selected);
         let mut rendered_lines = 0;
         loop {
-            rendered_lines = render(&mut stdout, &self.question, &state, unicode, rendered_lines)?;
+            rendered_lines = render(
+                &mut stdout,
+                &self.question,
+                &self.style,
+                &state,
+                unicode,
+                rendered_lines,
+            )?;
             stdout.flush()?;
 
+            let mut cancel = || {
+                clear_prompt(&mut stdout, rendered_lines)?;
+                stdout.flush()?;
+                Err(PromptError::Cancelled)
+            };
             if let Event::Key(key) = event::read()? {
                 match key.code {
-                    KeyCode::Up | KeyCode::Left | KeyCode::BackTab => state.previous(),
-                    KeyCode::Down | KeyCode::Right | KeyCode::Tab => state.next(),
-                    KeyCode::Esc | KeyCode::Char('c')
-                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                    {
-                        clear_prompt(&mut stdout, rendered_lines)?;
-                        stdout.flush()?;
-                        return Err(PromptError::Cancelled);
+                    KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => {
+                        return cancel();
                     }
-                    KeyCode::Char(c) if c.is_ascii_alphabetic() => {
+                    KeyCode::Esc if key.modifiers.is_empty() => return cancel(),
+                    KeyCode::Up | KeyCode::Left if key.modifiers.is_empty() => state.previous(),
+                    KeyCode::Down | KeyCode::Right if key.modifiers.is_empty() => state.next(),
+                    KeyCode::Char(c) if c.is_ascii_alphabetic() && key.modifiers.is_empty() => {
                         state.select_hotkey(c.to_ascii_lowercase());
                     }
-                    KeyCode::Enter => {
+                    KeyCode::Enter if key.modifiers.is_empty() => {
                         clear_prompt(&mut stdout, rendered_lines)?;
                         let option = &state.options[state.selected];
                         let marker = if unicode { "✓" } else { "done" };
-                        writeln!(stdout, "{}: ({}) {}", self.question, option.label, marker)?;
+                        writeln!(
+                            stdout,
+                            "{}: ({}) {}",
+                            self.question,
+                            option.label,
+                            marker.with(self.style.done)
+                        )?;
                         stdout.flush()?;
                         return Ok(option.value.clone());
                     }
@@ -235,6 +292,7 @@ fn pascal_to_label(value: &str) -> String {
 fn render<E>(
     stdout: &mut impl Write,
     question: &str,
+    style: &PromptStyle,
     state: &SelectionState<E>,
     unicode: bool,
     previous_lines: usize,
@@ -248,28 +306,40 @@ fn render<E>(
         .min(state.options.len().saturating_sub(visible_count));
     let end = (start + visible_count).min(state.options.len());
     let label_width = usize::from(columns).saturating_sub(8);
-    writeln!(stdout, "{}:", question)?;
+    writeln!(stdout, "{}:", question.with(style.question))?;
     queue!(stdout, cursor::MoveToColumn(0))?;
     let (selected, unselected) = if unicode { ('●', '○') } else { ('*', ' ') };
     for (index, option) in state.options[start..end].iter().enumerate() {
         let index = index + start;
-        let marker = if index == state.selected {
-            selected
+        let is_selected = index == state.selected;
+        let marker = if is_selected { selected } else { unselected };
+        let marker_color = if is_selected {
+            style.marker_selected
         } else {
-            unselected
+            style.marker_unselected
+        };
+        let row_color = if is_selected {
+            style.selected
+        } else {
+            Color::Reset
         };
         writeln!(
             stdout,
-            "  {} [{}] {}",
-            marker,
-            option.hotkey,
-            truncate(&option.label, label_width)
+            "  {}{}",
+            marker.with(marker_color),
+            format!(
+                " [{}] {}",
+                option.hotkey,
+                truncate(&option.label, label_width)
+            )
+            .with(row_color)
         )?;
         queue!(stdout, cursor::MoveToColumn(0))?;
     }
     writeln!(
         stdout,
-        "\n  ↑/↓/Tab navigate  Enter select  A-Z jump  Esc cancel"
+        "{}",
+        "\n  ↑/↓ navigate  Enter select  A-Z jump  Esc cancel".with(style.help)
     )?;
     Ok(end - start + 3)
 }
