@@ -172,7 +172,10 @@ where
                     }
                     KeyCode::Esc if key.modifiers.is_empty() => return cancel(),
                     KeyCode::Up | KeyCode::Left if key.modifiers.is_empty() => state.previous(),
-                    KeyCode::Down | KeyCode::Right if key.modifiers.is_empty() => state.next(),
+                    KeyCode::BackTab if key.modifiers == KeyModifiers::SHIFT => state.previous(),
+                    KeyCode::Down | KeyCode::Right | KeyCode::Tab if key.modifiers.is_empty() => {
+                        state.next()
+                    }
                     KeyCode::Char(c) if c.is_ascii_alphabetic() && key.modifiers.is_empty() => {
                         state.select_hotkey(c.to_ascii_lowercase());
                     }

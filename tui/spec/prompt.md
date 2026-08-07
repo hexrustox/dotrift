@@ -136,8 +136,8 @@ answer to question: (skip) ✓
 
 | Key      | Action                                    |
 |----------|-------------------------------------------|
-| Up / Left | Move to the previous option              |
-| Down / Right | Move to the next option              |
+| Up / Left / Shift+Tab | Move to the previous option  |
+| Down / Right / Tab | Move to the next option         |
 | A-Z      | Jump to the option with that hotkey       |
 | Enter    | Confirm the selected option and return it |
 | Esc      | Cancel the prompt                         |
