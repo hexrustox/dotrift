@@ -67,6 +67,31 @@ template deploy. Directories have no fingerprint. Comparing the current
 fingerprint against the record decides whether the path is still managed.
 _Avoid_: checksum, hash (when meaning the recorded state)
 
+**State database**:
+The single global SQLite file, per user, holding the management state:
+one *state record* per managed path plus the active-profile selectors.
+Located at `$XDG_STATE_HOME/dotrift/state.sqlite`, falling back to
+`$XDG_DATA_HOME/dotrift/state.sqlite`.
+_Avoid_: db, database (when meaning the dotrift file)
+
+**State record**:
+One row in the `managed_paths` table of the *state database*: the source
+path, target path, deployed kind, and fingerprint of a target path dotrift
+created. Mirrors the last completed filesystem action.
+_Avoid_: entry, database entry
+
+**Management state**:
+The collective state stored in the *state database* — all *state records*
+plus the active-profile selectors. Comparing it against the target directory
+and the desired deployment drives `apply`'s decisions.
+_Avoid_: state (generic)
+
+**Managed check**:
+The read-only comparison of a target path's current filesystem kind and
+fingerprint against its *state record*, deciding whether the path is still a
+*managed path*.
+_Avoid_: (none)
+
 **Collision**:
 Config-time condition where two different portal resolutions produce the same
 target path. Halts the program before any filesystem change. Distinct from
@@ -128,9 +153,11 @@ overlaid by active profiles in `activated_at` order, most recently activated
 winning, with lexicographic profile-name tie-breaking.
 _Avoid_: scope, environment (overloaded terms in the templater spec)
 
-**Apply lock**:
-Exclusive lock `apply` holds from reading the control files through
-filesystem actions, state updates, and exit, serialising concurrent
-invocations. A second invocation that cannot acquire it fails rather than
-interleaving operations.
-_Avoid_: (none)
+**State lock**:
+Exclusive lock held by any command that reads or mutates the *state database*
+— `apply`, `profile activate`, `profile deactivate` — serialising concurrent
+invocations. `apply` holds it from reading the control files through
+filesystem actions, state updates, and exit; short-lived commands hold it for
+the duration of their state mutation. A second invocation that cannot acquire
+it fails rather than interleaving operations.
+_Avoid_: apply lock (apply is one consumer, not the owner)

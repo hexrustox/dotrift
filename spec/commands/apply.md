@@ -8,7 +8,7 @@ it never removes managed paths — pruning stale entries is a separate
 
 ## Pipeline
 
-1. Acquire the apply lock (see [Concurrency](#concurrency)).
+1. Acquire the state lock (see [Concurrency](#concurrency)).
 2. Resolve the source directory and read the control files:
    - `dotrift.toml`, rendered as a template and parsed (see
      [`../dotrift-toml.md`](../dotrift-toml.md), ADR-0001).
@@ -188,7 +188,7 @@ permissions are not part of the comparison.
 
 ## Concurrency
 
-`apply` holds the exclusive apply lock for its entire lifecycle — acquired
+`apply` holds the exclusive state lock for its entire lifecycle — acquired
 before reading the control files and held through preflight, prompts,
 filesystem actions, state updates, and exit. A concurrent `apply` that cannot
 acquire the lock fails through the normal command error path rather than
