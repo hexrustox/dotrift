@@ -91,10 +91,20 @@ mode not applied.
 
 ### Obstruction prompts
 
+The prompt always shows the metadata below for each path involved:
+
+- existence and filesystem kind: regular file, directory, symlink, or other
+- absolute path
+- regular file: byte size and last-modified date
+- symlink: link target
+- directory: number of entries
+- other: no kind-specific metadata
+
 An unmanaged obstruction offers:
 
 - `skip` — leave the target unchanged and continue with later entries.
-- `view detail` — inspect both paths (see below), then return to the prompt.
+- `view detail` — show a content diff of the two files, then return to the
+  prompt.
 - `replace` — remove the obstruction and deploy the entry.
 - `replace all` — latch for this run: every upcoming obstruction prompt
   defaults to `replace` without prompting.
@@ -112,20 +122,11 @@ API's result and does not implement terminal detection or a non-interactive
 fallback.
 
 `view detail` is offered only when both paths resolve, after following
-symlinks, to regular files. It then shows the metadata below and a content
-diff of the two files. For a template entry, the rendered output is diffed
-against the target; a render failure shows the error and exits. For mixed
+symlinks, to regular files; it then shows a content diff of the two files.
+For a template entry, the rendered output is diffed against the target; a
+render failure shows the error and exits. For mixed
 file/directory kinds, symlinks resolving to directories, or special objects,
 `view detail` is omitted because no further useful information can be shown.
-
-The metadata shown per path:
-
-- existence and filesystem kind: regular file, directory, symlink, or other
-- absolute path
-- regular file: byte size and last-modified date
-- symlink: link target
-- directory: number of entries
-- other: no kind-specific metadata
 
 ### Parent directories
 
@@ -207,7 +208,30 @@ state-write failures follow the same per-action handling.
 reporting for each entry what a real run would do — deploy a new target,
 replace a clean managed path, or require a user choice for an obstruction —
 without prompting or changing the filesystem. Template entries are reported
-like copy entries, without rendering.
+like copy entries, without rendering. Dry-run prints no summary, and it
+conflicts with both `--quiet` and `--verbose`.
+
+## Output
+
+A real run prints the obstruction prompts as they occur, plus one summary line
+when the run's walk completes. Per-path detail is never printed by default.
+
+The summary counts `deployed N, replaced N, skipped N`; under `--clean-up` it
+also counts `removed N, pruned N`. There is no failure count — a hard failure
+stops the run before any summary — and relinquished records are never counted.
+
+`--verbose` adds one line per acted-upon path as the walk proceeds (`deployed`,
+`replaced`, `skipped`); under `--clean-up` it also prints `removed` and `pruned`
+lines, leaving the default clean-up silence intact otherwise.
+
+`--quiet` suppresses the summary line. Prompts and errors are never suppressed.
+
+The flag combinations `--quiet` with `--verbose`, `--dry-run` with `--quiet`,
+and `--dry-run` with `--verbose` are usage errors.
+
+A hard failure — a deploy, removal, or prune error — stops the run before the
+summary is printed. A completed-but-unsuccessful run (for example one with
+obstruction skips) still prints the summary, reflecting the skips.
 
 ## `--clean-up`
 
@@ -233,7 +257,9 @@ relinquished, making it an ordinary untracked path. A record whose target no
 longer exists is relinquished as well, with nothing left on disk. Relinquishing
 neither fails the run nor is reported outside a dry-run.
 
-`--clean-up` is silent: a real run prints nothing per removed path. A removal
+`--clean-up` is silent by default: a real run prints nothing per removed path,
+and its summary line still reports the removal and prune counts. `--verbose`
+adds per-path `removed` and `pruned` lines (see [Output](#output)). A removal
 that fails at the filesystem level fails the run through the normal error
 path.
 
