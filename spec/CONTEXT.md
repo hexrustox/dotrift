@@ -57,7 +57,8 @@ _Avoid_: deployment method
 A target path that dotrift created and whose current fingerprint still matches
 the recorded last-applied fingerprint. Only managed paths are replaced
 automatically. A previously managed path that was modified since the last
-apply no longer matches and is an *obstruction*.
+apply no longer matches and is an *obstruction*. A path whose current on-disk
+metadata or content cannot be read fails the check and is not a managed path.
 _Avoid_: tracked path
 
 **Fingerprint**:

@@ -112,6 +112,9 @@ Given a target path on disk and a record keyed by that path:
    bytes are hashed (xxHash64) and compared against `content_hash` — equal is
    managed, otherwise unmanaged. There is no mtime fast-path: the current
    bytes are always hashed.
+5. **Read failure** — a failure to read the on-disk metadata (the filesystem
+   kind) or the file content (for hashing) yields unmanaged: the current
+   state cannot be verified against the record, so the path is not managed.
 
 The check is read-only: it never writes disk or database. Callers decide what
 to do with the verdict.
