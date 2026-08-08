@@ -25,6 +25,13 @@ _Avoid_: destination, target-dir (only as CLI/config token)
 Per-entry path on disk that dotrift writes to.
 _Avoid_: computed target
 
+**Desired deployment**:
+The complete set of resolved portal entries `apply` intends to deploy for a
+given run: portal resolution, filtered by the ignore file and validated for
+collisions, with rules applied. Comparing it against the target directory and
+the management state drives `apply`'s decisions.
+_Avoid_: plan (generic)
+
 **Portal**:
 One entry in the `[portal]` table mapping a source pattern or literal to a
 target destination.
@@ -46,11 +53,39 @@ Enum per deployed file: `symlink` | `copy` | `template`. Set by `[rule]`,
 defaulting to `symlink` when no rule matches.
 _Avoid_: deployment method
 
+**Managed path**:
+A target path that dotrift created and whose current fingerprint still matches
+the recorded last-applied fingerprint. Only managed paths are replaced
+automatically. A previously managed path that was modified since the last
+apply no longer matches and is an *obstruction*.
+_Avoid_: tracked path
+
+**Fingerprint**:
+The recorded last-applied state of a target path dotrift created: the link
+target for a symlink deploy, or a hash of the deployed bytes for a copy or
+template deploy. Directories have no fingerprint. Comparing the current
+fingerprint against the record decides whether the path is still managed.
+_Avoid_: checksum, hash (when meaning the recorded state)
+
 **Collision**:
 Config-time condition where two different portal resolutions produce the same
 target path. Halts the program before any filesystem change. Distinct from
 *obstruction*.
 _Avoid_: (none — distinct from obstruction)
+
+**Structural conflict**:
+Config-time condition where two desired target paths place one as an ancestor
+of the other (for example `config` and `config/editor`), so they cannot both
+exist as deployment targets. Halts the program before any filesystem change,
+like a *collision*.
+_Avoid_: path conflict, overlap
+
+**Obstruction**:
+An existing target path that dotrift does not manage: either untracked, or
+previously created by dotrift but modified since the last apply. Blocks
+deployment of a resolved entry. Unlike a *collision* — a config-time error —
+an obstruction is a runtime condition resolved interactively during `apply`.
+_Avoid_: conflict, clash
 
 **Control file**:
 One of the three root metadata files in the source directory — `dotrift.toml`,
@@ -92,3 +127,10 @@ The resolved bindings passed to the templater for evaluation: base variables
 overlaid by active profiles in `activated_at` order, most recently activated
 winning, with lexicographic profile-name tie-breaking.
 _Avoid_: scope, environment (overloaded terms in the templater spec)
+
+**Apply lock**:
+Exclusive lock `apply` holds from reading the control files through
+filesystem actions, state updates, and exit, serialising concurrent
+invocations. A second invocation that cannot acquire it fails rather than
+interleaving operations.
+_Avoid_: (none)
