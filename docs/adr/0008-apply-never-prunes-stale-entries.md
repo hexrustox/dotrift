@@ -8,3 +8,6 @@ alternative, having `apply` converge the target directory by deleting anything
 it no longer manages, was set aside during the initial design because deletion
 is the least reversible operation dotrift performs and deserves its own
 decision process.
+
+Superseded by [ADR-0013](./0013-clean-up-removes-stale-paths.md), which
+resolves the removal design via `--clean-up`.

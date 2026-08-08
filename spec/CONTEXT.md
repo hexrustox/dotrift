@@ -112,6 +112,18 @@ deployment of a resolved entry. Unlike a *collision* — a config-time error —
 an obstruction is a runtime condition resolved interactively during `apply`.
 _Avoid_: conflict, clash
 
+**Stale path**:
+A *managed path* in the target directory that is not part of the *desired
+deployment* for the current run: the candidate set for `--clean-up`. Paths
+excluded by the ignore file count as stale.
+_Avoid_: leftover, orphan
+
+**Relinquish**:
+Drop a *state record* for a path dotrift no longer deploys, leaving the file
+itself untouched. Happens under `--clean-up` for stale obstructions (modified
+files) and for records whose target no longer exists.
+_Avoid_: forget, abandon
+
 **Control file**:
 One of the three root metadata files in the source directory — `dotrift.toml`,
 `dotrift_data.toml`, `.dotriftignore` — that configures dotrift rather than

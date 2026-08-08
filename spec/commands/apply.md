@@ -3,8 +3,8 @@
 Reconciles the target directory to the *desired deployment*: reads the control
 files, resolves and validates the portal entries, then creates or updates each
 target path according to its effective rule. `apply` is the deployment command;
-it never removes managed paths — pruning stale entries is a separate
-`--clean-up` feature (see [Out of scope](#out-of-scope)).
+stale entries are removed only under `--clean-up` (see
+[`--clean-up`](#--clean-up)).
 
 ## Pipeline
 
@@ -209,13 +209,51 @@ replace a clean managed path, or require a user choice for an obstruction —
 without prompting or changing the filesystem. Template entries are reported
 like copy entries, without rendering.
 
+## `--clean-up`
+
+`--clean-up` removes *stale paths*: managed paths in the target directory that
+are not part of the desired deployment. It runs after a successful deploy walk
+only — a run that failed during deployment leaves clean-up for the next
+invocation.
+
+### Candidates
+
+A stale path is a *state record* whose target path lies under the current
+target directory root and is not part of the desired deployment. Records from
+other deployments, outside the current target root, are never candidates.
+Paths excluded by the ignore file are not in the desired deployment and are
+therefore stale: adding an ignore pattern makes the previously deployed path a
+removal candidate, while a negated pattern that re-includes it removes it from
+the candidate set.
+
+Only a stale path whose managed check passes — still a *managed path* — is
+removed. A stale path modified since the last apply is an obstruction and is
+never silently deleted: the file is left untouched and its record is
+relinquished, making it an ordinary untracked path. A record whose target no
+longer exists is relinquished as well, with nothing left on disk. Relinquishing
+neither fails the run nor is reported outside a dry-run.
+
+`--clean-up` is silent: a real run prints nothing per removed path. A removal
+that fails at the filesystem level fails the run through the normal error
+path.
+
+`--dry-run --clean-up` reports the removals, relinquishments, and prunes the
+real run would perform, without changing the filesystem.
+
+### `--prune-empty-dirs`
+
+`--prune-empty-dirs` may only be used together with `--clean-up`; using it
+alone is an error. After each removal, the parent chain of the removed path is
+walked upward while each directory is empty, removing it, and stopping at the
+first non-empty directory. The target directory root is never pruned, and a
+symlink parent component is never traversed or pruned. Pruning runs after
+removals in the same post-deploy phase, so a directory that still holds a
+deployed entry is non-empty and is left alone. Directories are never recorded,
+so pruning touches no state.
+
 ## Exit status
 
 The run is unsuccessful if preflight validation failed, or if any entry was
-skipped or failed; otherwise it succeeds.
-
-## Out of scope
-
-`apply` never removes managed paths that are no longer in the desired
-deployment. Removal semantics are a separate `--clean-up` design
-(ADR-0008).
+skipped or failed; otherwise it succeeds. Under `--clean-up`, a removal or
+prune that fails at the filesystem level also makes the run unsuccessful.
+Relinquishing a stale path never makes the run unsuccessful.
