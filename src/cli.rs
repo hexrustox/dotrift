@@ -19,6 +19,18 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Status,
+    Profile {
+        #[command(subcommand)]
+        command: ProfileCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileCommand {
+    List,
+    Activate { name: String },
+    Deactivate { name: String },
+    Show,
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +40,14 @@ pub struct ResolvedGlobalOptions {
 }
 
 impl Cli {
+    pub fn resolve_source(self) -> Result<(PathBuf, Command)> {
+        let source = match self.source {
+            Some(path) => ensure_absolute(&path)?,
+            None => ensure_absolute(&default_source()?)?,
+        };
+        Ok((source, self.command))
+    }
+
     pub fn resolve_paths(self) -> Result<(ResolvedGlobalOptions, Command)> {
         let source = match self.source {
             Some(path) => ensure_absolute(&path)?,

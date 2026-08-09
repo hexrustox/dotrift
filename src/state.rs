@@ -1,6 +1,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use miette::{Result, WrapErr, miette};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
@@ -213,6 +214,54 @@ impl StateDatabase {
                 format!("cannot check state record for `{}`", target_path.display())
             })?;
         Ok(found)
+    }
+
+    pub fn active_profiles(&self) -> Result<Vec<(String, i64)>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT name, activated_at FROM active_profiles ORDER BY activated_at, name")
+            .map_err(|error| miette!(error))
+            .wrap_err("cannot read active profiles")?;
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|error| miette!(error))
+            .wrap_err("cannot read active profiles")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| miette!(error))
+            .wrap_err("cannot read active profiles")
+    }
+
+    pub fn activate_profile(&self, name: &str) -> Result<()> {
+        let current: Option<i64> = self
+            .connection
+            .query_row("SELECT MAX(activated_at) FROM active_profiles", [], |row| {
+                row.get(0)
+            })
+            .map_err(|error| miette!(error))
+            .wrap_err("cannot read profile activation timestamps")?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| miette!(error))
+            .wrap_err("system clock is before the Unix epoch")?
+            .as_millis() as i64;
+        let activated_at = now.max(current.map_or(0, |value| value.saturating_add(1)));
+        self.connection
+            .execute(
+                "INSERT OR REPLACE INTO active_profiles (name, activated_at) VALUES (?1, ?2)",
+                params![name, activated_at],
+            )
+            .map_err(|error| miette!(error))
+            .wrap_err("cannot activate profile")?;
+        Ok(())
+    }
+
+    pub fn deactivate_profile(&self, name: &str) -> Result<bool> {
+        let count = self
+            .connection
+            .execute("DELETE FROM active_profiles WHERE name = ?1", [name])
+            .map_err(|error| miette!(error))
+            .wrap_err("cannot deactivate profile")?;
+        Ok(count == 1)
     }
 }
 
