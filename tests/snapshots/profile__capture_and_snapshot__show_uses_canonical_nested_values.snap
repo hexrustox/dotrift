@@ -1,0 +1,7 @@
+---
+source: tests/profile.rs
+expression: setup(&env)
+---
+items      ["x", 2]
+plain      text
+settings   {"enabled": true}

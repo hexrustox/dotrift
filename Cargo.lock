@@ -1532,6 +1532,7 @@ dependencies = [
  "miette",
  "proptest",
  "rand",
+ "serde",
  "tempfile",
  "templater",
  "test-case",

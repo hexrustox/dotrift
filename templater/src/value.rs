@@ -2,8 +2,11 @@ use std::collections::BTreeMap;
 
 use std::io;
 
+use serde::Deserialize;
+
 /// A runtime value produced by evaluating an expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
 pub enum Value {
     Str(String),
     Int(i64),
@@ -56,7 +59,7 @@ impl Value {
     /// - **Int** — decimal, with a leading `-` for negatives.
     /// - **Bool** — `true` / `false`.
     /// - **List/Map** — their canonical nested forms via [`Value::write_nested`].
-    pub(crate) fn write_top<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+    pub fn write_top<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         match self {
             Value::Str(s) => writer.write_all(s.as_bytes()),
             Value::Int(n) => write!(writer, "{n}"),

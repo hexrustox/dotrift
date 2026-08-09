@@ -40,25 +40,25 @@ pub struct ResolvedGlobalOptions {
 }
 
 impl Cli {
-    pub fn resolve_source(self) -> Result<(PathBuf, Command)> {
-        let source = match self.source {
-            Some(path) => ensure_absolute(&path)?,
-            None => ensure_absolute(&default_source()?)?,
+    pub fn resolve(self) -> Result<(Option<PathBuf>, Command)> {
+        let Cli {
+            command, source, ..
+        } = self;
+        let source = if matches!(
+            &command,
+            Command::Status
+                | Command::Profile {
+                    command: ProfileCommand::Deactivate { .. }
+                }
+        ) {
+            None
+        } else {
+            Some(match source {
+                Some(path) => ensure_absolute(&path)?,
+                None => ensure_absolute(&default_source()?)?,
+            })
         };
-        Ok((source, self.command))
-    }
-
-    pub fn resolve_paths(self) -> Result<(ResolvedGlobalOptions, Command)> {
-        let source = match self.source {
-            Some(path) => ensure_absolute(&path)?,
-            None => ensure_absolute(&default_source()?)?,
-        };
-        let target = match self.target {
-            Some(path) => ensure_absolute(&path)?,
-            None => ensure_absolute(&default_target()?)?,
-        };
-
-        Ok((ResolvedGlobalOptions { source, target }, self.command))
+        Ok((source, command))
     }
 }
 
