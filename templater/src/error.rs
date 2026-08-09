@@ -1,20 +1,3 @@
-//! Error display conventions:
-//!
-//! - **Case**: lowercase sentence fragments, no trailing period.
-//! - **Quoting**: backtick-quote syntax elements (keywords, delimiters, modifiers,
-//!   operators): `` `keyword` ``.
-//! - **Field interpolation**: `{field}` for dynamic values (identifiers, types,
-//!   indices).
-//! - **Voice**: describe what the error *is*, not what the user should *do*
-//!   (e.g. "undefined variable" not "variable is not defined").
-//! - **Terminology**: prefer spec terms from `CONTEXT.md` (e.g. "interpolation"
-//!   not "placeholder", "delimiter" not "bracket").
-//! - **Message vs Label**: `#[error("...")]` describes what the error *is*
-//!   (descriptive). `#[label("...")]` on `span` tells the user what they
-//!   *should do* (prescriptive, actionable). When the action is obvious from
-//!   the message, the label text may be omitted and only the underline
-//!   remains.
-
 use std::io;
 
 use miette::{Diagnostic, SourceSpan};
