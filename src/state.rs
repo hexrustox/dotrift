@@ -47,6 +47,29 @@ pub struct StateRecord {
     pub content_hash: Option<String>,
 }
 
+#[cfg(test)]
+#[macro_export]
+macro_rules! record {
+    (f, $target:expr, $source:expr, $hash:expr) => {
+        StateRecord {
+            target_path: PathBuf::from($target),
+            source_path: PathBuf::from($source),
+            kind: Kind::File,
+            link_target: None,
+            content_hash: Some($hash.into()),
+        }
+    };
+    (s, $target:expr, $source:expr, $link_target:expr) => {
+        StateRecord {
+            target_path: PathBuf::from($target),
+            source_path: PathBuf::from($source),
+            kind: Kind::Symlink,
+            link_target: Some(PathBuf::from($link_target)),
+            content_hash: None,
+        }
+    };
+}
+
 pub struct StateDatabase {
     connection: Connection,
     pub path: PathBuf,
@@ -232,5 +255,93 @@ impl Drop for StateLock {
     fn drop(&mut self) {
         // SAFETY: the descriptor came from the lock's still-open file.
         unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use test_case::test_case;
+
+    use super::*;
+
+    fn database() -> (tempfile::TempDir, StateDatabase) {
+        let dir = tempfile::tempdir().expect("cannot create temp dir");
+        let database = StateDatabase::open_at(dir.path()).expect("cannot open test database");
+        (dir, database)
+    }
+
+    #[test_case(Kind::File, "file"; "file")]
+    #[test_case(Kind::Symlink, "symlink"; "symlink")]
+    fn kind_as_str_and_display(kind: Kind, expected: &str) {
+        assert_eq!(kind.as_str(), expected);
+        assert_eq!(kind.to_string(), expected);
+    }
+
+    #[test_case("file" => matches Ok(Kind::File); "parses_file")]
+    #[test_case("symlink" => matches Ok(Kind::Symlink); "parses_symlink")]
+    #[test_case("link" => matches Err(_); "rejects_unknown_kind")]
+    fn kind_parse(value: &str) -> miette::Result<Kind> {
+        Kind::parse(value)
+    }
+
+    #[test_case(crate::record!(f, "/home/user/.gitconfig", "dotfiles/git/config", "abc123"); "file")]
+    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc", "/home/user/.config/bashrc"); "symlink")]
+    fn put_round_trips(record: StateRecord) {
+        let (_dir, database) = database();
+        database.put(&record).expect("cannot store record");
+        assert_eq!(
+            database.managed_paths().expect("cannot read records"),
+            vec![record]
+        );
+    }
+
+    #[test_case(
+        crate::record!(f, "/home/user/.gitconfig", "dotfiles/git/config", "abc123"),
+        crate::record!(s, "/home/user/.gitconfig", "dotfiles/git/global", "/home/user/.config/git/config");
+        "file replaced by symlink"
+    )]
+    #[test_case(
+        crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc", "/home/user/.config/bashrc"),
+        crate::record!(f, "/home/user/.bashrc", "dotfiles/bash/rc", "deadbeef");
+        "symlink replaced by file"
+    )]
+    fn put_replaces_existing_record(original: StateRecord, replacement: StateRecord) {
+        let (_dir, database) = database();
+        database
+            .put(&original)
+            .expect("cannot store original record");
+        database
+            .put(&replacement)
+            .expect("cannot store replacement record");
+        assert_eq!(
+            database.managed_paths().expect("cannot read records"),
+            vec![replacement]
+        );
+    }
+
+    #[test]
+    fn contains_reports_stored_and_unknown() {
+        let (_dir, database) = database();
+        let record = crate::record!(f, "/home/user/.gitconfig", "dotfiles/git/config", "abc123");
+        database.put(&record).expect("cannot store record");
+        assert!(
+            database
+                .contains(&record.target_path)
+                .expect("cannot check stored path")
+        );
+        assert!(
+            !database
+                .contains(Path::new("/home/user/.bashrc"))
+                .expect("cannot check unknown path")
+        );
+    }
+
+    #[test]
+    fn state_lock_acquire_is_exclusive() {
+        let dir = tempfile::tempdir().expect("cannot create temp dir");
+        let first = StateLock::acquire_at(dir.path()).expect("cannot acquire first lock");
+        assert!(StateLock::acquire_at(dir.path()).is_err());
+        drop(first);
+        assert!(StateLock::acquire_at(dir.path()).is_ok());
     }
 }

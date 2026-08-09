@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod commands;
+pub mod hash;
 pub mod managed;
 pub mod state;
 
