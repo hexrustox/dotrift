@@ -1,0 +1,8 @@
+---
+source: tests/status.rs
+expression: captured
+---
+managed     file      <root>/config/app.conf
+managed     symlink   <root>/links/editor
+unmanaged   symlink   <root>/links/missing
+unmanaged   file      <root>/zsh/zshrc

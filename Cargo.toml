@@ -8,6 +8,9 @@ license = "GPL-3.0-or-later"
 resolver = "3"
 members = ["tui", "templater"]
 
+[features]
+testing = []
+
 [dependencies]
 tui = { path = "./tui" }
 templater = { path = "./templater" }
@@ -17,7 +20,6 @@ dirs = "6"
 glob = "0.3.3"
 ignore = "0.4.25"
 indexmap = { version = "2", features = ["serde"] }
-insta.workspace = true
 memmap2.workspace = true
 miette.workspace = true
 normalize-path = "0.2"
@@ -31,7 +33,9 @@ walkdir = "2"
 libc = "0.2"
 
 [dev-dependencies]
+dotrift = { path = ".", features = ["testing"] }
 proptest.workspace = true
+insta.workspace = true
 strip-ansi-escapes = "0.2.1"
 tempfile.workspace = true
 test-case.workspace = true
