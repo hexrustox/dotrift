@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use miette::{Result, miette};
+use miette::{Result, WrapErr, miette};
 
 use crate::ensure_absolute;
 
@@ -43,14 +43,16 @@ impl Cli {
 }
 
 fn default_source() -> Result<PathBuf> {
-    dirs::data_dir()
+    let source = dirs::data_dir()
         .map(|data_home| data_home.join("dotfiles"))
-        .ok_or_else(|| {
-            miette!("cannot resolve source directory: both XDG_DATA_HOME and HOME are unset")
-        })
+        .ok_or_else(|| miette!("both XDG_DATA_HOME and HOME are unset"))
+        .wrap_err("cannot resolve source directory")?;
+    Ok(source)
 }
 
 fn default_target() -> Result<PathBuf> {
-    dirs::home_dir()
-        .ok_or_else(|| miette!("cannot resolve target directory: HOME is unset or empty"))
+    let target = dirs::home_dir()
+        .ok_or_else(|| miette!("HOME is unset or empty"))
+        .wrap_err("cannot resolve target directory")?;
+    Ok(target)
 }

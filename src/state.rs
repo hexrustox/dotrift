@@ -2,7 +2,7 @@ use std::fs::{self, File, OpenOptions};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
-use miette::{Result, miette};
+use miette::{Result, WrapErr, miette};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,7 +23,11 @@ impl Kind {
         match value {
             "file" => Ok(Self::File),
             "symlink" => Ok(Self::Symlink),
-            other => Err(miette!("invalid state record: {other}")),
+            other => Err(miette::MietteDiagnostic::new(format!(
+                "unknown state record kind `{other}`"
+            ))
+            .with_help("this is likely an internal error")
+            .into()),
         }
     }
 }
@@ -49,12 +53,12 @@ pub struct StateDatabase {
 }
 
 pub(crate) fn state_root() -> Result<PathBuf> {
-    dirs::state_dir()
+    let state_home = dirs::state_dir()
         .or_else(dirs::data_dir)
         .map(|state_home| state_home.join("dotrift"))
-        .ok_or_else(|| {
-            miette!("cannot resolve state location: XDG_STATE_HOME and XDG_DATA_HOME are unset")
-        })
+        .ok_or_else(|| miette!("XDG_STATE_HOME and XDG_DATA_HOME are unset"))
+        .wrap_err("cannot resolve state location")?;
+    Ok(state_home)
 }
 
 impl StateDatabase {
@@ -63,9 +67,13 @@ impl StateDatabase {
     }
 
     fn open_at(root: &Path) -> Result<Self> {
-        fs::create_dir_all(root).map_err(|error| miette!(error))?;
+        fs::create_dir_all(root)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot create state directory `{}`", root.display()))?;
         let path = root.join("state.sqlite");
-        let connection = Connection::open(&path).map_err(|error| miette!(error))?;
+        let connection = Connection::open(&path)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot open state database `{}`", path.display()))?;
         connection
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS managed_paths (
@@ -82,7 +90,8 @@ impl StateDatabase {
                 activated_at INTEGER NOT NULL
             );",
             )
-            .map_err(|error| miette!(error))?;
+            .map_err(|error| miette!(error))
+            .wrap_err("cannot initialize state schema")?;
         Ok(Self { connection, path })
     }
 
@@ -96,7 +105,8 @@ impl StateDatabase {
             return Ok(None);
         }
         let connection = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|error| miette!(error))?;
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot open state database `{}`", path.display()))?;
         Ok(Some(Self { connection, path }))
     }
 
@@ -107,7 +117,8 @@ impl StateDatabase {
                 "SELECT target_path, source_path, kind, link_target, content_hash
                  FROM managed_paths",
             )
-            .map_err(|error| miette!(error))?;
+            .map_err(|error| miette!(error))
+            .wrap_err("cannot read managed paths")?;
         let rows = statement
             .query_map([], |row| {
                 Ok((
@@ -118,10 +129,12 @@ impl StateDatabase {
                     row.get(4)?,
                 ))
             })
-            .map_err(|error| miette!(error))?;
+            .map_err(|error| miette!(error))
+            .wrap_err("cannot read managed paths")?;
         let tuples = rows
             .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|error| miette!(error))?;
+            .map_err(|error| miette!(error))
+            .wrap_err("cannot read managed paths")?;
         let mut records = Vec::with_capacity(tuples.len());
         for (target_path, source_path, kind, link_target, content_hash) in tuples {
             records.push(StateRecord {
@@ -152,12 +165,19 @@ impl StateDatabase {
                     record.content_hash,
                 ],
             )
-            .map_err(|error| miette!(error))?;
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| {
+                format!(
+                    "cannot store state record for `{}`",
+                    record.target_path.display()
+                )
+            })?;
         Ok(())
     }
 
     pub fn contains(&self, target_path: &Path) -> Result<bool> {
-        self.connection
+        let found = self
+            .connection
             .query_row(
                 "SELECT 1 FROM managed_paths WHERE target_path = ?1",
                 [target_path.to_string_lossy()],
@@ -166,6 +186,10 @@ impl StateDatabase {
             .optional()
             .map(|value| value.is_some())
             .map_err(|error| miette!(error))
+            .wrap_err_with(|| {
+                format!("cannot check state record for `{}`", target_path.display())
+            })?;
+        Ok(found)
     }
 }
 
@@ -179,14 +203,18 @@ impl StateLock {
     }
 
     fn acquire_at(root: &Path) -> Result<Self> {
-        fs::create_dir_all(root).map_err(|error| miette!(error))?;
+        fs::create_dir_all(root)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot create state directory `{}`", root.display()))?;
+        let lock_path = root.join("state.lock");
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
             .write(true)
-            .open(root.join("state.lock"))
-            .map_err(|error| miette!(error))?;
+            .open(&lock_path)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot open state lock `{}`", lock_path.display()))?;
         // SAFETY: the file descriptor is open for the lifetime of this lock.
         let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
         if result == -1 {
@@ -194,7 +222,7 @@ impl StateLock {
             if error.raw_os_error() == Some(libc::EWOULDBLOCK) {
                 return Err(miette!("state lock is already held"));
             }
-            return Err(miette!(error));
+            Err(miette!(error)).wrap_err("cannot acquire state lock")?;
         }
         Ok(Self { file })
     }
