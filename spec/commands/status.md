@@ -29,8 +29,8 @@ defined in `core.md` (Managed check); the storage schema is defined in
 Each record prints one line:
 
 ```
-[managed]   symlink  ~/.zshrc
-[unmanaged] file     ~/.config/nvim/init.lua
+managed     symlink   ~/.zshrc
+unmanaged   file      ~/.config/nvim/init.lua
 ```
 
 - The verdict prefix is `[managed]` when the managed check passes and
