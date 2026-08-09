@@ -1,27 +1,12 @@
 use clap::Parser;
+use miette::Error;
 
-use dotrift::cli::{Cli, Command, state_root};
-use dotrift::state::StateDatabase;
+use dotrift::cli::{Cli, Command};
 
-fn main() {
-    if let Err(error) = run() {
-        eprintln!("dotrift: {error}");
-        std::process::exit(1);
-    }
-}
-
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Error> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Status => {
-            let Some(state_root) = state_root().ok() else {
-                return Ok(());
-            };
-            let database = StateDatabase::open_read_only(state_root)?;
-            for line in dotrift::status_lines(&database)? {
-                println!("{line}");
-            }
-        }
+        Command::Status => dotrift::commands::status::run()?,
     }
     Ok(())
 }

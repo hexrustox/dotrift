@@ -430,7 +430,6 @@ dependencies = [
  "tempfile",
  "templater",
  "test-case",
- "thiserror",
  "toml",
  "toml_edit",
  "tui",

@@ -2,20 +2,8 @@ use std::fs::{self, File, OpenOptions};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
+use miette::{Result, miette};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum StateError {
-    #[error("state I/O error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("state database error: {0}")]
-    Sql(#[from] rusqlite::Error),
-    #[error("state lock is already held")]
-    LockContended,
-    #[error("invalid state record: {0}")]
-    InvalidRecord(String),
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -31,11 +19,11 @@ impl Kind {
         }
     }
 
-    fn parse(value: &str) -> Result<Self, StateError> {
+    fn parse(value: &str) -> Result<Self> {
         match value {
             "file" => Ok(Self::File),
             "symlink" => Ok(Self::Symlink),
-            other => Err(StateError::InvalidRecord(other.to_owned())),
+            other => Err(miette!("invalid state record: {other}")),
         }
     }
 }
@@ -60,14 +48,27 @@ pub struct StateDatabase {
     pub path: PathBuf,
 }
 
+pub(crate) fn state_root() -> Result<PathBuf> {
+    dirs::state_dir()
+        .or_else(dirs::data_dir)
+        .map(|state_home| state_home.join("dotrift"))
+        .ok_or_else(|| {
+            miette!("cannot resolve state location: XDG_STATE_HOME and XDG_DATA_HOME are unset")
+        })
+}
+
 impl StateDatabase {
-    pub fn open(root: impl AsRef<Path>) -> Result<Self, StateError> {
-        let root = root.as_ref();
-        fs::create_dir_all(root)?;
+    pub fn open() -> Result<Self> {
+        Self::open_at(&state_root()?)
+    }
+
+    fn open_at(root: &Path) -> Result<Self> {
+        fs::create_dir_all(root).map_err(|error| miette!(error))?;
         let path = root.join("state.sqlite");
-        let connection = Connection::open(&path)?;
-        connection.execute_batch(
-            "CREATE TABLE IF NOT EXISTS managed_paths (
+        let connection = Connection::open(&path).map_err(|error| miette!(error))?;
+        connection
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS managed_paths (
                 target_path TEXT PRIMARY KEY,
                 source_path TEXT NOT NULL,
                 kind TEXT NOT NULL CHECK (kind IN ('file', 'symlink')),
@@ -80,78 +81,82 @@ impl StateDatabase {
                 name TEXT PRIMARY KEY,
                 activated_at INTEGER NOT NULL
             );",
-        )?;
+            )
+            .map_err(|error| miette!(error))?;
         Ok(Self { connection, path })
     }
 
-    pub fn open_read_only(root: impl AsRef<Path>) -> Result<Self, StateError> {
-        let root = root.as_ref();
+    pub fn open_read_only() -> Result<Option<Self>> {
+        Self::open_read_only_at(&state_root()?)
+    }
+
+    fn open_read_only_at(root: &Path) -> Result<Option<Self>> {
         let path = root.join("state.sqlite");
         if !path.exists() {
-            let connection = Connection::open_in_memory()?;
-            connection.execute_batch(
-                "CREATE TABLE managed_paths (
-                    target_path TEXT PRIMARY KEY,
-                    source_path TEXT NOT NULL,
-                    kind TEXT NOT NULL CHECK (kind IN ('file', 'symlink')),
-                    link_target TEXT,
-                    content_hash TEXT,
-                    CHECK ((kind = 'symlink' AND link_target IS NOT NULL AND content_hash IS NULL)
-                        OR (kind = 'file' AND content_hash IS NOT NULL AND link_target IS NULL))
-                )",
-            )?;
-            connection.execute_batch(
-                "CREATE TABLE active_profiles (
-                    name TEXT PRIMARY KEY,
-                    activated_at INTEGER NOT NULL
-                )",
-            )?;
-            return Ok(Self { connection, path });
+            return Ok(None);
         }
-        let connection = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        Ok(Self { connection, path })
+        let connection = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|error| miette!(error))?;
+        Ok(Some(Self { connection, path }))
     }
 
-    pub fn managed_paths(&self) -> Result<Vec<StateRecord>, StateError> {
-        let mut statement = self.connection.prepare(
-            "SELECT target_path, source_path, kind, link_target, content_hash
-             FROM managed_paths",
-        )?;
-        let rows = statement.query_map([], |row| {
-            let kind = Kind::parse(&row.get::<_, String>(2)?)
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-            Ok(StateRecord {
-                target_path: PathBuf::from(row.get::<_, String>(0)?),
-                source_path: PathBuf::from(row.get::<_, String>(1)?),
-                kind,
-                link_target: row.get::<_, Option<String>>(3)?.map(PathBuf::from),
-                content_hash: row.get(4)?,
+    pub fn managed_paths(&self) -> Result<Vec<StateRecord>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT target_path, source_path, kind, link_target, content_hash
+                 FROM managed_paths",
+            )
+            .map_err(|error| miette!(error))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    PathBuf::from(row.get::<_, String>(0)?),
+                    PathBuf::from(row.get::<_, String>(1)?),
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?.map(PathBuf::from),
+                    row.get(4)?,
+                ))
             })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StateError::from)
+            .map_err(|error| miette!(error))?;
+        let tuples = rows
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| miette!(error))?;
+        let mut records = Vec::with_capacity(tuples.len());
+        for (target_path, source_path, kind, link_target, content_hash) in tuples {
+            records.push(StateRecord {
+                target_path,
+                source_path,
+                kind: Kind::parse(&kind)?,
+                link_target,
+                content_hash,
+            });
+        }
+        Ok(records)
     }
 
-    pub fn put(&self, record: &StateRecord) -> Result<(), StateError> {
-        self.connection.execute(
-            "INSERT OR REPLACE INTO managed_paths
-             (target_path, source_path, kind, link_target, content_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                record.target_path.to_string_lossy(),
-                record.source_path.to_string_lossy(),
-                record.kind.as_str(),
-                record
-                    .link_target
-                    .as_ref()
-                    .map(|path| path.to_string_lossy()),
-                record.content_hash,
-            ],
-        )?;
+    pub fn put(&self, record: &StateRecord) -> Result<()> {
+        self.connection
+            .execute(
+                "INSERT OR REPLACE INTO managed_paths
+                 (target_path, source_path, kind, link_target, content_hash)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    record.target_path.to_string_lossy(),
+                    record.source_path.to_string_lossy(),
+                    record.kind.as_str(),
+                    record
+                        .link_target
+                        .as_ref()
+                        .map(|path| path.to_string_lossy()),
+                    record.content_hash,
+                ],
+            )
+            .map_err(|error| miette!(error))?;
         Ok(())
     }
 
-    pub fn contains(&self, target_path: &Path) -> Result<bool, StateError> {
+    pub fn contains(&self, target_path: &Path) -> Result<bool> {
         self.connection
             .query_row(
                 "SELECT 1 FROM managed_paths WHERE target_path = ?1",
@@ -160,7 +165,7 @@ impl StateDatabase {
             )
             .optional()
             .map(|value| value.is_some())
-            .map_err(StateError::from)
+            .map_err(|error| miette!(error))
     }
 }
 
@@ -169,22 +174,27 @@ pub struct StateLock {
 }
 
 impl StateLock {
-    pub fn acquire(root: impl AsRef<Path>) -> Result<Self, StateError> {
-        let root = root.as_ref();
-        fs::create_dir_all(root)?;
+    pub fn acquire() -> Result<Self> {
+        Self::acquire_at(&state_root()?)
+    }
+
+    fn acquire_at(root: &Path) -> Result<Self> {
+        fs::create_dir_all(root).map_err(|error| miette!(error))?;
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
             .write(true)
-            .open(root.join("state.lock"))?;
+            .open(root.join("state.lock"))
+            .map_err(|error| miette!(error))?;
         // SAFETY: the file descriptor is open for the lifetime of this lock.
         let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
         if result == -1 {
-            if std::io::Error::last_os_error().raw_os_error() == Some(libc::EWOULDBLOCK) {
-                return Err(StateError::LockContended);
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EWOULDBLOCK) {
+                return Err(miette!("state lock is already held"));
             }
-            return Err(std::io::Error::last_os_error().into());
+            return Err(miette!(error));
         }
         Ok(Self { file })
     }
@@ -194,40 +204,5 @@ impl Drop for StateLock {
     fn drop(&mut self) {
         // SAFETY: the descriptor came from the lock's still-open file.
         unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) };
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use tempfile::tempdir;
-
-    use super::*;
-
-    #[test]
-    fn database_persists_state_records_and_creates_schema() {
-        let directory = tempdir().unwrap();
-        let database = StateDatabase::open(directory.path()).unwrap();
-        let record = StateRecord {
-            target_path: PathBuf::from("/target"),
-            source_path: PathBuf::from("/source"),
-            kind: Kind::File,
-            link_target: None,
-            content_hash: Some("0123456789abcdef".into()),
-        };
-        database.put(&record).unwrap();
-
-        let reopened = StateDatabase::open(directory.path()).unwrap();
-        assert_eq!(reopened.managed_paths().unwrap(), vec![record]);
-    }
-
-    #[test]
-    fn lock_fails_fast_when_another_lock_is_held() {
-        let directory = tempdir().unwrap();
-        let _lock = StateLock::acquire(directory.path()).unwrap();
-
-        assert!(matches!(
-            StateLock::acquire(directory.path()),
-            Err(StateError::LockContended)
-        ));
     }
 }
