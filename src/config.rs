@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    ffi::OsString,
     fs,
     path::{Component, Path, PathBuf},
 };
@@ -13,11 +14,61 @@ use walkdir::WalkDir;
 
 use crate::data::DataFile;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum DeployType {
     Symlink,
     Copy,
     Template,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "DeployModeRepr")]
+pub struct DeployMode(u32);
+
+impl From<DeployMode> for u32 {
+    fn from(value: DeployMode) -> Self {
+        value.0
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum DeployModeRepr {
+    Str(String),
+    Uint(u32),
+}
+
+impl TryFrom<DeployModeRepr> for DeployMode {
+    type Error = miette::Report;
+
+    fn try_from(value: DeployModeRepr) -> Result<Self, Self::Error> {
+        match value {
+            DeployModeRepr::Str(value) => Self::try_from(value),
+            DeployModeRepr::Uint(value) => Self::try_from(value),
+        }
+    }
+}
+
+impl TryFrom<String> for DeployMode {
+    type Error = miette::Report;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.len() != 3 || !value.bytes().all(|byte| (b'0'..=b'7').contains(&byte)) {
+            return Err(miette!("invalid mode `{value}`"));
+        }
+        Ok(Self(u32::from_str_radix(&value, 8).unwrap()))
+    }
+}
+
+impl TryFrom<u32> for DeployMode {
+    type Error = miette::Report;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        if (0..=0o777).contains(&value) {
+            return Err(miette!("invalid mode `{value:o}`"));
+        }
+        Ok(Self(value))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +76,7 @@ pub struct DeploymentEntry {
     pub source_path: PathBuf,
     pub target_path: PathBuf,
     pub deploy_type: DeployType,
-    pub mode: Option<u32>,
+    pub mode: Option<DeployMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,12 +96,34 @@ struct FileConfig {
     rule: indexmap::IndexMap<String, RuleConfig>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone)]
 struct RuleConfig {
-    #[serde(rename = "type")]
-    deploy_type: Option<String>,
-    mode: Option<String>,
+    deploy_type: Option<DeployType>,
+    mode: Option<DeployMode>,
+}
+
+impl<'de> serde::Deserialize<'de> for RuleConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            #[serde(rename = "type")]
+            deploy_type: Option<DeployType>,
+            mode: Option<DeployMode>,
+        }
+        let raw = Raw::deserialize(deserializer)?;
+        if raw.mode.is_some() && raw.deploy_type == Some(DeployType::Symlink) {
+            return Err(serde::de::Error::custom(
+                "`mode` cannot be used with `type` `symlink`",
+            ));
+        }
+        Ok(RuleConfig {
+            deploy_type: raw.deploy_type,
+            mode: raw.mode,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +132,7 @@ struct ResolvedPortal {
     target: PathBuf,
 }
 
+// TODO
 struct NoFunctions;
 impl FunctionRegistry for NoFunctions {
     fn call(
@@ -70,7 +144,7 @@ impl FunctionRegistry for NoFunctions {
     }
 }
 
-pub fn read(source: &Path, target_override: Option<&Path>) -> Result<DesiredDeployment> {
+pub fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDeployment> {
     if !source.is_dir() {
         return Err(miette!(
             "source directory `{}` does not exist",
@@ -83,21 +157,10 @@ pub fn read(source: &Path, target_override: Option<&Path>) -> Result<DesiredDepl
     let context = data.context(&active).into_iter().collect::<HashMap<_, _>>();
     let config_path = source.join("dotrift.toml");
     let rendered = render_config(&config_path, &context)?;
-    let mut document: toml::Value = toml::from_str(&rendered)
-        .map_err(|error| miette!(error))
-        .wrap_err_with(|| format!("cannot parse `{}`", config_path.display()))?;
-    if target_override.is_some() {
-        document
-            .as_table_mut()
-            .expect("TOML root is a table")
-            .remove("target-directory");
-    }
-    let config: FileConfig = document
-        .try_into()
+    let config = toml::from_str::<FileConfig>(&rendered)
         .map_err(|error| miette!(error))
         .wrap_err_with(|| format!("cannot parse `{}`", config_path.display()))?;
     let target = target_override
-        .map(Path::to_path_buf)
         .or_else(|| config.target_directory.map(PathBuf::from))
         .or_else(dirs::home_dir)
         .ok_or_else(|| miette!("`HOME` is unset or empty"))?;
@@ -111,12 +174,11 @@ pub fn read(source: &Path, target_override: Option<&Path>) -> Result<DesiredDepl
         .into_iter()
         .filter(|entry| !ignore.matched(&entry.target, false).is_ignore())
         .collect::<Vec<_>>();
-    validate_collisions(&portals)?;
-    validate_structural_conflicts(&portals)?;
-    validate_rules(&config.rule)?;
+    validate_targets(&portals)?;
+    let rules = compile_rules(&config.rule)?;
     let entries = portals
         .into_iter()
-        .map(|entry| apply_rules(entry, &config.rule, &target))
+        .map(|entry| apply_rules(entry, &rules, &target))
         .collect::<Result<Vec<_>>>()?;
     Ok(DesiredDeployment {
         target_directory: target,
@@ -152,279 +214,11 @@ fn read_ignore(source: &Path) -> Result<Gitignore> {
         .add_line(None, "/.dotriftignore")
         .map_err(|error| miette!(error))?;
     let path = source.join(".dotriftignore");
-    if let Ok(text) = fs::read_to_string(&path) {
-        for line in text.lines() {
-            builder
-                .add_line(Some(path.clone()), line)
-                .map_err(|error| miette!(error))?;
-        }
-    } else if path.exists() {
-        return Err(miette!("cannot read `{}`", path.display()));
+    match builder.add(path) {
+        None => {}
+        Some(error) => return Err(miette!(error)),
     }
     builder.build().map_err(|error| miette!(error))
-}
-
-fn resolve_portals(
-    source: &Path,
-    portals: &BTreeMap<String, String>,
-) -> Result<Vec<ResolvedPortal>> {
-    let mut result = Vec::new();
-    for (key, value) in portals {
-        validate_relative(key, "portal source")?;
-        validate_relative(value, "portal target")?;
-        if value
-            .bytes()
-            .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b'{' | b'}'))
-        {
-            return Err(miette!(
-                "portal target `{value}` cannot contain glob syntax"
-            ));
-        }
-        let key = key.strip_prefix("./").unwrap_or(key);
-        let value = value.strip_prefix("./").unwrap_or(value);
-        let pattern = Pattern::new(key)
-            .map_err(|error| miette!("invalid portal pattern `{key}` because {error}"))?;
-        let wildcard = key.bytes().any(|byte| matches!(byte, b'*' | b'?' | b'['));
-        if !wildcard {
-            let path = source.join(key.trim_start_matches("./"));
-            if !path.exists() && fs::symlink_metadata(&path).is_err() {
-                return Err(miette!("literal portal source `{key}` does not exist"));
-            }
-            add_source(&mut result, source, &path, Path::new(value))?;
-            continue;
-        }
-        let strip = stripping_prefix(key);
-        for item in WalkDir::new(source).follow_links(false) {
-            let item = item.map_err(|error| miette!(error))?;
-            let path = item.path();
-            if path == source || is_directory(path) {
-                continue;
-            }
-            let relative = path
-                .strip_prefix(source)
-                .expect("walkdir path below source");
-            if pattern.matches_path(relative) {
-                if !is_deployable_file(path) {
-                    return Err(miette!(
-                        "source path `{}` is not a regular file or symlink to a regular file",
-                        relative.display()
-                    ));
-                }
-                let remainder = relative.strip_prefix(&strip).unwrap_or(relative);
-                result.push(ResolvedPortal {
-                    source: path.to_path_buf(),
-                    target: PathBuf::from(value).join(remainder),
-                });
-            }
-        }
-    }
-    Ok(result)
-}
-
-fn add_source(
-    result: &mut Vec<ResolvedPortal>,
-    _source_root: &Path,
-    source: &Path,
-    target: &Path,
-) -> Result<()> {
-    if fs::symlink_metadata(source).is_ok_and(|metadata| metadata.file_type().is_symlink())
-        && !is_deployable_file(source)
-    {
-        return Err(miette!(
-            "portal source `{}` is not a regular file or directory",
-            source.display()
-        ));
-    }
-    if is_deployable_file(source) {
-        result.push(ResolvedPortal {
-            source: source.to_path_buf(),
-            target: target.to_path_buf(),
-        });
-        return Ok(());
-    }
-    if source.is_dir() {
-        for item in WalkDir::new(source).follow_links(false) {
-            let item = item.map_err(|error| miette!(error))?;
-            if item.path() == source || is_directory(item.path()) {
-                continue;
-            }
-            if !is_deployable_file(item.path()) {
-                return Err(miette!(
-                    "source path `{}` is not a regular file or symlink to a regular file",
-                    item.path().display()
-                ));
-            }
-            let relative = item.path().strip_prefix(source).expect("descendant");
-            result.push(ResolvedPortal {
-                source: item.path().to_path_buf(),
-                target: target.join(relative),
-            });
-        }
-        return Ok(());
-    }
-    Err(miette!(
-        "portal source `{}` is not a regular file or directory",
-        source.display()
-    ))
-}
-
-fn is_deployable_file(path: &Path) -> bool {
-    fs::metadata(path).is_ok_and(|meta| meta.is_file())
-}
-
-fn is_directory(path: &Path) -> bool {
-    fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_dir())
-}
-
-fn stripping_prefix(pattern: &str) -> PathBuf {
-    let mut prefix = PathBuf::new();
-    for component in Path::new(pattern).components() {
-        let value = component.as_os_str().to_string_lossy();
-        if value.bytes().any(|byte| matches!(byte, b'*' | b'?' | b'[')) {
-            break;
-        }
-        prefix.push(value.as_ref());
-    }
-    prefix
-}
-
-fn validate_relative(value: &str, what: &str) -> Result<()> {
-    if value.is_empty()
-        || Path::new(value).is_absolute()
-        || value.contains('{')
-        || value.contains('}')
-    {
-        return Err(miette!("invalid {what} path `{value}`"));
-    }
-    for (index, component) in Path::new(value).components().enumerate() {
-        if matches!(component, Component::CurDir | Component::ParentDir)
-            && !(index == 0 && component == Component::CurDir)
-        {
-            return Err(miette!("invalid {what} path `{value}`"));
-        }
-    }
-    Ok(())
-}
-
-fn validate_collisions(entries: &[ResolvedPortal]) -> Result<()> {
-    let mut seen: BTreeMap<&Path, Vec<&Path>> = BTreeMap::new();
-    for entry in entries {
-        let sources = seen.entry(&entry.target).or_default();
-        sources.push(&entry.source);
-    }
-    if let Some((target, sources)) = seen.iter().find(|(_, sources)| sources.len() > 1) {
-        let contributors = sources
-            .iter()
-            .map(|source| format!("`{}`", source.display()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(miette!(
-            "collision at `{}` from source paths {}",
-            target.display(),
-            contributors
-        ));
-    }
-    Ok(())
-}
-
-fn apply_rules(
-    entry: ResolvedPortal,
-    rules: &indexmap::IndexMap<String, RuleConfig>,
-    target_root: &Path,
-) -> Result<DeploymentEntry> {
-    let mut deploy_type = DeployType::Symlink;
-    let mut mode = None;
-    for (pattern, rule) in rules {
-        validate_relative(pattern, "rule")?;
-        let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
-        if Pattern::new(pattern)
-            .map_err(|error| miette!("invalid rule pattern `{pattern}` because {error}"))?
-            .matches_path(&entry.target)
-        {
-            if let Some(value) = &rule.deploy_type {
-                deploy_type = match value.as_str() {
-                    "symlink" => DeployType::Symlink,
-                    "copy" => DeployType::Copy,
-                    "template" => DeployType::Template,
-                    _ => return Err(miette!("invalid deploy type `{value}`")),
-                };
-            }
-            if let Some(value) = &rule.mode {
-                if value.len() != 3 || !value.bytes().all(|byte| (b'0'..=b'7').contains(&byte)) {
-                    return Err(miette!("invalid mode `{value}`"));
-                }
-                mode = Some(u32::from_str_radix(value, 8).unwrap());
-            }
-        }
-    }
-    if mode.is_some() && deploy_type == DeployType::Symlink {
-        return Err(miette!("mode cannot be used with symlink deployment"));
-    }
-    Ok(DeploymentEntry {
-        source_path: entry.source,
-        target_path: target_root.join(entry.target),
-        deploy_type,
-        mode,
-    })
-}
-
-fn validate_structural_conflicts<T: TargetPath>(entries: &[T]) -> Result<()> {
-    for (index, left) in entries.iter().enumerate() {
-        for right in entries.iter().skip(index + 1) {
-            if is_ancestor(left.target(), right.target())
-                || is_ancestor(right.target(), left.target())
-            {
-                return Err(miette!(
-                    "structural conflict between `{}` and `{}`",
-                    left.target().display(),
-                    right.target().display()
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn is_ancestor(left: &Path, right: &Path) -> bool {
-    left == Path::new(".") || right.starts_with(left)
-}
-
-trait TargetPath {
-    fn target(&self) -> &Path;
-}
-
-impl TargetPath for ResolvedPortal {
-    fn target(&self) -> &Path {
-        &self.target
-    }
-}
-
-impl TargetPath for DeploymentEntry {
-    fn target(&self) -> &Path {
-        &self.target_path
-    }
-}
-
-fn validate_rules(rules: &indexmap::IndexMap<String, RuleConfig>) -> Result<()> {
-    for (pattern, rule) in rules {
-        validate_relative(pattern, "rule")?;
-        Pattern::new(pattern.strip_prefix("./").unwrap_or(pattern))
-            .map_err(|error| miette!("invalid rule pattern `{pattern}` because {error}"))?;
-        if let Some(value) = &rule.deploy_type {
-            if !matches!(value.as_str(), "symlink" | "copy" | "template") {
-                return Err(miette!("invalid deploy type `{value}`"));
-            }
-        }
-        if let Some(value) = &rule.mode {
-            if value.len() != 3 || !value.bytes().all(|byte| (b'0'..=b'7').contains(&byte)) {
-                return Err(miette!("invalid mode `{value}`"));
-            }
-        }
-        if rule.mode.is_some() && rule.deploy_type.as_deref() == Some("symlink") {
-            return Err(miette!("`mode` cannot be used with `type` `symlink`"));
-        }
-    }
-    Ok(())
 }
 
 fn validate_overlap(source: &Path, target: &Path) -> Result<()> {
@@ -458,75 +252,249 @@ fn resolve_for_comparison(path: &Path) -> Result<PathBuf> {
     Ok(resolved)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
+fn resolve_portals(
+    source: &Path,
+    portals: &BTreeMap<String, String>,
+) -> Result<Vec<ResolvedPortal>> {
+    let mut result = Vec::new();
+    for (key, value) in portals {
+        validate_relative(key, "portal source")?;
+        validate_relative(value, "portal target")?;
+        if contains_wildcard(value) {
+            return Err(miette!(
+                "portal target `{value}` cannot contain glob syntax"
+            ));
+        }
+        let key = key.strip_prefix("./").unwrap_or(key);
+        let value = value.strip_prefix("./").unwrap_or(value);
+        let wildcard = contains_wildcard(key);
+        if !wildcard {
+            let path = source.join(key);
+            if !path.exists() && fs::symlink_metadata(&path).is_err() {
+                return Err(miette!("literal portal source `{key}` does not exist"));
+            }
+            add_source(&mut result, &path, Path::new(value))?;
+            continue;
+        }
+        let strip = stripping_prefix(key);
+        for item in WalkDir::new(source).follow_links(false) {
+            let item = item.map_err(|error| miette!(error))?;
+            let path = item.path();
+            if path == source || is_directory(path) {
+                continue;
+            }
+            let relative = path
+                .strip_prefix(source)
+                .expect("walkdir path below source");
+            let pattern = Pattern::new(key)
+                .map_err(|error| miette!("invalid portal pattern `{key}` because {error}"))?;
+            if pattern.matches_path(relative) {
+                if !is_deployable_file(path) {
+                    return Err(miette!(
+                        "source path `{}` is not a regular file or symlink to a regular file",
+                        relative.display()
+                    ));
+                }
+                let remainder = relative.strip_prefix(&strip).unwrap_or(relative);
+                result.push(ResolvedPortal {
+                    source: path.to_path_buf(),
+                    target: PathBuf::from(value).join(remainder),
+                });
+            }
+        }
+    }
+    Ok(result)
+}
 
-    #[test]
-    fn resolves_literal_directory_and_rules_in_order() {
-        let dir = tempdir().unwrap();
-        let source = dir.path().join("source");
-        fs::create_dir_all(source.join("config/secrets")).unwrap();
-        fs::write(source.join("config/a"), "a").unwrap();
-        fs::write(source.join("config/secrets/x"), "x").unwrap();
-        fs::write(source.join("dotrift.toml"), "[portal]\n\"config\" = \"files\"\n[rule]\n\"files/**\" = { type=\"copy\" }\n\"files/secrets/**\" = { mode=\"600\" }").unwrap();
-        let result = read(&source, Some(&dir.path().join("target"))).unwrap();
-        assert_eq!(result.entries.len(), 2);
-        assert_eq!(
-            result
-                .entries
-                .iter()
-                .find(|entry| entry.target_path.ends_with("files/secrets/x"))
-                .unwrap()
-                .mode,
-            Some(0o600)
-        );
+fn add_source(result: &mut Vec<ResolvedPortal>, source: &Path, target: &Path) -> Result<()> {
+    if is_deployable_file(source) {
+        result.push(ResolvedPortal {
+            source: source.to_path_buf(),
+            target: target.to_path_buf(),
+        });
+        return Ok(());
+    }
+    if is_directory(source) {
+        for item in WalkDir::new(source).follow_links(false) {
+            let item = item.map_err(|error| miette!(error))?;
+            if item.path() == source || is_directory(item.path()) {
+                continue;
+            }
+            if !is_deployable_file(item.path()) {
+                return Err(miette!(
+                    "source path `{}` is not a regular file or symlink to a regular file",
+                    item.path().display()
+                ));
+            }
+            let relative = item.path().strip_prefix(source).expect("descendant");
+            result.push(ResolvedPortal {
+                source: item.path().to_path_buf(),
+                target: target.join(relative),
+            });
+        }
+        return Ok(());
+    }
+    Err(miette!(
+        "portal source `{}` is not a regular file or directory",
+        source.display()
+    ))
+}
+
+fn contains_wildcard(value: &str) -> bool {
+    value
+        .bytes()
+        .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b']'))
+}
+
+fn stripping_prefix(pattern: &str) -> PathBuf {
+    let mut prefix = PathBuf::new();
+    for component in Path::new(pattern).components() {
+        let value = component.as_os_str().to_string_lossy();
+        if contains_wildcard(&value) {
+            break;
+        }
+        prefix.push(value.as_ref());
+    }
+    prefix
+}
+
+fn validate_targets(entries: &[ResolvedPortal]) -> Result<()> {
+    let mut tree = Node::Dir(BTreeMap::new());
+    for entry in entries {
+        tree.insert(&entry.target, &entry.source)?;
+    }
+    Ok(())
+}
+
+enum Node {
+    Dir(BTreeMap<OsString, Node>),
+    File(PathBuf),
+}
+
+impl Default for Node {
+    fn default() -> Self {
+        Self::Dir(BTreeMap::new())
+    }
+}
+
+impl Node {
+    fn insert(&mut self, target: &Path, source: &Path) -> Result<()> {
+        let mut node = self;
+        let mut consumed = PathBuf::new();
+        let mut components = target.components().peekable();
+        while let Some(component) = components.next() {
+            let name = component.as_os_str().to_owned();
+            match node {
+                Node::File(_) => {
+                    return Err(miette!(
+                        "structural conflict between `{}` and `{}`",
+                        consumed.display(),
+                        target.display()
+                    ));
+                }
+                Node::Dir(children) => {
+                    consumed.push(&name);
+                    let child = children.entry(name).or_default();
+                    if components.peek().is_none() {
+                        if let Node::File(existing) = child {
+                            return Err(miette!(
+                                "collision at `{}` between `{}` and `{}`",
+                                target.display(),
+                                existing.display(),
+                                source.display()
+                            ));
+                        }
+                        if matches!(child, Node::Dir(children) if children.is_empty()) {
+                            *child = Node::File(source.to_path_buf());
+                            return Ok(());
+                        }
+                        let descendant = consumed.join(child.first_file_path());
+                        return Err(miette!(
+                            "structural conflict between `{}` and `{}`",
+                            target.display(),
+                            descendant.display()
+                        ));
+                    }
+                    node = child;
+                }
+            }
+        }
+        unreachable!("validated targets are non-empty relative paths")
     }
 
-    #[test]
-    fn ignores_then_reincludes_entries() {
-        let dir = tempdir().unwrap();
-        let source = dir.path().join("source");
-        fs::create_dir_all(source.join("x")).unwrap();
-        fs::write(source.join("x/a"), "a").unwrap();
-        fs::write(source.join("dotrift.toml"), "[portal]\n\"x/**\" = \".\"").unwrap();
-        fs::write(source.join(".dotriftignore"), "a\n!a\n").unwrap();
-        assert_eq!(
-            read(&source, Some(&dir.path().join("target")))
-                .unwrap()
-                .entries
-                .len(),
-            1
-        );
+    fn first_file_path(&self) -> PathBuf {
+        match self {
+            Node::File(_) => PathBuf::new(),
+            Node::Dir(children) => {
+                let (name, child) = children.iter().next().expect("dir node has children");
+                PathBuf::from(name).join(child.first_file_path())
+            }
+        }
     }
+}
 
-    #[test]
-    fn implicitly_ignores_control_files() {
-        let dir = tempdir().unwrap();
-        let source = dir.path().join("source");
-        fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("dotrift.toml"), "[portal]\n\"**\" = \".\"").unwrap();
-        fs::write(source.join("dotrift_data.toml"), "").unwrap();
-        fs::write(source.join(".dotriftignore"), "").unwrap();
-        fs::write(source.join("file"), "content").unwrap();
-        let result = read(&source, Some(&dir.path().join("target"))).unwrap();
-        assert_eq!(result.entries.len(), 1);
-        assert!(result.entries[0].target_path.ends_with("file"));
+fn compile_rules(
+    rules: &indexmap::IndexMap<String, RuleConfig>,
+) -> Result<indexmap::IndexMap<Pattern, RuleConfig>> {
+    let mut compiled = indexmap::IndexMap::with_capacity(rules.len());
+    for (pattern, rule) in rules {
+        validate_relative(pattern, "rule")?;
+        let pattern = Pattern::new(pattern.strip_prefix("./").unwrap_or(pattern))
+            .map_err(|error| miette!("invalid rule pattern `{pattern}` because {error}"))?;
+        compiled.insert(pattern, rule.clone());
     }
+    Ok(compiled)
+}
 
-    #[test]
-    fn rejects_collisions_before_rules() {
-        let dir = tempdir().unwrap();
-        let source = dir.path().join("source");
-        fs::create_dir_all(source.join("one")).unwrap();
-        fs::write(source.join("one/a"), "a").unwrap();
-        fs::write(source.join("one/b"), "b").unwrap();
-        fs::write(
-            source.join("dotrift.toml"),
-            "[portal]\n\"one/a\" = \"same\"\n\"one/b\" = \"same\"",
-        )
-        .unwrap();
-        assert!(read(&source, Some(&dir.path().join("target"))).is_err());
+fn apply_rules(
+    entry: ResolvedPortal,
+    rules: &indexmap::IndexMap<Pattern, RuleConfig>,
+    target_root: &Path,
+) -> Result<DeploymentEntry> {
+    let mut deploy_type = DeployType::Symlink;
+    let mut mode = None;
+    for (pattern, rule) in rules {
+        if pattern.matches_path(&entry.target) {
+            if let Some(value) = rule.deploy_type {
+                deploy_type = value;
+            }
+            if let Some(value) = &rule.mode {
+                mode = Some(*value);
+            }
+        }
     }
+    if mode.is_some() && deploy_type == DeployType::Symlink {
+        return Err(miette!(
+            "conflicting rules for `{}`: `mode` is set but the effective `type` is `symlink`",
+            entry.target.display()
+        ));
+    }
+    Ok(DeploymentEntry {
+        source_path: entry.source,
+        target_path: target_root.join(entry.target),
+        deploy_type,
+        mode,
+    })
+}
+
+fn validate_relative(value: &str, what: &str) -> Result<()> {
+    if value.is_empty() || Path::new(value).is_absolute() {
+        return Err(miette!("invalid {what} path `{value}`"));
+    }
+    for (index, component) in Path::new(value).components().enumerate() {
+        if matches!(component, Component::CurDir | Component::ParentDir)
+            && !(index == 0 && component == Component::CurDir)
+        {
+            return Err(miette!("invalid {what} path `{value}`"));
+        }
+    }
+    Ok(())
+}
+
+fn is_deployable_file(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|meta| meta.is_file())
+}
+
+fn is_directory(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_dir())
 }

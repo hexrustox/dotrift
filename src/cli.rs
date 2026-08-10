@@ -33,12 +33,6 @@ pub enum ProfileCommand {
     Show,
 }
 
-#[derive(Debug, Clone)]
-pub struct ResolvedGlobalOptions {
-    pub source: PathBuf,
-    pub target: PathBuf,
-}
-
 impl Cli {
     pub fn resolve(self) -> Result<(Option<PathBuf>, Command)> {
         let Cli {
@@ -68,11 +62,4 @@ fn default_source() -> Result<PathBuf> {
         .ok_or_else(|| miette!("both XDG_DATA_HOME and HOME are unset"))
         .wrap_err("cannot resolve source directory")?;
     Ok(source)
-}
-
-fn default_target() -> Result<PathBuf> {
-    let target = dirs::home_dir()
-        .ok_or_else(|| miette!("HOME is unset or empty"))
-        .wrap_err("cannot resolve target directory")?;
-    Ok(target)
 }
