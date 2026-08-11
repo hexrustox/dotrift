@@ -1,6 +1,7 @@
 mod common;
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 
 use common::TestEnv;
 use dotrift::commands::apply;
@@ -102,4 +103,72 @@ fn apply_does_not_traverse_a_symlink_parent() {
 
     assert!(apply::run(&source, Some(target.clone())).is_err());
     assert!(!outside.join("file").exists());
+}
+
+#[test]
+fn apply_copies_bytes_records_fingerprint_and_applies_mode() {
+    let env = TestEnv::new();
+    let source = env.path("source");
+    let target = env.path("target");
+    fs::create_dir_all(&source).expect("create source");
+    fs::write(source.join("file"), b"copy me").expect("write source");
+    fs::write(
+        source.join("dotrift.toml"),
+        "[portal]\n\"file\" = \"out\"\n[rule]\n\"out\" = { type = \"copy\", mode = \"600\" }\n",
+    )
+    .expect("write config");
+
+    apply::run(&source, Some(target.clone())).expect("apply deployment");
+
+    assert_eq!(
+        fs::read(target.join("out")).expect("read output"),
+        b"copy me"
+    );
+    assert_eq!(
+        fs::metadata(target.join("out"))
+            .expect("stat output")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    let record = env
+        .database()
+        .record(&target.join("out"))
+        .expect("read state")
+        .expect("state record");
+    assert_eq!(record.kind, Kind::File);
+    assert_eq!(record.content_hash.as_deref(), Some("e665290c3bf08e31"));
+}
+
+#[test]
+fn apply_renders_template_with_resolved_variables_before_writing() {
+    let env = TestEnv::new();
+    let source = env.path("source");
+    let target = env.path("target");
+    fs::create_dir_all(&source).expect("create source");
+    fs::write(source.join("file"), b"hello {{ name }}").expect("write source");
+    fs::write(
+        source.join("dotrift_data.toml"),
+        "[variable]\nname = \"profile\"\n",
+    )
+    .expect("write data");
+    fs::write(
+        source.join("dotrift.toml"),
+        "[portal]\n\"file\" = \"out\"\n[rule]\n\"out\" = { type = \"template\" }\n",
+    )
+    .expect("write config");
+
+    apply::run(&source, Some(target.clone())).expect("apply deployment");
+
+    assert_eq!(
+        fs::read(target.join("out")).expect("read output"),
+        b"hello profile"
+    );
+    let record = env
+        .database()
+        .record(&target.join("out"))
+        .expect("read state")
+        .expect("state record");
+    assert_eq!(record.content_hash.as_deref(), Some("4855d9d542918ce5"));
 }

@@ -1,14 +1,15 @@
 use std::fs;
-use std::os::unix::fs::symlink;
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 
-use miette::{Result, miette};
+use miette::{Result, WrapErr, miette};
 
 use crate::config::{self, DeployType};
+use crate::hash;
 use crate::managed;
 use crate::state::{Kind, StateDatabase, StateLock, StateRecord};
 
-/// Reconciles the desired symlink deployment with the target directory.
+/// Reconciles the desired deployment with the target directory.
 pub fn run(source: &Path, target_override: Option<std::path::PathBuf>) -> Result<()> {
     let _lock = StateLock::acquire()?;
     let deployment = config::read(source, target_override)?;
@@ -35,7 +36,7 @@ pub fn run(source: &Path, target_override: Option<std::path::PathBuf>) -> Result
     let mut entries = deployment.entries;
     entries.sort_by(|left, right| left.target_path.cmp(&right.target_path));
     for entry in entries {
-        deploy_entry(&database, target, &entry)?;
+        deploy_entry(&database, target, &entry, &deployment.variable_context)?;
     }
     Ok(())
 }
@@ -44,17 +45,8 @@ fn deploy_entry(
     database: &StateDatabase,
     target_root: &Path,
     entry: &config::DeploymentEntry,
+    context: &std::collections::HashMap<String, templater::value::Value>,
 ) -> Result<()> {
-    if entry.deploy_type != DeployType::Symlink {
-        return Err(miette!(
-            "deploy type `{}` is not supported by basic apply",
-            match entry.deploy_type {
-                DeployType::Copy => "copy",
-                DeployType::Template => "template",
-                DeployType::Symlink => "symlink",
-            }
-        ));
-    }
     if !fs::metadata(&entry.source_path)
         .map_err(|error| miette!(error))?
         .is_file()
@@ -102,16 +94,54 @@ fn deploy_entry(
     }
 
     create_parent_dirs(target_root, &entry.target_path)?;
-    symlink(&entry.source_path, &entry.target_path)
-        .map_err(|error| miette!(error))
-        .map_err(|error| miette!(error).wrap_err("cannot create target symlink"))?;
-    database.put(&StateRecord {
-        target_path: entry.target_path.clone(),
-        source_path: entry.source_path.clone(),
-        kind: Kind::Symlink,
-        link_target: Some(entry.source_path.clone()),
-        content_hash: None,
-    })?;
+    let record = match entry.deploy_type {
+        DeployType::Symlink => {
+            symlink(&entry.source_path, &entry.target_path)
+                .map_err(|error| miette!(error))
+                .map_err(|error| miette!(error).wrap_err("cannot create target symlink"))?;
+            StateRecord {
+                target_path: entry.target_path.clone(),
+                source_path: entry.source_path.clone(),
+                kind: Kind::Symlink,
+                link_target: Some(entry.source_path.clone()),
+                content_hash: None,
+            }
+        }
+        DeployType::Copy => {
+            let bytes = fs::read(&entry.source_path)
+                .map_err(|error| miette!(error))
+                .wrap_err("cannot read copy source")?;
+            fs::write(&entry.target_path, &bytes)
+                .map_err(|error| miette!(error))
+                .wrap_err("cannot write target file")?;
+            StateRecord {
+                target_path: entry.target_path.clone(),
+                source_path: entry.source_path.clone(),
+                kind: Kind::File,
+                link_target: None,
+                content_hash: Some(hash::hash_bytes(&bytes)),
+            }
+        }
+        DeployType::Template => {
+            let bytes = config::render_template(&entry.source_path, context)?;
+            fs::write(&entry.target_path, &bytes)
+                .map_err(|error| miette!(error))
+                .wrap_err("cannot write target file")?;
+            StateRecord {
+                target_path: entry.target_path.clone(),
+                source_path: entry.source_path.clone(),
+                kind: Kind::File,
+                link_target: None,
+                content_hash: Some(hash::hash_bytes(&bytes)),
+            }
+        }
+    };
+    database.put(&record)?;
+    if let Some(mode) = entry.mode {
+        fs::set_permissions(&entry.target_path, fs::Permissions::from_mode(mode.into()))
+            .map_err(|error| miette!(error))
+            .wrap_err("cannot apply target mode")?;
+    }
     Ok(())
 }
 

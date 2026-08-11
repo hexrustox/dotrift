@@ -15,6 +15,7 @@ use walkdir::WalkDir;
 use crate::data::DataFile;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DeployType {
     Symlink,
     Copy,
@@ -83,6 +84,7 @@ pub struct DeploymentEntry {
 pub struct DesiredDeployment {
     pub target_directory: PathBuf,
     pub entries: Vec<DeploymentEntry>,
+    pub variable_context: HashMap<String, Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,10 +185,11 @@ pub fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDe
     Ok(DesiredDeployment {
         target_directory: target,
         entries,
+        variable_context: context,
     })
 }
 
-fn render_config(path: &Path, context: &HashMap<String, Value>) -> Result<String> {
+pub(crate) fn render_template(path: &Path, context: &HashMap<String, Value>) -> Result<Vec<u8>> {
     let bytes = fs::read(path)
         .map_err(|error| miette!(error))
         .wrap_err_with(|| format!("cannot read `{}`", path.display()))?;
@@ -197,7 +200,11 @@ fn render_config(path: &Path, context: &HashMap<String, Value>) -> Result<String
         .report(result)
         .map_err(|error| miette!(error))
         .wrap_err_with(|| format!("cannot render `{}`", path.display()))?;
-    String::from_utf8(output)
+    Ok(output)
+}
+
+fn render_config(path: &Path, context: &HashMap<String, Value>) -> Result<String> {
+    String::from_utf8(render_template(path, context)?)
         .map_err(|error| miette!(error))
         .wrap_err("rendered configuration is not `UTF-8`")
 }
