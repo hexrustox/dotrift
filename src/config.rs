@@ -126,7 +126,7 @@ impl<'de> serde::Deserialize<'de> for RuleConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ResolvedPortal {
     source: PathBuf,
     target: PathBuf,
@@ -267,16 +267,34 @@ fn resolve_portals(
         }
         let key = key.strip_prefix("./").unwrap_or(key);
         let value = value.strip_prefix("./").unwrap_or(value);
-        let wildcard = contains_wildcard(key);
-        if !wildcard {
+        if !contains_wildcard(key) {
             let path = source.join(key);
             if !path.exists() && fs::symlink_metadata(&path).is_err() {
                 return Err(miette!("literal portal source `{key}` does not exist"));
             }
-            add_source(&mut result, &path, Path::new(value))?;
+            if push_deployable(&mut result, &path, Path::new(value)).is_ok() {
+                continue;
+            } else if is_directory(&path) {
+                for item in WalkDir::new(&path).follow_links(false) {
+                    let item = item.map_err(|error| miette!(error))?;
+                    if item.path() == path || is_directory(item.path()) {
+                        continue;
+                    }
+                    let relative = item.path().strip_prefix(&path).expect("descendant");
+                    push_deployable(&mut result, item.path(), &Path::new(value).join(relative))?;
+                }
+            } else {
+                return Err(miette!(
+                    "portal source `{}` is not a regular file, symlink to a regular file or directory",
+                    path.display()
+                ));
+            }
             continue;
         }
+
         let strip = stripping_prefix(key);
+        let pattern = Pattern::new(key)
+            .map_err(|error| miette!("invalid portal pattern `{key}` because {error}"))?;
         for item in WalkDir::new(source).follow_links(false) {
             let item = item.map_err(|error| miette!(error))?;
             let path = item.path();
@@ -286,58 +304,27 @@ fn resolve_portals(
             let relative = path
                 .strip_prefix(source)
                 .expect("walkdir path below source");
-            let pattern = Pattern::new(key)
-                .map_err(|error| miette!("invalid portal pattern `{key}` because {error}"))?;
             if pattern.matches_path(relative) {
-                if !is_deployable_file(path) {
-                    return Err(miette!(
-                        "source path `{}` is not a regular file or symlink to a regular file",
-                        relative.display()
-                    ));
-                }
                 let remainder = relative.strip_prefix(&strip).unwrap_or(relative);
-                result.push(ResolvedPortal {
-                    source: path.to_path_buf(),
-                    target: PathBuf::from(value).join(remainder),
-                });
+                push_deployable(&mut result, path, &PathBuf::from(value).join(remainder))?;
             }
         }
     }
     Ok(result)
 }
 
-fn add_source(result: &mut Vec<ResolvedPortal>, source: &Path, target: &Path) -> Result<()> {
-    if is_deployable_file(source) {
-        result.push(ResolvedPortal {
-            source: source.to_path_buf(),
-            target: target.to_path_buf(),
-        });
-        return Ok(());
+fn push_deployable(result: &mut Vec<ResolvedPortal>, source: &Path, target: &Path) -> Result<()> {
+    if !fs::metadata(source).is_ok_and(|meta| meta.is_file()) {
+        return Err(miette!(
+            "source path `{}` is not a regular file or symlink to a regular file",
+            source.display()
+        ));
     }
-    if is_directory(source) {
-        for item in WalkDir::new(source).follow_links(false) {
-            let item = item.map_err(|error| miette!(error))?;
-            if item.path() == source || is_directory(item.path()) {
-                continue;
-            }
-            if !is_deployable_file(item.path()) {
-                return Err(miette!(
-                    "source path `{}` is not a regular file or symlink to a regular file",
-                    item.path().display()
-                ));
-            }
-            let relative = item.path().strip_prefix(source).expect("descendant");
-            result.push(ResolvedPortal {
-                source: item.path().to_path_buf(),
-                target: target.join(relative),
-            });
-        }
-        return Ok(());
-    }
-    Err(miette!(
-        "portal source `{}` is not a regular file or directory",
-        source.display()
-    ))
+    result.push(ResolvedPortal {
+        source: source.to_path_buf(),
+        target: target.to_path_buf(),
+    });
+    Ok(())
 }
 
 fn contains_wildcard(value: &str) -> bool {
@@ -491,10 +478,347 @@ fn validate_relative(value: &str, what: &str) -> Result<()> {
     Ok(())
 }
 
-fn is_deployable_file(path: &Path) -> bool {
-    fs::metadata(path).is_ok_and(|meta| meta.is_file())
-}
-
 fn is_directory(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_dir())
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+    use test_case::test_case;
+
+    use super::*;
+
+    macro_rules! portals {
+        ($($key:expr => $value:expr),* $(,)?) => {
+            BTreeMap::from([$(($key.to_string(), $value.to_string())),*])
+        };
+    }
+
+    macro_rules! resolve {
+        ($source:expr, $target:expr) => {
+            ResolvedPortal {
+                source: PathBuf::from($source),
+                target: PathBuf::from($target),
+            }
+        };
+    }
+
+    macro_rules! rules {
+        ($($pattern:expr => $rule:expr),* $(,)?) => {
+            indexmap::IndexMap::from([$(($pattern.to_string(), $rule)),*])
+        };
+    }
+
+    macro_rules! rule {
+        ($type:expr, $mode:expr) => {
+            RuleConfig {
+                deploy_type: $type,
+                mode: $mode,
+            }
+        };
+    }
+
+    macro_rules! deploy {
+        ($source:expr, $target:expr, $type:expr, $mode:expr) => {
+            DeploymentEntry {
+                source_path: PathBuf::from($source),
+                target_path: PathBuf::from($target),
+                deploy_type: $type,
+                mode: $mode,
+            }
+        };
+    }
+
+    fn mode(octal: &str) -> DeployMode {
+        DeployMode::try_from(octal.to_string()).expect("valid octal mode")
+    }
+
+    #[test_case(
+        |t| fs::write(t.join("file.txt"), "hello").unwrap(),
+        portals! { "file.txt" => "out.txt" } => vec![resolve!("file.txt", "out.txt")];
+        "literal_file_portal"
+    )]
+    #[test_case(
+        |t| fs::write(t.join("file.txt"), "hello").unwrap(),
+        portals! { "./file.txt" => "./out.txt" } => vec![resolve!("file.txt", "out.txt")];
+        "literal_file_dot_prefix"
+    )]
+    #[test_case(
+        |t| {
+            fs::write(t.join("file.txt"), "").unwrap();
+            std::os::unix::fs::symlink(t.join("file.txt"), t.join("link")).unwrap();
+        },
+        portals! { "link" => "out" } => vec![resolve!("link", "out")];
+        "literal_symlink_to_file"
+    )]
+    #[test_case(
+        |t| fs::create_dir(t.join("empty")).unwrap(),
+        portals! { "empty" => "dst" } => Vec::<ResolvedPortal>::new();
+        "literal_empty_directory"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("dir/sub")).unwrap();
+            fs::write(t.join("dir/a.txt"), "").unwrap();
+            fs::write(t.join("dir/sub/b.txt"), "").unwrap();
+        },
+        portals! { "dir" => "dst" } => vec![
+            resolve!("dir/a.txt", "dst/a.txt"),
+            resolve!("dir/sub/b.txt", "dst/sub/b.txt")
+        ];
+        "literal_directory_recurses"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("dir")).unwrap();
+            fs::write(t.join("a.txt"), "").unwrap();
+        },
+        portals! { "*" => "dst" } => vec![resolve!("a.txt", "dst/a.txt")];
+        "wildcard_skips_directories"
+    )]
+    #[test_case(
+        |t| {
+            fs::write(t.join("a.txt"), "").unwrap();
+            fs::write(t.join("b.txt"), "").unwrap();
+            fs::write(t.join("other.md"), "").unwrap();
+        },
+        portals! { "*.txt" => "dst" } => vec![
+            resolve!("a.txt", "dst/a.txt"),
+            resolve!("b.txt", "dst/b.txt")
+        ];
+        "wildcard_top_level_files"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("configs/sub")).unwrap();
+            fs::write(t.join("configs/a.txt"), "").unwrap();
+            fs::write(t.join("configs/sub/b.txt"), "").unwrap();
+        },
+        portals! { "configs/**" => "dst" } => vec![
+            resolve!("configs/a.txt", "dst/a.txt"),
+            resolve!("configs/sub/b.txt", "dst/sub/b.txt")
+        ];
+        "wildcard_prefix_stripped"
+    )]
+    #[test_case(
+        |_| {},
+        portals! { "/abs" => "dst" } => panics "invalid portal source path `/abs`";
+        "absolute_source_rejected"
+    )]
+    #[test_case(
+        |t| fs::write(t.join("file.txt"), "hello").unwrap(),
+        portals! { "file.txt" => "/abs" } => panics "invalid portal target path `/abs`";
+        "absolute_target_rejected"
+    )]
+    #[test_case(
+        |_| {},
+        portals! { "../x" => "dst" } => panics "invalid portal source path `../x`";
+        "parent_component_in_source_rejected"
+    )]
+    #[test_case(
+        |t| fs::write(t.join("file.txt"), "hello").unwrap(),
+        portals! { "file.txt" => "../dst" } => panics "invalid portal target path `../dst`";
+        "parent_component_in_target_rejected"
+    )]
+    #[test_case(
+        |_| {},
+        portals! { "" => "dst" } => panics "invalid portal source path";
+        "empty_source_rejected"
+    )]
+    #[test_case(
+        |t| fs::write(t.join("file.txt"), "hello").unwrap(),
+        portals! { "file.txt" => "" } => panics "invalid portal target path";
+        "empty_target_rejected"
+    )]
+    #[test_case(
+        |_| {},
+        portals! { "missing" => "dst" } => panics "literal portal source `missing` does not exist";
+        "literal_source_missing"
+    )]
+    #[test_case(
+        |t| {
+            std::os::unix::fs::symlink(t.join("missing"), t.join("dangling")).unwrap();
+        },
+        portals! { "dangling" => "dst" } => panics "is not a regular file, symlink to a regular file or directory";
+        "broken_symlink_source_rejected"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("dir")).unwrap();
+            std::os::unix::fs::symlink(t.join("missing"), t.join("dir/dangling")).unwrap();
+        },
+        portals! { "dir" => "dst" } => panics "is not a regular file or symlink to a regular file";
+        "directory_containing_broken_symlink_rejected"
+    )]
+    #[test_case(
+        |_| {},
+        portals! { "[" => "dst" } => panics "invalid portal pattern `[`";
+        "invalid_portal_pattern"
+    )]
+    #[test_case(
+        |t| fs::write(t.join("file.txt"), "hello").unwrap(),
+        portals! { "file.txt" => "*.txt" } => panics "portal target `*.txt` cannot contain glob syntax";
+        "target_with_glob_rejected"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("real")).unwrap();
+            std::os::unix::fs::symlink(t.join("real"), t.join("dirlink")).unwrap();
+        },
+        portals! { "*" => "dst" } => panics "is not a regular file or symlink to a regular file";
+        "wildcard_matching_symlink_to_dir_rejected"
+    )]
+    #[test_case(
+        |t| std::os::unix::fs::symlink(t.join("missing"), t.join("dangling")).unwrap(),
+        portals! { "*" => "dst" } => panics "is not a regular file or symlink to a regular file";
+        "wildcard_matching_broken_symlink_rejected"
+    )]
+    fn resolve_portals_test<F: Fn(&Path)>(
+        setup: F,
+        portals: BTreeMap<String, String>,
+    ) -> Vec<ResolvedPortal> {
+        let tmp = tempdir().expect("cannot create temp dir");
+        setup(tmp.path());
+        let mut result = resolve_portals(tmp.path(), &portals).unwrap_or_else(|e| panic!("{e}"));
+        result.sort_by(|a, b| (&a.source, &a.target).cmp(&(&b.source, &b.target)));
+        for entry in &mut result {
+            entry.source = entry
+                .source
+                .strip_prefix(tmp.path())
+                .expect("source below temp dir")
+                .to_path_buf();
+        }
+        result
+    }
+
+    #[test_case(vec![] => (); "empty")]
+    #[test_case(
+        vec![resolve!("s1.txt", "dst.txt")] => ();
+        "single_file"
+    )]
+    #[test_case(
+        vec![resolve!("s1", "a"), resolve!("s2", "b"), resolve!("s3", "c")] => ();
+        "distinct_files"
+    )]
+    #[test_case(
+        vec![resolve!("s1", "a/b"), resolve!("s2", "a/c"), resolve!("s3", "d/e/f")] => ();
+        "nested_distinct_paths"
+    )]
+    #[test_case(
+        vec![resolve!("s1", "a"), resolve!("s2", "a")] => panics "collision at `a` between `s1` and `s2`";
+        "duplicate_target_collision"
+    )]
+    #[test_case(
+        vec![resolve!("s1", "a/x"), resolve!("s2", "a/x")] => panics "collision at `a/x` between `s1` and `s2`";
+        "duplicate_nested_target_collision"
+    )]
+    #[test_case(
+        vec![resolve!("s1", "a"), resolve!("s2", "a/b")] => panics "structural conflict between `a` and `a/b`";
+        "file_then_descendant_conflict"
+    )]
+    #[test_case(
+        vec![resolve!("s1", "a/b"), resolve!("s2", "a/b/c")] => panics "structural conflict between `a/b` and `a/b/c`";
+        "deep_file_then_descendant_conflict"
+    )]
+    #[test_case(
+        vec![resolve!("s1", "a/b"), resolve!("s2", "a")] => panics "structural conflict between `a` and `a/b/`";
+        "descendant_then_file_conflict"
+    )]
+    #[test_case(
+        vec![resolve!("s1", "a/b/c"), resolve!("s2", "a/b")] => panics "structural conflict between `a/b` and `a/b/c/`";
+        "deep_descendant_then_file_conflict"
+    )]
+    fn validate_targets_test(entries: Vec<ResolvedPortal>) {
+        validate_targets(&entries).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    #[test_case(
+        resolve!("a.txt", "a.txt"),
+        rules! {} => deploy!("a.txt", "/a.txt", DeployType::Symlink, None);
+        "no_rules_default_symlink"
+    )]
+    #[test_case(
+        resolve!("a.txt", "a.txt"),
+        rules! { "*.md" => rule!(Some(DeployType::Copy), None) } => deploy!("a.txt", "/a.txt", DeployType::Symlink, None);
+        "rule_does_not_match"
+    )]
+    #[test_case(
+        resolve!("a.txt", "a.txt"),
+        rules! { "*.txt" => rule!(Some(DeployType::Copy), None) } => deploy!("a.txt", "/a.txt", DeployType::Copy, None);
+        "copy_rule_applies"
+    )]
+    #[test_case(
+        resolve!("a.toml", "a.toml"),
+        rules! { "*.toml" => rule!(Some(DeployType::Template), None) } => deploy!("a.toml", "/a.toml", DeployType::Template, None);
+        "template_rule_applies"
+    )]
+    #[test_case(
+        resolve!("a.txt", "a.txt"),
+        rules! { "./*.txt" => rule!(Some(DeployType::Copy), None) } => deploy!("a.txt", "/a.txt", DeployType::Copy, None);
+        "dot_prefix_rule_pattern"
+    )]
+    #[test_case(
+        resolve!("src", "configs/sub/file"),
+        rules! { "configs/**" => rule!(Some(DeployType::Copy), None) } => deploy!("src", "/configs/sub/file", DeployType::Copy, None);
+        "nested_glob_matches"
+    )]
+    #[test_case(
+        resolve!("a.sh", "a.sh"),
+        rules! { "*.sh" => rule!(Some(DeployType::Copy), Some(mode("755"))) } => deploy!("a.sh", "/a.sh", DeployType::Copy, Some(mode("755")));
+        "mode_with_copy"
+    )]
+    #[test_case(
+        resolve!("a.txt", "a.txt"),
+        rules! {
+            "*.txt" => rule!(Some(DeployType::Copy), None),
+            "a.*" => rule!(Some(DeployType::Template), None)
+        } => deploy!("a.txt", "/a.txt", DeployType::Template, None);
+        "last_matching_rule_wins"
+    )]
+    #[test_case(
+        resolve!("a.txt", "a.txt"),
+        rules! {
+            "*.txt" => rule!(Some(DeployType::Copy), None),
+            "a.txt" => rule!(None, Some(mode("644")))
+        } => deploy!("a.txt", "/a.txt", DeployType::Copy, Some(mode("644")));
+        "fields_merge_across_rules"
+    )]
+    #[test_case(
+        resolve!("a.txt", "a.txt"),
+        rules! { "/abs" => rule!(None, None) } => panics "invalid rule path `/abs`";
+        "absolute_rule_pattern_rejected"
+    )]
+    #[test_case(
+        resolve!("a.txt", "a.txt"),
+        rules! { ".." => rule!(None, None) } => panics "invalid rule path `..`";
+        "parent_rule_pattern_rejected"
+    )]
+    #[test_case(
+        resolve!("a.txt", "a.txt"),
+        rules! { "" => rule!(None, None) } => panics "invalid rule path";
+        "empty_rule_pattern_rejected"
+    )]
+    #[test_case(
+        resolve!("a.txt", "a.txt"),
+        rules! { "[" => rule!(None, None) } => panics "invalid rule pattern `[`";
+        "invalid_glob_pattern_rejected"
+    )]
+    #[test_case(
+        resolve!("a.txt", "a.txt"),
+        rules! { "*.txt" => rule!(None, Some(mode("755"))) } => panics "conflicting rules for `a.txt`: `mode` is set but the effective `type` is `symlink`";
+        "mode_conflicts_with_default_symlink"
+    )]
+    #[test_case(
+        resolve!("a.txt", "a.txt"),
+        rules! { "*.txt" => rule!(Some(DeployType::Symlink), Some(mode("755"))) } => panics "conflicting rules for `a.txt`: `mode` is set but the effective `type` is `symlink`";
+        "mode_conflicts_with_explicit_symlink"
+    )]
+    fn apply_rules_test(
+        entry: ResolvedPortal,
+        rules: indexmap::IndexMap<String, RuleConfig>,
+    ) -> DeploymentEntry {
+        let compiled = compile_rules(&rules).unwrap_or_else(|e| panic!("{e}"));
+        apply_rules(entry, &compiled, Path::new("/")).unwrap_or_else(|e| panic!("{e}"))
+    }
 }
