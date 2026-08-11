@@ -199,23 +199,6 @@ impl StateDatabase {
         Ok(())
     }
 
-    pub fn contains(&self, target_path: &Path) -> Result<bool> {
-        let found = self
-            .connection
-            .query_row(
-                "SELECT 1 FROM managed_paths WHERE target_path = ?1",
-                [target_path.to_string_lossy()],
-                |_| Ok(()),
-            )
-            .optional()
-            .map(|value| value.is_some())
-            .map_err(|error| miette!(error))
-            .wrap_err_with(|| {
-                format!("cannot check state record for `{}`", target_path.display())
-            })?;
-        Ok(found)
-    }
-
     /// Returns the state record for an absolute target path, if one exists.
     pub fn record(&self, target_path: &Path) -> Result<Option<StateRecord>> {
         let record = self
@@ -420,20 +403,182 @@ mod tests {
         );
     }
 
-    #[test]
-    fn contains_reports_stored_and_unknown() {
+    #[test_case(
+        StateRecord {
+            target_path: PathBuf::from("/home/user/x"),
+            source_path: PathBuf::from("dotfiles/x"),
+            kind: Kind::File,
+            link_target: Some(PathBuf::from("/some/link")),
+            content_hash: None,
+        };
+        "file with link_target"
+    )]
+    #[test_case(
+        StateRecord {
+            target_path: PathBuf::from("/home/user/y"),
+            source_path: PathBuf::from("dotfiles/y"),
+            kind: Kind::Symlink,
+            link_target: None,
+            content_hash: Some("abc".into()),
+        };
+        "symlink with content_hash"
+    )]
+    fn put_rejects_records_violating_schema(record: StateRecord) {
         let (_dir, database) = database();
-        let record = crate::record!(f, "/home/user/.gitconfig", "dotfiles/git/config", "abc123");
+        assert!(database.put(&record).is_err());
+    }
+
+    #[test]
+    fn managed_paths_returns_all_records() {
+        let (_dir, database) = database();
+        let first = crate::record!(f, "/home/user/.gitconfig", "dotfiles/git/config", "abc123");
+        let second = crate::record!(
+            s,
+            "/home/user/.bashrc",
+            "dotfiles/bash/bashrc",
+            "/home/user/.config/bashrc"
+        );
+        database.put(&first).expect("cannot store first record");
+        database.put(&second).expect("cannot store second record");
+        let mut records = database.managed_paths().expect("cannot read records");
+        let mut expected = vec![first, second];
+        records.sort_by(|left, right| left.target_path.cmp(&right.target_path));
+        expected.sort_by(|left, right| left.target_path.cmp(&right.target_path));
+        assert_eq!(records, expected);
+    }
+
+    #[test_case(crate::record!(f, "/home/user/.gitconfig", "dotfiles/git/config", "abc123"); "file")]
+    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc", "/home/user/.config/bashrc"); "symlink")]
+    fn record_returns_stored_record(record: StateRecord) {
+        let (_dir, database) = database();
         database.put(&record).expect("cannot store record");
+        assert_eq!(
+            database
+                .record(&record.target_path)
+                .expect("cannot read record"),
+            Some(record)
+        );
+    }
+
+    #[test]
+    fn record_returns_none_for_unknown_path() {
+        let (_dir, database) = database();
+        assert_eq!(
+            database
+                .record(Path::new("/home/user/.nonexistent"))
+                .expect("cannot read record"),
+            None
+        );
+    }
+
+    #[test]
+    fn record_rejects_unknown_kind_in_database() {
+        let (_dir, database) = database();
+        database
+            .connection
+            .execute_batch(
+                "DROP TABLE managed_paths;
+                 CREATE TABLE managed_paths (
+                     target_path TEXT PRIMARY KEY,
+                     source_path TEXT NOT NULL,
+                     kind TEXT NOT NULL,
+                     link_target TEXT,
+                     content_hash TEXT
+                 );
+                 INSERT INTO managed_paths VALUES
+                     ('/home/user/.gitconfig', 'dotfiles/git/config', 'link', NULL, 'abc123');",
+            )
+            .expect("cannot seed corrupt record");
+        assert!(database.record(Path::new("/home/user/.gitconfig")).is_err());
+    }
+
+    #[test_case(crate::record!(f, "/home/user/.gitconfig", "dotfiles/git/config", "abc123"); "file")]
+    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc", "/home/user/.config/bashrc"); "symlink")]
+    fn remove_deletes_record(record: StateRecord) {
+        let (_dir, database) = database();
+        database.put(&record).expect("cannot store record");
+        database
+            .remove(&record.target_path)
+            .expect("cannot remove record");
+        assert_eq!(
+            database.managed_paths().expect("cannot read records"),
+            vec![]
+        );
+    }
+
+    #[test]
+    fn remove_is_idempotent_for_unknown_path() {
+        let (_dir, database) = database();
+        database
+            .remove(Path::new("/home/user/.nonexistent"))
+            .expect("cannot remove absent record");
+    }
+
+    #[test]
+    fn active_profiles_starts_empty() {
+        let (_dir, database) = database();
+        assert_eq!(
+            database.active_profiles().expect("cannot read profiles"),
+            vec![]
+        );
+    }
+
+    #[test]
+    fn active_profiles_reports_activation_order() {
+        let (_dir, database) = database();
+        database
+            .activate_profile("editor")
+            .expect("cannot activate profile");
+        database
+            .activate_profile("shell")
+            .expect("cannot activate profile");
+        database
+            .activate_profile("editor")
+            .expect("cannot reactivate profile");
+        let profiles = database.active_profiles().expect("cannot read profiles");
+        assert_eq!(
+            profiles
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["shell", "editor"]
+        );
+    }
+
+    #[test]
+    fn activate_profile_replaces_existing_row() {
+        let (_dir, database) = database();
+        database
+            .activate_profile("editor")
+            .expect("cannot activate profile");
+        database
+            .activate_profile("editor")
+            .expect("cannot reactivate profile");
+        let profiles = database.active_profiles().expect("cannot read profiles");
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].0, "editor");
+    }
+
+    #[test]
+    fn deactivate_profile_returns_true_when_active() {
+        let (_dir, database) = database();
+        database
+            .activate_profile("editor")
+            .expect("cannot activate profile");
         assert!(
             database
-                .contains(&record.target_path)
-                .expect("cannot check stored path")
+                .deactivate_profile("editor")
+                .expect("cannot deactivate profile")
         );
+    }
+
+    #[test]
+    fn deactivate_profile_returns_false_when_absent() {
+        let (_dir, database) = database();
         assert!(
             !database
-                .contains(Path::new("/home/user/.bashrc"))
-                .expect("cannot check unknown path")
+                .deactivate_profile("editor")
+                .expect("cannot deactivate profile")
         );
     }
 

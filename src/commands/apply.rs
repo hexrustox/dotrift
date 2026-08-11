@@ -28,7 +28,6 @@ pub fn run(source: &Path, target_override: Option<std::path::PathBuf>) -> Result
     }
     if !target.exists() {
         fs::create_dir_all(target)
-            .map_err(|error| miette!(error))
             .map_err(|error| miette!(error).wrap_err("cannot create target directory"))?;
     }
 
