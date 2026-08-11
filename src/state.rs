@@ -216,6 +216,58 @@ impl StateDatabase {
         Ok(found)
     }
 
+    /// Returns the state record for an absolute target path, if one exists.
+    pub fn record(&self, target_path: &Path) -> Result<Option<StateRecord>> {
+        let record = self
+            .connection
+            .query_row(
+                "SELECT target_path, source_path, kind, link_target, content_hash
+                 FROM managed_paths WHERE target_path = ?1",
+                [target_path.to_string_lossy()],
+                |row| {
+                    Ok((
+                        PathBuf::from(row.get::<_, String>(0)?),
+                        PathBuf::from(row.get::<_, String>(1)?),
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?.map(PathBuf::from),
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| {
+                format!("cannot read state record for `{}`", target_path.display())
+            })?;
+        record
+            .map(
+                |(target_path, source_path, kind, link_target, content_hash)| {
+                    Ok(StateRecord {
+                        target_path,
+                        source_path,
+                        kind: Kind::parse(&kind)?,
+                        link_target,
+                        content_hash,
+                    })
+                },
+            )
+            .transpose()
+    }
+
+    /// Removes the state record for a target path, if present.
+    pub fn remove(&self, target_path: &Path) -> Result<()> {
+        self.connection
+            .execute(
+                "DELETE FROM managed_paths WHERE target_path = ?1",
+                [target_path.to_string_lossy()],
+            )
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| {
+                format!("cannot remove state record for `{}`", target_path.display())
+            })?;
+        Ok(())
+    }
+
     pub fn active_profiles(&self) -> Result<Vec<(String, i64)>> {
         let mut statement = self
             .connection

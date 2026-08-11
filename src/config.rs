@@ -64,7 +64,7 @@ impl TryFrom<u32> for DeployMode {
     type Error = miette::Report;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
-        if (0..=0o777).contains(&value) {
+        if value > 0o777 {
             return Err(miette!("invalid mode `{value:o}`"));
         }
         Ok(Self(value))
@@ -214,9 +214,11 @@ fn read_ignore(source: &Path) -> Result<Gitignore> {
         .add_line(None, "/.dotriftignore")
         .map_err(|error| miette!(error))?;
     let path = source.join(".dotriftignore");
-    match builder.add(path) {
-        None => {}
-        Some(error) => return Err(miette!(error)),
+    if path.exists() {
+        match builder.add(path) {
+            None => {}
+            Some(error) => return Err(miette!(error)),
+        }
     }
     builder.build().map_err(|error| miette!(error))
 }

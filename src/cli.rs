@@ -18,6 +18,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    Apply,
     Status,
     Profile {
         #[command(subcommand)]
@@ -34,9 +35,11 @@ pub enum ProfileCommand {
 }
 
 impl Cli {
-    pub fn resolve(self) -> Result<(Option<PathBuf>, Command)> {
+    pub fn resolve(self) -> Result<(Option<PathBuf>, Option<PathBuf>, Command)> {
         let Cli {
-            command, source, ..
+            command,
+            source,
+            target,
         } = self;
         let source = if matches!(
             &command,
@@ -52,7 +55,8 @@ impl Cli {
                 None => ensure_absolute(&default_source()?)?,
             })
         };
-        Ok((source, command))
+        let target = target.map(|path| ensure_absolute(&path)).transpose()?;
+        Ok((source, target, command))
     }
 }
 
