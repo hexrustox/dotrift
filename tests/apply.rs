@@ -85,6 +85,57 @@ fn apply_replaces_a_clean_managed_symlink() {
 }
 
 #[test]
+fn apply_skips_an_unmanaged_obstruction_and_keeps_it_unmodified() {
+    let env = TestEnv::new();
+    let source = env.path("source");
+    let target = env.path("target");
+    fs::create_dir_all(&source).expect("create source");
+    fs::write(source.join("file"), b"desired").expect("write source");
+    fs::write(
+        source.join("dotrift.toml"),
+        "[portal]\n\"file\" = \"out\"\n",
+    )
+    .expect("write config");
+    fs::create_dir_all(&target).expect("create target");
+    fs::write(target.join("out"), b"keep me").expect("write obstruction");
+
+    assert!(apply::run(&source, Some(target.clone())).is_err());
+    assert_eq!(
+        fs::read(target.join("out")).expect("read obstruction"),
+        b"keep me"
+    );
+    assert!(
+        env.database()
+            .record(&target.join("out"))
+            .expect("read state")
+            .is_none()
+    );
+}
+
+#[test]
+fn apply_skipping_a_parent_obstruction_does_not_create_earlier_parents() {
+    let env = TestEnv::new();
+    let source = env.path("source");
+    let target = env.path("target");
+    fs::create_dir_all(&source).expect("create source");
+    fs::write(source.join("file"), b"desired").expect("write source");
+    fs::write(
+        source.join("dotrift.toml"),
+        "[portal]\n\"file\" = \"new/blocked/out\"\n",
+    )
+    .expect("write config");
+    fs::create_dir_all(target.join("new")).expect("create parent");
+    fs::write(target.join("new/blocked"), b"keep me").expect("write obstruction");
+
+    assert!(apply::run(&source, Some(target.clone())).is_err());
+    assert!(!target.join("new/blocked/out").exists());
+    assert_eq!(
+        fs::read(target.join("new/blocked")).expect("read obstruction"),
+        b"keep me"
+    );
+}
+
+#[test]
 fn apply_does_not_traverse_a_symlink_parent() {
     let env = TestEnv::new();
     let source = env.path("source");

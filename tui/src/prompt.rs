@@ -11,7 +11,36 @@ use crossterm::{
     style::{Attribute, Color, SetAttribute, Stylize},
     terminal::{self, ClearType},
 };
-use strum::IntoEnumIterator;
+use strum::{EnumIter, IntoEnumIterator};
+
+/// Choices used when an existing target blocks deployment.
+#[derive(Clone, Copy, Debug, Eq, EnumIter, PartialEq)]
+pub enum ObstructionChoice {
+    Skip,
+    ViewDetail,
+    Replace,
+    ReplaceAll,
+}
+
+impl PromptOption for ObstructionChoice {
+    fn label(&self) -> Option<&str> {
+        Some(match self {
+            Self::Skip => "skip",
+            Self::ViewDetail => "view detail",
+            Self::Replace => "replace",
+            Self::ReplaceAll => "replace all",
+        })
+    }
+
+    fn hotkey(&self) -> Option<char> {
+        Some(match self {
+            Self::Skip => 's',
+            Self::ViewDetail => 'v',
+            Self::Replace => 'r',
+            Self::ReplaceAll => 'a',
+        })
+    }
+}
 
 /// Optional per-variant presentation overrides for [`SelectPrompt`].
 pub trait PromptOption {
@@ -86,6 +115,7 @@ struct OptionEntry<E> {
 pub struct SelectPrompt<E> {
     question: String,
     default: Option<E>,
+    options: Option<Vec<E>>,
     style: PromptStyle,
 }
 
@@ -95,6 +125,7 @@ impl<E> SelectPrompt<E> {
         Self {
             question: String::new(),
             default: None,
+            options: None,
             style: PromptStyle::default(),
         }
     }
@@ -108,6 +139,12 @@ impl<E> SelectPrompt<E> {
     /// Sets the option initially selected by the prompt.
     pub fn default(mut self, value: E) -> Self {
         self.default = Some(value);
+        self
+    }
+
+    /// Restricts the prompt to the supplied options, preserving their order.
+    pub fn options(mut self, options: impl Into<Vec<E>>) -> Self {
+        self.options = Some(options.into());
         self
     }
 
@@ -130,7 +167,9 @@ where
 {
     /// Runs the prompt and returns the confirmed enum variant.
     pub fn interact(self) -> Result<E, PromptError> {
-        let options = make_options::<E>()?;
+        let options = self
+            .options
+            .map_or_else(make_options::<E>, make_options_from_values)?;
         let selected = self
             .default
             .as_ref()
@@ -235,7 +274,13 @@ fn make_options<E>() -> Result<Vec<OptionEntry<E>>, PromptError>
 where
     E: Clone + Debug + IntoEnumIterator + PromptOption,
 {
-    let variants: Vec<E> = E::iter().collect();
+    make_options_from_values(E::iter().collect())
+}
+
+fn make_options_from_values<E>(variants: Vec<E>) -> Result<Vec<OptionEntry<E>>, PromptError>
+where
+    E: Clone + Debug + PromptOption,
+{
     if variants.is_empty() {
         return Err(PromptError::EmptyOptions);
     }
