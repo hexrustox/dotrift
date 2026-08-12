@@ -15,7 +15,7 @@ impl PromptOption for Fruits {}
 
 fn main() {
     match SelectPrompt::new()
-        .question("what to eat")
+        .question("what to eat?")
         .default(Fruits::Apple)
         .style(PromptStyle {
             question: Color::Cyan,

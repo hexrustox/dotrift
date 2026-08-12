@@ -9,7 +9,7 @@ use glob::Pattern;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use miette::{Result, WrapErr, miette};
 use serde::Deserialize;
-use templater::{Template, function::FunctionRegistry, value::Value};
+use templater::value::Value;
 use walkdir::WalkDir;
 
 use crate::data::DataFile;
@@ -134,18 +134,6 @@ struct ResolvedPortal {
     target: PathBuf,
 }
 
-// TODO
-struct NoFunctions;
-impl FunctionRegistry for NoFunctions {
-    fn call(
-        &self,
-        name: &str,
-        _: &[Value],
-    ) -> std::result::Result<Value, templater::error::RegistryError> {
-        Err(templater::error::RegistryError::Undefined { name: name.into() })
-    }
-}
-
 pub fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDeployment> {
     if !source.is_dir() {
         return Err(miette!(
@@ -189,22 +177,8 @@ pub fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDe
     })
 }
 
-pub(crate) fn render_template(path: &Path, context: &HashMap<String, Value>) -> Result<Vec<u8>> {
-    let bytes = fs::read(path)
-        .map_err(|error| miette!(error))
-        .wrap_err_with(|| format!("cannot read `{}`", path.display()))?;
-    let template = Template::from_bytes(bytes);
-    let mut output = Vec::new();
-    let result = template.render(&mut output, context, &NoFunctions);
-    template
-        .report(result)
-        .map_err(|error| miette!(error))
-        .wrap_err_with(|| format!("cannot render `{}`", path.display()))?;
-    Ok(output)
-}
-
 fn render_config(path: &Path, context: &HashMap<String, Value>) -> Result<String> {
-    String::from_utf8(render_template(path, context)?)
+    String::from_utf8(crate::template::render_template(path, context)?)
         .map_err(|error| miette!(error))
         .wrap_err("rendered configuration is not `UTF-8`")
 }

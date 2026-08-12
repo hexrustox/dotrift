@@ -11,36 +11,7 @@ use crossterm::{
     style::{Attribute, Color, SetAttribute, Stylize},
     terminal::{self, ClearType},
 };
-use strum::{EnumIter, IntoEnumIterator};
-
-/// Choices used when an existing target blocks deployment.
-#[derive(Clone, Copy, Debug, Eq, EnumIter, PartialEq)]
-pub enum ObstructionChoice {
-    Skip,
-    ViewDetail,
-    Replace,
-    ReplaceAll,
-}
-
-impl PromptOption for ObstructionChoice {
-    fn label(&self) -> Option<&str> {
-        Some(match self {
-            Self::Skip => "skip",
-            Self::ViewDetail => "view detail",
-            Self::Replace => "replace",
-            Self::ReplaceAll => "replace all",
-        })
-    }
-
-    fn hotkey(&self) -> Option<char> {
-        Some(match self {
-            Self::Skip => 's',
-            Self::ViewDetail => 'v',
-            Self::Replace => 'r',
-            Self::ReplaceAll => 'a',
-        })
-    }
-}
+use strum::IntoEnumIterator;
 
 /// Optional per-variant presentation overrides for [`SelectPrompt`].
 pub trait PromptOption {
@@ -90,19 +61,18 @@ impl Default for PromptStyle {
 }
 
 /// Errors returned by a prompt before, during, or after terminal interaction.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PromptError {
+    #[error("no options to display")]
     EmptyOptions,
+    #[error("prompt hotkey {0} is not ASCII A-Z")]
     InvalidHotkey(char),
+    #[error("prompt hotkey {0} is used by two options")]
     DuplicateHotkey(char),
+    #[error("prompt cancelled")]
     Cancelled,
-    Io(io::Error),
-}
-
-impl From<io::Error> for PromptError {
-    fn from(value: io::Error) -> Self {
-        Self::Io(value)
-    }
+    #[error("{0}")]
+    Io(#[from] io::Error),
 }
 
 struct OptionEntry<E> {
@@ -111,11 +81,13 @@ struct OptionEntry<E> {
     hotkey: char,
 }
 
+type OptionFilter<E> = Box<dyn Fn(&E) -> bool>;
+
 /// An inline, keyboard-driven enum selection prompt.
 pub struct SelectPrompt<E> {
     question: String,
     default: Option<E>,
-    options: Option<Vec<E>>,
+    filter: Option<OptionFilter<E>>,
     style: PromptStyle,
 }
 
@@ -125,7 +97,7 @@ impl<E> SelectPrompt<E> {
         Self {
             question: String::new(),
             default: None,
-            options: None,
+            filter: None,
             style: PromptStyle::default(),
         }
     }
@@ -142,9 +114,9 @@ impl<E> SelectPrompt<E> {
         self
     }
 
-    /// Restricts the prompt to the supplied options, preserving their order.
-    pub fn options(mut self, options: impl Into<Vec<E>>) -> Self {
-        self.options = Some(options.into());
+    /// Filters the enum variants displayed by the prompt.
+    pub fn filter(mut self, predicate: impl Fn(&E) -> bool + 'static) -> Self {
+        self.filter = Some(Box::new(predicate));
         self
     }
 
@@ -167,9 +139,7 @@ where
 {
     /// Runs the prompt and returns the confirmed enum variant.
     pub fn interact(self) -> Result<E, PromptError> {
-        let options = self
-            .options
-            .map_or_else(make_options::<E>, make_options_from_values)?;
+        let options = make_options(self.filter.as_deref())?;
         let selected = self
             .default
             .as_ref()
@@ -224,7 +194,7 @@ where
                         let marker = if unicode { "✓" } else { "done" };
                         writeln!(
                             stdout,
-                            "{}: ({}) {}",
+                            "{} ({}) {}",
                             self.question,
                             option.label,
                             marker.with(self.style.done)
@@ -270,17 +240,13 @@ impl<E> SelectionState<E> {
     }
 }
 
-fn make_options<E>() -> Result<Vec<OptionEntry<E>>, PromptError>
+fn make_options<E>(filter: Option<&dyn Fn(&E) -> bool>) -> Result<Vec<OptionEntry<E>>, PromptError>
 where
     E: Clone + Debug + IntoEnumIterator + PromptOption,
 {
-    make_options_from_values(E::iter().collect())
-}
-
-fn make_options_from_values<E>(variants: Vec<E>) -> Result<Vec<OptionEntry<E>>, PromptError>
-where
-    E: Clone + Debug + PromptOption,
-{
+    let variants = E::iter()
+        .filter(|value| filter.is_none_or(|predicate| predicate(value)))
+        .collect::<Vec<_>>();
     if variants.is_empty() {
         return Err(PromptError::EmptyOptions);
     }
@@ -355,7 +321,7 @@ fn render<E>(
         .saturating_sub(visible_count.saturating_sub(1))
         .min(state.options.len().saturating_sub(visible_count));
     let end = (start + visible_count).min(state.options.len());
-    writeln!(stdout, "{}:", question.with(style.question))?;
+    writeln!(stdout, "{}", question.with(style.question))?;
     queue!(stdout, cursor::MoveToColumn(0))?;
     let (selected, unselected) = if unicode { ('●', '○') } else { ('*', ' ') };
     for (index, option) in state.options[start..end].iter().enumerate() {
@@ -425,7 +391,7 @@ impl Drop for TerminalGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::{PromptError, SelectionState, make_options, pascal_to_label};
+    use super::*;
     use strum::EnumIter;
     use test_case::test_case;
 
@@ -458,13 +424,35 @@ mod tests {
     #[test_case(Choice::First, "custom label", 'f'; "label_overridden_hotkey_derived")]
     #[test_case(Choice::Third, "third", 'z'; "hotkey_overridden_label_derived")]
     fn make_options_produces_labels_and_hotkeys(variant: Choice, label: &str, hotkey: char) {
-        let options = make_options::<Choice>().unwrap();
+        let options = make_options::<Choice>(None).unwrap();
         let option = options
             .iter()
             .find(|option| option.value == variant)
             .unwrap();
         assert_eq!(option.label, label);
         assert_eq!(option.hotkey, hotkey);
+    }
+
+    #[test]
+    fn make_options_filters_variants_before_building_options() {
+        let options =
+            make_options::<Choice>(Some(&|choice| *choice != Choice::HTTPServer)).unwrap();
+
+        assert_eq!(
+            options
+                .iter()
+                .map(|option| option.value.clone())
+                .collect::<Vec<_>>(),
+            vec![Choice::Skip, Choice::First, Choice::Third]
+        );
+    }
+
+    #[test]
+    fn make_options_rejects_a_filter_that_removes_every_variant() {
+        assert!(matches!(
+            make_options::<Choice>(Some(&|_| false)),
+            Err(PromptError::EmptyOptions)
+        ));
     }
 
     #[test_case("OverwriteIdentical" => "overwrite identical"; "words")]
@@ -488,7 +476,7 @@ mod tests {
     #[test]
     fn make_options_rejects_duplicate_hotkeys() {
         assert!(matches!(
-            make_options::<DuplicateHotkeys>(),
+            make_options::<DuplicateHotkeys>(None),
             Err(PromptError::DuplicateHotkey('a'))
         ));
     }
@@ -507,7 +495,7 @@ mod tests {
     #[test]
     fn make_options_rejects_non_ascii_hotkey() {
         assert!(matches!(
-            make_options::<InvalidHotkey>(),
+            make_options::<InvalidHotkey>(None),
             Err(PromptError::InvalidHotkey('1'))
         ));
     }

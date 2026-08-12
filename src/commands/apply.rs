@@ -4,15 +4,18 @@ use std::path::Path;
 
 use miette::{Result, WrapErr, miette};
 use similar::TextDiff;
-use tui::prompt::{ObstructionChoice, SelectPrompt};
+use strum::EnumIter;
+use tui::prompt::{PromptError, PromptOption, SelectPrompt};
 
+use crate::ExitStatus;
 use crate::config::{self, DeployType};
 use crate::hash;
 use crate::managed;
 use crate::state::{Kind, StateDatabase, StateLock, StateRecord};
+use crate::template;
 
 /// Reconciles the desired deployment with the target directory.
-pub fn run(source: &Path, target_override: Option<std::path::PathBuf>) -> Result<()> {
+pub fn run(source: &Path, target_override: Option<std::path::PathBuf>) -> Result<ExitStatus> {
     let _lock = StateLock::acquire()?;
     let deployment = config::read(source, target_override)?;
     let target = &deployment.target_directory;
@@ -27,7 +30,7 @@ pub fn run(source: &Path, target_override: Option<std::path::PathBuf>) -> Result
         ));
     }
     if deployment.entries.is_empty() {
-        return Ok(());
+        return Ok(ExitStatus::Success);
     }
     if fs::symlink_metadata(target).is_err() {
         fs::create_dir_all(target)
@@ -52,13 +55,14 @@ pub fn run(source: &Path, target_override: Option<std::path::PathBuf>) -> Result
             EntryResult::Deployed => deployed += 1,
             EntryResult::Replaced => replaced += 1,
             EntryResult::Skipped => skipped += 1,
+            EntryResult::Cancelled => return Ok(ExitStatus::Cancelled),
         }
     }
     println!("deployed {deployed}, replaced {replaced}, skipped {skipped}");
     if skipped > 0 {
-        return Err(miette!("one or more obstructions were skipped"));
+        return Ok(ExitStatus::Skipped);
     }
-    Ok(())
+    Ok(ExitStatus::Success)
 }
 
 #[derive(Clone, Copy)]
@@ -66,6 +70,7 @@ enum EntryResult {
     Deployed,
     Replaced,
     Skipped,
+    Cancelled,
 }
 
 fn deploy_entry(
@@ -108,21 +113,25 @@ fn deploy_entry(
             replaced = true;
         } else if !*replace_all {
             loop {
-                match prompt_for_obstruction(entry, &entry.target_path, context)? {
-                    ObstructionChoice::Skip => return Ok(EntryResult::Skipped),
-                    ObstructionChoice::ViewDetail => {
+                match prompt_for_obstruction(entry, &entry.target_path, context) {
+                    Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
+                    Ok(ObstructionChoice::ViewDetail) => {
                         show_detail(entry, &entry.target_path, context)?
                     }
-                    ObstructionChoice::Replace => {
+                    Ok(ObstructionChoice::Replace) => {
                         remove_path(database, &entry.target_path)?;
                         replaced = true;
                         break;
                     }
-                    ObstructionChoice::ReplaceAll => {
+                    Ok(ObstructionChoice::ReplaceAll) => {
                         *replace_all = true;
                         remove_path(database, &entry.target_path)?;
                         replaced = true;
                         break;
+                    }
+                    Err(PromptError::Cancelled) => return Ok(EntryResult::Cancelled),
+                    Err(error) => {
+                        return Err(miette!(error).wrap_err("cannot display obstruction prompt"));
                     }
                 }
             }
@@ -135,19 +144,23 @@ fn deploy_entry(
     if let Some(obstruction) = parent_obstruction(target_root, &entry.target_path)? {
         if !*replace_all {
             loop {
-                match prompt_for_obstruction(entry, &obstruction, context)? {
-                    ObstructionChoice::Skip => return Ok(EntryResult::Skipped),
-                    ObstructionChoice::ViewDetail => show_detail(entry, &obstruction, context)?,
-                    ObstructionChoice::Replace => {
+                match prompt_for_obstruction(entry, &obstruction, context) {
+                    Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
+                    Ok(ObstructionChoice::ViewDetail) => show_detail(entry, &obstruction, context)?,
+                    Ok(ObstructionChoice::Replace) => {
                         remove_path(database, &obstruction)?;
                         replaced = true;
                         break;
                     }
-                    ObstructionChoice::ReplaceAll => {
+                    Ok(ObstructionChoice::ReplaceAll) => {
                         *replace_all = true;
                         remove_path(database, &obstruction)?;
                         replaced = true;
                         break;
+                    }
+                    Err(PromptError::Cancelled) => return Ok(EntryResult::Cancelled),
+                    Err(error) => {
+                        return Err(miette!(error).wrap_err("cannot display obstruction prompt"));
                     }
                 }
             }
@@ -173,7 +186,7 @@ fn deploy_entry(
         }
         DeployType::Copy | DeployType::Template => {
             let bytes = if entry.deploy_type == DeployType::Template {
-                config::render_template(&entry.source_path, context)?
+                template::render_template(&entry.source_path, context)?
             } else {
                 fs::read(&entry.source_path)
                     .map_err(|error| miette!(error))
@@ -204,69 +217,61 @@ fn deploy_entry(
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, EnumIter)]
+enum ObstructionChoice {
+    Skip,
+    ViewDetail,
+    Replace,
+    ReplaceAll,
+}
+
+impl PromptOption for ObstructionChoice {
+    fn hotkey(&self) -> Option<char> {
+        match self {
+            Self::ReplaceAll => Some('a'),
+            _ => None,
+        }
+    }
+}
+
 fn prompt_for_obstruction(
     entry: &config::DeploymentEntry,
     obstruction: &Path,
     _context: &std::collections::HashMap<String, templater::value::Value>,
-) -> Result<ObstructionChoice> {
+) -> std::result::Result<ObstructionChoice, PromptError> {
     let can_show_detail = fs::metadata(&entry.source_path).is_ok_and(|metadata| metadata.is_file())
         && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
-    let options = if can_show_detail {
-        vec![
-            ObstructionChoice::Skip,
-            ObstructionChoice::ViewDetail,
-            ObstructionChoice::Replace,
-            ObstructionChoice::ReplaceAll,
-        ]
-    } else {
-        vec![
-            ObstructionChoice::Skip,
-            ObstructionChoice::Replace,
-            ObstructionChoice::ReplaceAll,
-        ]
-    };
     let question = format!(
-        "obstruction\nsource: {}\ntarget: {}\n{}\n{}",
-        describe_path(&entry.source_path)?,
-        describe_path(obstruction)?,
+        r#"Cannot deploy {} {}:
+{} {} is already present.
+How would you like to proceed?"#,
+        path_kind(&entry.source_path)?,
         entry.source_path.display(),
+        path_kind(obstruction)?,
         obstruction.display()
     );
     SelectPrompt::new()
         .question(question)
-        .options(options)
+        .filter(move |choice| can_show_detail || *choice != ObstructionChoice::ViewDetail)
         .interact()
-        .map_err(|error| miette!("obstruction prompt failed: {error:?}"))
 }
 
-fn describe_path(path: &Path) -> Result<String> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| miette!(error).wrap_err(format!("cannot inspect `{}`", path.display())))?;
-    let kind = if metadata.file_type().is_symlink() {
-        let target = fs::read_link(path).map_err(|error| miette!(error))?;
-        format!("symlink -> {}", target.display())
-    } else if metadata.file_type().is_file() {
-        format!(
-            "regular file, {} bytes, modified {:?}",
-            metadata.len(),
-            metadata.modified().ok()
-        )
-    } else if metadata.file_type().is_dir() {
-        let count = fs::read_dir(path).map_err(|error| miette!(error))?.count();
-        format!("directory, {count} entries")
+fn path_kind(path: &Path) -> std::io::Result<&'static str> {
+    Ok(if fs::symlink_metadata(path)?.is_dir() {
+        "directory"
     } else {
-        "other".to_string()
-    };
-    Ok(format!("{}: {kind}", path.display()))
+        "file"
+    })
 }
 
+// TODO pager
 fn show_detail(
     entry: &config::DeploymentEntry,
     target: &Path,
     context: &std::collections::HashMap<String, templater::value::Value>,
 ) -> Result<()> {
     let source = if entry.deploy_type == DeployType::Template {
-        config::render_template(&entry.source_path, context)?
+        template::render_template(&entry.source_path, context)?
     } else {
         fs::read(&entry.source_path).map_err(|error| miette!(error))?
     };

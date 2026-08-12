@@ -1698,6 +1698,7 @@ dependencies = [
  "strum 0.28.0",
  "tempfile",
  "test-case",
+ "thiserror",
 ]
 
 [[package]]

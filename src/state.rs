@@ -76,7 +76,7 @@ pub struct StateDatabase {
     pub path: PathBuf,
 }
 
-pub(crate) fn state_root() -> Result<PathBuf> {
+fn state_root() -> Result<PathBuf> {
     let state_home = dirs::state_dir()
         .or_else(dirs::data_dir)
         .map(|state_home| state_home.join("dotrift"))
