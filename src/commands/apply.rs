@@ -1,6 +1,12 @@
-use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
-use std::path::Path;
+// TODO optimize fs::read
+use std::{
+    fmt::Display,
+    fs,
+    io::Write,
+    os::unix::fs::{PermissionsExt, symlink},
+    path::Path,
+    process::{Command, Stdio},
+};
 
 use miette::{Result, WrapErr, miette};
 use similar::TextDiff;
@@ -264,7 +270,6 @@ fn path_kind(path: &Path) -> std::io::Result<&'static str> {
     })
 }
 
-// TODO pager
 fn show_detail(
     entry: &config::DeploymentEntry,
     target: &Path,
@@ -276,15 +281,72 @@ fn show_detail(
         fs::read(&entry.source_path).map_err(|error| miette!(error))?
     };
     let target = fs::read(target).map_err(|error| miette!(error))?;
-    println!(
-        "{}",
-        TextDiff::from_lines(
-            &String::from_utf8_lossy(&source),
-            &String::from_utf8_lossy(&target),
-        )
-        .unified_diff()
-        .header("source", "target")
-    );
+    let source_lossy = String::from_utf8_lossy(&source);
+    let target_lossy = String::from_utf8_lossy(&target);
+    let text_diff = TextDiff::from_lines(&source_lossy, &target_lossy);
+    let mut diff = text_diff.unified_diff();
+    diff.header("source", "target");
+    std::io::stdout().flush().map_err(|error| miette!(error))?;
+    display_detail(
+        &diff,
+        std::env::var("DOTRIFT_PAGER").ok().as_deref(),
+        std::env::var("PAGER").ok().as_deref(),
+    )
+}
+
+enum PagerResolution<'a> {
+    DotriftPager(&'a str),
+    Pager(&'a str),
+    Stdout,
+}
+
+fn resolve_pager<'a>(
+    dotrift_pager: Option<&'a str>,
+    pager: Option<&'a str>,
+) -> PagerResolution<'a> {
+    match dotrift_pager {
+        Some(command) if !command.trim().is_empty() => PagerResolution::DotriftPager(command),
+        _ => match pager {
+            Some(command) if !command.trim().is_empty() => PagerResolution::Pager(command),
+            _ => PagerResolution::Stdout,
+        },
+    }
+}
+
+fn display_detail(
+    diff: &dyn Display,
+    dotrift_pager: Option<&str>,
+    pager: Option<&str>,
+) -> Result<()> {
+    match resolve_pager(dotrift_pager, pager) {
+        PagerResolution::DotriftPager(command) => run_pager(command, diff)
+            .map_err(|error| miette!(error).wrap_err("cannot run DOTRIFT_PAGER")),
+        PagerResolution::Pager(command) => {
+            if run_pager(command, diff).is_err() {
+                println!("{diff}");
+            }
+            Ok(())
+        }
+        PagerResolution::Stdout => {
+            println!("{diff}");
+            Ok(())
+        }
+    }
+}
+
+fn run_pager(command: &str, diff: &dyn Display) -> std::io::Result<()> {
+    let mut parts = command.split_whitespace();
+    let program = parts.next().expect("non-empty pager command");
+    let mut child = Command::new(program)
+        .args(parts)
+        .stdin(Stdio::piped())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .expect("piped stdin")
+        .write_fmt(format_args!("{diff}"))?;
+    child.wait()?;
     Ok(())
 }
 

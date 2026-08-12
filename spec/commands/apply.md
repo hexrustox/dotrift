@@ -91,14 +91,21 @@ mode not applied.
 
 ### Obstruction prompts
 
-The prompt always shows the metadata below for each path involved:
+The prompt shows the source path and the obstructing path, each with its
+absolute location and its kind, and reports that the obstructing path is
+already present:
 
-- existence and filesystem kind: regular file, directory, symlink, or other
-- absolute path
-- regular file: byte size and last-modified date
-- symlink: link target
-- directory: number of entries
-- other: no kind-specific metadata
+```
+Cannot deploy {kind} {source}:
+{kind} {obstruction} is already present.
+How would you like to proceed?
+```
+
+The kind is `file` or `directory`, decided by the path's own non-following
+metadata: a directory is `directory`, and everything else — regular files,
+symlinks, and special filesystem objects alike — is `file`. Paths are shown
+in absolute form. No size, modification time, link target, or entry count is
+shown.
 
 An unmanaged obstruction offers:
 
@@ -127,6 +134,12 @@ For a template entry, the rendered output is diffed against the target; a
 render failure shows the error and exits. For mixed
 file/directory kinds, symlinks resolving to directories, or special objects,
 `view detail` is omitted because no further useful information can be shown.
+
+The diff is displayed through the pager named by `$DOTRIFT_PAGER` when set,
+otherwise `$PAGER`, otherwise printed to standard output. An empty value
+counts as unset. A `$DOTRIFT_PAGER` that cannot be started fails the run; a
+`$PAGER` that cannot be started falls back to standard output. A pager's
+non-zero exit status never fails the run.
 
 ### Parent directories
 
