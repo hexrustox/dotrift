@@ -90,7 +90,7 @@ impl StateDatabase {
         Self::open_at(&state_root()?)
     }
 
-    fn open_at(root: &Path) -> Result<Self> {
+    pub(crate) fn open_at(root: &Path) -> Result<Self> {
         fs::create_dir_all(root)
             .map_err(|error| miette!(error))
             .wrap_err_with(|| format!("cannot create state directory `{}`", root.display()))?;

@@ -1,5 +1,6 @@
 // TODO optimize fs::read
 use std::{
+    cell::RefCell,
     fmt::Display,
     fs,
     io::Write,
@@ -71,7 +72,7 @@ pub fn run(source: &Path, target_override: Option<std::path::PathBuf>) -> Result
     Ok(ExitStatus::Success)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EntryResult {
     Deployed,
     Replaced,
@@ -96,18 +97,50 @@ fn deploy_entry(
         ));
     }
 
-    let existed = match fs::symlink_metadata(&entry.target_path) {
-        Ok(_) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(error) => {
-            return Err(miette!(error).wrap_err(format!(
-                "cannot inspect target `{}`",
-                entry.target_path.display()
-            )));
+    let obstruction = parent_obstruction(target_root, &entry.target_path)?;
+    let existed = if obstruction.is_some() {
+        false
+    } else {
+        match fs::symlink_metadata(&entry.target_path) {
+            Ok(_) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => {
+                return Err(miette!(error).wrap_err(format!(
+                    "cannot inspect target `{}`",
+                    entry.target_path.display()
+                )));
+            }
         }
     };
     let mut replaced = false;
-    if existed {
+    if let Some(obstruction) = obstruction {
+        if !*replace_all {
+            loop {
+                match prompt_for_obstruction(entry, &obstruction, context) {
+                    Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
+                    Ok(ObstructionChoice::ViewDetail) => show_detail(entry, &obstruction, context)?,
+                    Ok(ObstructionChoice::Replace) => {
+                        remove_path(database, &obstruction)?;
+                        replaced = true;
+                        break;
+                    }
+                    Ok(ObstructionChoice::ReplaceAll) => {
+                        *replace_all = true;
+                        remove_path(database, &obstruction)?;
+                        replaced = true;
+                        break;
+                    }
+                    Err(PromptError::Cancelled) => return Ok(EntryResult::Cancelled),
+                    Err(error) => {
+                        return Err(miette!(error).wrap_err("cannot display obstruction prompt"));
+                    }
+                }
+            }
+        } else {
+            remove_path(database, &obstruction)?;
+            replaced = true;
+        }
+    } else if existed {
         let old_record = database.record(&entry.target_path)?;
         let managed = old_record
             .as_ref()
@@ -146,36 +179,13 @@ fn deploy_entry(
             replaced = true;
         }
     }
-
-    if let Some(obstruction) = parent_obstruction(target_root, &entry.target_path)? {
-        if !*replace_all {
-            loop {
-                match prompt_for_obstruction(entry, &obstruction, context) {
-                    Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
-                    Ok(ObstructionChoice::ViewDetail) => show_detail(entry, &obstruction, context)?,
-                    Ok(ObstructionChoice::Replace) => {
-                        remove_path(database, &obstruction)?;
-                        replaced = true;
-                        break;
-                    }
-                    Ok(ObstructionChoice::ReplaceAll) => {
-                        *replace_all = true;
-                        remove_path(database, &obstruction)?;
-                        replaced = true;
-                        break;
-                    }
-                    Err(PromptError::Cancelled) => return Ok(EntryResult::Cancelled),
-                    Err(error) => {
-                        return Err(miette!(error).wrap_err("cannot display obstruction prompt"));
-                    }
-                }
-            }
-        } else {
-            remove_path(database, &obstruction)?;
-            replaced = true;
-        }
-    }
-    create_parent_dirs(target_root, &entry.target_path)?;
+    let parent = entry
+        .target_path
+        .parent()
+        .ok_or_else(|| miette!("target path has no parent"))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| miette!(error))
+        .wrap_err("cannot create target parent directories")?;
 
     let record = match entry.deploy_type {
         DeployType::Symlink => {
@@ -240,26 +250,35 @@ impl PromptOption for ObstructionChoice {
     }
 }
 
+thread_local! {
+    static PROMPT_CHOICE: RefCell<Option<ObstructionChoice>> = const { RefCell::new(None) }
+}
+
 fn prompt_for_obstruction(
     entry: &config::DeploymentEntry,
     obstruction: &Path,
     _context: &std::collections::HashMap<String, templater::value::Value>,
 ) -> std::result::Result<ObstructionChoice, PromptError> {
-    let can_show_detail = fs::metadata(&entry.source_path).is_ok_and(|metadata| metadata.is_file())
-        && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
-    let question = format!(
-        r#"Cannot deploy {} {}:
+    if cfg!(test) {
+        Ok(PROMPT_CHOICE.with(|c| c.borrow().to_owned().unwrap()))
+    } else {
+        let question = format!(
+            r#"Cannot deploy {} {}:
 {} {} is already present.
 How would you like to proceed?"#,
-        path_kind(&entry.source_path)?,
-        entry.source_path.display(),
-        path_kind(obstruction)?,
-        obstruction.display()
-    );
-    SelectPrompt::new()
-        .question(question)
-        .filter(move |choice| can_show_detail || *choice != ObstructionChoice::ViewDetail)
-        .interact()
+            path_kind(&entry.source_path)?,
+            entry.source_path.display(),
+            path_kind(obstruction)?,
+            obstruction.display()
+        );
+        let can_show_detail = fs::metadata(&entry.source_path)
+            .is_ok_and(|metadata| metadata.is_file())
+            && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
+        SelectPrompt::new()
+            .question(question)
+            .filter(move |choice| can_show_detail || *choice != ObstructionChoice::ViewDetail)
+            .interact()
+    }
 }
 
 fn path_kind(path: &Path) -> std::io::Result<&'static str> {
@@ -401,26 +420,568 @@ fn parent_obstruction(
     Ok(None)
 }
 
-fn create_parent_dirs(target_root: &Path, target_path: &Path) -> Result<()> {
-    let parent = target_path
-        .parent()
-        .ok_or_else(|| miette!("target path has no parent"))?;
-    let relative = parent
-        .strip_prefix(target_root)
-        .map_err(|_| miette!("target path is outside target directory"))?;
-    let mut current = target_root.to_path_buf();
-    for component in relative.components() {
-        current.push(component);
-        if fs::symlink_metadata(&current).is_err() {
-            fs::create_dir(&current)
-                .map_err(|error| miette!(error))
-                .map_err(|error| {
-                    miette!(error).wrap_err(format!(
-                        "cannot create target parent `{}`",
-                        current.display()
-                    ))
-                })?;
-        }
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+
+    use super::*;
+    use tempfile::tempdir;
+    use test_case::test_case;
+
+    #[test_case(|t| t.join("file") => None; "direct_child_has_no_obstruction")]
+    #[test_case(|t| {
+        fs::create_dir_all(t.join("a/b/c")).unwrap();
+        t.join("a/b/c/file")
+    } => None; "all_parent_dirs_are_clear")]
+    #[test_case(|t| {
+        fs::create_dir(t.join("a")).unwrap();
+        fs::write(t.join("a/b"), b"").unwrap();
+        t.join("a/b/c/file")
+    } => Some(PathBuf::from("a/b")); "intermediate_parent_is_a_file")]
+    #[test_case(|t| {
+        fs::create_dir(t.join("x")).unwrap();
+        symlink(t.join("x"), t.join("a")).unwrap();
+        t.join("a/b/file")
+    } => Some(PathBuf::from("a")); "symlink_to_dir_is_an_obstruction")]
+    #[test_case(|t| {
+        fs::create_dir(t.join("a")).unwrap();
+        t.join("a/b/c/file")
+    } => None; "missing_parent_subtree_short_circuits")]
+    #[test_case(|t| t.join("a/b/file") => None; "empty_root_target_has_missing_parent")]
+    #[test_case(|_| PathBuf::from("/outside/target/file") => panics ""; "target_outside_root")]
+    #[test_case(|_| PathBuf::from("/") => panics ""; "target_has_no_parent")]
+    fn parent_obstruction_test<F: Fn(&Path) -> PathBuf>(setup: F) -> Option<PathBuf> {
+        let tmp = tempdir().unwrap();
+        parent_obstruction(tmp.path(), &setup(tmp.path()))
+            .unwrap()
+            .map(|obstruction| obstruction.strip_prefix(tmp.path()).unwrap().to_path_buf())
     }
-    Ok(())
+
+    #[test_case(
+        |db, t| {
+            fs::write(t.join("file"), b"data").unwrap();
+            db.put(&crate::record!(f, t.join("file"), "src", hash::hash_bytes(b"data"))).unwrap();
+            t.join("file")
+        },
+        |db, t| {
+            assert!(fs::symlink_metadata(t.join("file")).is_err());
+            assert_eq!(db.record(&t.join("file")).unwrap(), None);
+        };
+        "removes_regular_file"
+    )]
+    #[test_case(
+        |db, t| {
+            fs::write(t.join("real"), b"data").unwrap();
+            symlink(t.join("real"), t.join("link")).unwrap();
+            db.put(&crate::record!(s, t.join("link"), "src", t.join("real"))).unwrap();
+            t.join("link")
+        },
+        |db, t| {
+            assert!(fs::symlink_metadata(t.join("link")).is_err());
+            assert!(fs::symlink_metadata(t.join("real")).is_ok());
+            assert_eq!(db.record(&t.join("link")).unwrap(), None);
+        };
+        "removes_symlink_but_not_target"
+    )]
+    #[test_case(
+        |_db, t| {
+            fs::create_dir(t.join("target")).unwrap();
+            symlink(t.join("target"), t.join("link")).unwrap();
+            t.join("link")
+        },
+        |_db, t| {
+            assert!(fs::symlink_metadata(t.join("link")).is_err());
+            assert!(fs::symlink_metadata(t.join("target")).is_ok());
+        };
+        "removes_symlink_to_dir_without_following"
+    )]
+    #[test_case(
+        |db, t| {
+            fs::create_dir_all(t.join("a/b/c")).unwrap();
+            fs::write(t.join("a/b/c/deep"), b"").unwrap();
+            db.put(&crate::record!(f, t.join("a"), "src/a", "h1")).unwrap();
+            db.put(&crate::record!(f, t.join("a/b/c"), "src/c", "h2")).unwrap();
+            db.put(&crate::record!(f, t.join("a/b/c/deep"), "src/deep", "h3")).unwrap();
+            t.join("a")
+        },
+        |db, t| {
+            assert!(fs::symlink_metadata(t.join("a")).is_err());
+            for relative in ["a", "a/b/c", "a/b/c/deep"] {
+                assert_eq!(db.record(&t.join(relative)).unwrap(), None);
+            }
+        };
+        "removes_nested_directory_tree"
+    )]
+    #[test_case(
+        |db, t| {
+            fs::create_dir(t.join("a")).unwrap();
+            fs::write(t.join("real"), b"").unwrap();
+            symlink(t.join("real"), t.join("a/link")).unwrap();
+            db.put(&crate::record!(f, t.join("a"), "src/a", "h1")).unwrap();
+            db.put(&crate::record!(s, t.join("a/link"), "src/link", t.join("real"))).unwrap();
+            t.join("a")
+        },
+        |db, t| {
+            assert!(fs::symlink_metadata(t.join("a")).is_err());
+            assert!(fs::symlink_metadata(t.join("real")).is_ok());
+            assert_eq!(db.record(&t.join("a")).unwrap(), None);
+            assert_eq!(db.record(&t.join("a/link")).unwrap(), None);
+        };
+        "removes_tree_containing_symlink_without_following"
+    )]
+    #[test_case(
+        |db, t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            fs::write(t.join("a/child"), b"").unwrap();
+            fs::write(t.join("other"), b"").unwrap();
+            db.put(&crate::record!(f, t.join("a"), "src/a", "h1")).unwrap();
+            t.join("a")
+        },
+        |db, t| {
+            assert!(fs::symlink_metadata(t.join("a")).is_err());
+            assert!(fs::symlink_metadata(t.join("other")).is_ok());
+            assert_eq!(db.record(&t.join("a")).unwrap(), None);
+        };
+        "removes_tree_but_preserves_sibling"
+    )]
+    #[test_case(
+        |_db, t| {
+            fs::create_dir(t.join("empty")).unwrap();
+            t.join("empty")
+        },
+        |_db, t| assert!(fs::symlink_metadata(t.join("empty")).is_err());
+        "removes_empty_directory"
+    )]
+    #[test_case(
+        |_db, t| t.join("missing"),
+        |_db, _t| {}
+        => panics ""
+        ; "missing_path_is_an_error"
+    )]
+    fn remove_path_test<
+        F: Fn(&mut StateDatabase, &Path) -> PathBuf,
+        G: Fn(&StateDatabase, &Path),
+    >(
+        setup: F,
+        assert: G,
+    ) {
+        let tmp = tempdir().unwrap();
+        let mut database = StateDatabase::open_at(&tmp.path().join("db")).unwrap();
+        let path = setup(&mut database, tmp.path());
+        remove_path(&database, &path).unwrap();
+        assert(&database, tmp.path())
+    }
+
+    macro_rules! entry {
+        ($source:expr, $target:expr, $deploy_type:expr) => {
+            config::DeploymentEntry {
+                source_path: $source,
+                target_path: $target,
+                deploy_type: $deploy_type,
+                mode: None,
+            }
+        };
+        ($source:expr, $target:expr, $deploy_type:expr, $mode:expr) => {
+            config::DeploymentEntry {
+                source_path: $source,
+                target_path: $target,
+                deploy_type: $deploy_type,
+                mode: $mode,
+            }
+        };
+    }
+
+    fn set_prompt_choice(choice: ObstructionChoice) {
+        PROMPT_CHOICE.with(|current| *current.borrow_mut() = Some(choice));
+    }
+
+    #[test_case(
+        |_db, t| {
+            let source = t.join("src");
+            fs::write(&source, b"content").unwrap();
+            entry!(source, t.join("target"), DeployType::Symlink)
+        },
+        |db, t| {
+            let source = t.join("src");
+            let metadata = fs::symlink_metadata(t.join("target")).unwrap();
+            assert!(metadata.file_type().is_symlink());
+            assert_eq!(fs::read_link(t.join("target")).unwrap(), source);
+            let record = db.record(&t.join("target")).unwrap().unwrap();
+            assert_eq!(record.kind, Kind::Symlink);
+            assert_eq!(record.source_path, source);
+            assert_eq!(record.link_target, Some(source));
+            assert_eq!(record.content_hash, None);
+        }
+        => EntryResult::Deployed
+        ; "deploys_symlink"
+    )]
+    #[test_case(
+        |_db, t| {
+            let source = t.join("src");
+            fs::write(&source, b"copy").unwrap();
+            entry!(source, t.join("target"), DeployType::Copy)
+        },
+        |db, t| {
+            assert_eq!(fs::read(t.join("target")).unwrap(), b"copy");
+            let metadata = fs::symlink_metadata(t.join("target")).unwrap();
+            assert!(metadata.file_type().is_file());
+            let record = db.record(&t.join("target")).unwrap().unwrap();
+            assert_eq!(record.kind, Kind::File);
+            assert_eq!(record.content_hash, Some(hash::hash_bytes(b"copy")));
+            assert_eq!(record.link_target, None);
+        }
+        => EntryResult::Deployed
+        ; "deploys_copy"
+    )]
+    #[test_case(
+        |_db, t| {
+            let source = t.join("src");
+            fs::write(&source, br#"{{"rendered"}}"#).unwrap();
+            entry!(source, t.join("target"), DeployType::Template)
+        },
+        |db, t| {
+            assert_eq!(fs::read(t.join("target")).unwrap(), b"rendered");
+            let metadata = fs::symlink_metadata(t.join("target")).unwrap();
+            assert!(metadata.file_type().is_file());
+            let record = db.record(&t.join("target")).unwrap().unwrap();
+            assert_eq!(record.kind, Kind::File);
+            assert_eq!(record.content_hash, Some(hash::hash_bytes(b"rendered")));
+        }
+        => EntryResult::Deployed
+        ; "deploys_template"
+    )]
+    #[test_case(
+        |_db, t| {
+            let source = t.join("src");
+            fs::write(&source, b"copy").unwrap();
+            let mode = config::DeployMode::try_from(0o600).unwrap();
+            entry!(source, t.join("target"), DeployType::Copy, Some(mode))
+        },
+        |_db, t| {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::read(t.join("target")).unwrap(), b"copy");
+            let mode = fs::metadata(t.join("target")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        => EntryResult::Deployed
+        ; "deploys_copy_with_mode"
+    )]
+    #[test_case(
+        |_db, t| {
+            let source = t.join("src");
+            fs::write(&source, b"deep").unwrap();
+            entry!(source, t.join("a/b/c/file"), DeployType::Copy)
+        },
+        |db, t| {
+            assert_eq!(fs::read(t.join("a/b/c/file")).unwrap(), b"deep");
+            assert!(db.record(&t.join("a/b/c/file")).unwrap().is_some());
+            assert_eq!(db.managed_paths().iter().len(), 1);
+        }
+        => EntryResult::Deployed
+        ; "deploys_into_nested_missing_dirs"
+    )]
+    #[test_case(
+        |db, t| {
+            let target = t.join("target");
+            fs::write(&target, b"old").unwrap();
+            db.put(&crate::record!(f, target.clone(), "old-src", hash::hash_bytes(b"old"))).unwrap();
+            let source = t.join("src");
+            fs::write(&source, b"new").unwrap();
+            entry!(source, target, DeployType::Copy)
+        },
+        |db, t| {
+            assert_eq!(fs::read(t.join("target")).unwrap(), b"new");
+            let record = db.record(&t.join("target")).unwrap().unwrap();
+            assert_eq!(record.content_hash, Some(hash::hash_bytes(b"new")));
+        }
+        => EntryResult::Replaced
+        ; "replaces_managed_file_target"
+    )]
+    #[test_case(
+        |db, t| {
+            let target = t.join("target");
+            let old_source = t.join("old-src");
+            fs::write(&old_source, b"old").unwrap();
+            symlink(&old_source, &target).unwrap();
+            db.put(&crate::record!(s, target.clone(), "old-src", old_source.clone())).unwrap();
+            let source = t.join("src");
+            fs::write(&source, b"new").unwrap();
+            entry!(source, target, DeployType::Symlink)
+        },
+        |db, t| {
+            assert_eq!(fs::read_link(t.join("target")).unwrap(), t.join("src"));
+            let record = db.record(&t.join("target")).unwrap().unwrap();
+            assert_eq!(record.kind, Kind::Symlink);
+            assert_eq!(record.source_path, t.join("src"));
+            assert_eq!(record.link_target, Some(t.join("src")));
+        }
+        => EntryResult::Replaced
+        ; "replaces_managed_symlink_target"
+    )]
+    #[test_case(
+        |_db, t| {
+            set_prompt_choice(ObstructionChoice::Replace);
+            let target = t.join("target");
+            fs::write(&target, b"old").unwrap();
+            let source = t.join("src");
+            fs::write(&source, b"new").unwrap();
+            entry!(source, target, DeployType::Copy)
+        },
+        |db, t| {
+            assert_eq!(fs::read(t.join("target")).unwrap(), b"new");
+            assert!(db.record(&t.join("target")).unwrap().is_some());
+        }
+        => EntryResult::Replaced
+        ; "replaces_unmanaged_target_via_prompt"
+    )]
+    #[test_case(
+        |_db, t| {
+            set_prompt_choice(ObstructionChoice::Skip);
+            let target = t.join("target");
+            fs::write(&target, b"old").unwrap();
+            let source = t.join("src");
+            fs::write(&source, b"new").unwrap();
+            entry!(source, target, DeployType::Copy)
+        },
+        |db, t| {
+            assert_eq!(fs::read(t.join("target")).unwrap(), b"old");
+            assert_eq!(db.record(&t.join("target")).unwrap(), None);
+        }
+        => EntryResult::Skipped
+        ; "skips_unmanaged_target_via_prompt"
+    )]
+    #[test_case(
+        |_db, t| {
+            set_prompt_choice(ObstructionChoice::Skip);
+            fs::create_dir(t.join("a")).unwrap();
+            fs::write(t.join("a/b"), b"").unwrap();
+            let source = t.join("src");
+            fs::write(&source, b"new").unwrap();
+            entry!(source, t.join("a/b/file"), DeployType::Copy)
+        },
+        |db, t| {
+            assert!(fs::symlink_metadata(t.join("a/b")).unwrap().is_file());
+            assert!(fs::symlink_metadata(t.join("a/b/file")).is_err());
+            assert_eq!(db.record(&t.join("a/b/file")).unwrap(), None);
+        }
+        => EntryResult::Skipped
+        ; "skips_parent_obstruction_via_prompt"
+    )]
+    #[test_case(
+        |_db, t| {
+            set_prompt_choice(ObstructionChoice::Replace);
+            fs::create_dir(t.join("a")).unwrap();
+            fs::write(t.join("a/b"), b"").unwrap();
+            let source = t.join("src");
+            fs::write(&source, b"new").unwrap();
+            entry!(source, t.join("a/b/file"), DeployType::Copy)
+        },
+        |db, t| {
+            assert!(fs::metadata(t.join("a/b")).unwrap().is_dir());
+            assert_eq!(fs::read(t.join("a/b/file")).unwrap(), b"new");
+            assert!(db.record(&t.join("a/b/file")).unwrap().is_some());
+        }
+        => EntryResult::Replaced
+        ; "removes_parent_obstruction_via_prompt"
+    )]
+    #[test_case(
+        |_db, t| {
+            set_prompt_choice(ObstructionChoice::Replace);
+            fs::create_dir_all(t.join("a")).unwrap();
+            fs::create_dir(t.join("real")).unwrap();
+            symlink(t.join("real"), t.join("a/b")).unwrap();
+            let source = t.join("src");
+            fs::write(&source, b"new").unwrap();
+            entry!(source, t.join("a/b/file"), DeployType::Copy)
+        },
+        |db, t| {
+            assert!(fs::metadata(t.join("a/b")).unwrap().is_dir());
+            assert_eq!(fs::read(t.join("a/b/file")).unwrap(), b"new");
+            assert!(db.record(&t.join("a/b/file")).unwrap().is_some());
+        }
+        => EntryResult::Replaced
+        ; "removes_symlink_parent_obstruction_via_prompt"
+    )]
+    #[test_case(
+        |_db, t| {
+            set_prompt_choice(ObstructionChoice::Replace);
+            fs::create_dir_all(t.join("a")).unwrap();
+            fs::create_dir(t.join("real")).unwrap();
+            fs::write(t.join("real/file"), b"old").unwrap();
+            symlink(t.join("real"), t.join("a/b")).unwrap();
+            let source = t.join("src");
+            fs::write(&source, b"new").unwrap();
+            entry!(source, t.join("a/b/file"), DeployType::Copy)
+        },
+        |db, t| {
+            assert!(fs::metadata(t.join("a/b")).unwrap().is_dir());
+            assert_eq!(fs::read(t.join("a/b/file")).unwrap(), b"new");
+            assert_eq!(fs::read(t.join("real/file")).unwrap(), b"old");
+            assert!(db.record(&t.join("a/b/file")).unwrap().is_some());
+        }
+        => EntryResult::Replaced
+        ; "symlink_parent_with_existing_leaf_is_replaced_as_obstruction"
+    )]
+    #[test_case(
+        |_db, t| {
+            let source = t.join("src");
+            symlink(t.join("missing"), &source).unwrap();
+            entry!(source, t.join("target"), DeployType::Copy)
+        },
+        |db, t| {
+            assert!(fs::symlink_metadata(t.join("target")).is_err());
+            assert_eq!(db.record(&t.join("target")).unwrap(), None);
+        }
+        => panics ""
+        ; "source_is_a_dangling_symlink"
+    )]
+    #[test_case(
+        |_db, t| {
+            let source = t.join("srcdir");
+            fs::create_dir(&source).unwrap();
+            entry!(source, t.join("target"), DeployType::Copy)
+        },
+        |db, t| {
+            assert!(fs::symlink_metadata(t.join("target")).is_err());
+            assert_eq!(db.record(&t.join("target")).unwrap(), None);
+        }
+        => panics ""
+        ; "source_is_not_a_regular_file"
+    )]
+    #[test_case(
+        |_db, t| {
+            let source = t.join("src");
+            fs::write(&source, b"{{ missing }}").unwrap();
+            entry!(source, t.join("target"), DeployType::Template)
+        },
+        |db, t| {
+            assert!(fs::symlink_metadata(t.join("target")).is_err());
+            assert_eq!(db.record(&t.join("target")).unwrap(), None);
+        }
+        => panics ""
+        ; "template_with_undefined_variable_errors"
+    )]
+    fn deploy_entry_test<
+        F: Fn(&mut StateDatabase, &Path) -> config::DeploymentEntry,
+        G: Fn(&StateDatabase, &Path),
+    >(
+        setup: F,
+        assert: G,
+    ) -> EntryResult {
+        let tmp = tempdir().unwrap();
+        let mut database = StateDatabase::open_at(&tmp.path().join("db")).unwrap();
+        let entry = setup(&mut database, tmp.path());
+        let mut replace_all = false;
+        let result = deploy_entry(
+            &database,
+            tmp.path(),
+            &entry,
+            &HashMap::new(),
+            &mut replace_all,
+        );
+        assert(&database, tmp.path());
+        result.unwrap()
+    }
+
+    #[test_case(
+        |_db, t| {
+            let target_a = t.join("target_a");
+            fs::write(&target_a, b"old-a").unwrap();
+            let source_a = t.join("src_a");
+            fs::write(&source_a, b"new-a").unwrap();
+            let target_b = t.join("target_b");
+            fs::write(&target_b, b"old-b").unwrap();
+            let source_b = t.join("src_b");
+            fs::write(&source_b, b"new-b").unwrap();
+            vec![
+                entry!(source_a, target_a, DeployType::Copy),
+                entry!(source_b, target_b, DeployType::Copy),
+            ]
+        },
+        |db, t| {
+            assert_eq!(fs::read(t.join("target_a")).unwrap(), b"new-a");
+            assert_eq!(fs::read(t.join("target_b")).unwrap(), b"new-b");
+            assert!(db.record(&t.join("target_a")).unwrap().is_some());
+            assert!(db.record(&t.join("target_b")).unwrap().is_some());
+        }
+        => vec![EntryResult::Replaced, EntryResult::Replaced]
+        ; "replace_all_latches_across_entries"
+    )]
+    #[test_case(
+        |_db, t| {
+            fs::create_dir(t.join("a")).unwrap();
+            fs::write(t.join("a/b"), b"").unwrap();
+            let source = t.join("src");
+            fs::write(&source, b"new").unwrap();
+            let target_b = t.join("target_b");
+            fs::write(&target_b, b"old-b").unwrap();
+            let source_b = t.join("src_b");
+            fs::write(&source_b, b"new-b").unwrap();
+            vec![
+                entry!(source, t.join("a/b/file"), DeployType::Copy),
+                entry!(source_b, target_b, DeployType::Copy),
+            ]
+        },
+        |db, t| {
+            assert!(fs::metadata(t.join("a/b")).unwrap().is_dir());
+            assert_eq!(fs::read(t.join("a/b/file")).unwrap(), b"new");
+            assert_eq!(fs::read(t.join("target_b")).unwrap(), b"new-b");
+            assert!(db.record(&t.join("a/b/file")).unwrap().is_some());
+            assert!(db.record(&t.join("target_b")).unwrap().is_some());
+        }
+        => vec![EntryResult::Replaced, EntryResult::Replaced]
+        ; "replace_all_latches_from_parent_obstruction"
+    )]
+    #[test_case(
+        |_db, t| {
+            let target_a = t.join("target_a");
+            fs::write(&target_a, b"old-a").unwrap();
+            let source_a = t.join("src_a");
+            fs::write(&source_a, b"new-a").unwrap();
+            fs::create_dir(t.join("a")).unwrap();
+            fs::write(t.join("a/b"), b"").unwrap();
+            let source_b = t.join("src_b");
+            fs::write(&source_b, b"new-b").unwrap();
+            vec![
+                entry!(source_a, target_a, DeployType::Copy),
+                entry!(source_b, t.join("a/b/file"), DeployType::Copy),
+            ]
+        },
+        |db, t| {
+            assert_eq!(fs::read(t.join("target_a")).unwrap(), b"new-a");
+            assert!(fs::metadata(t.join("a/b")).unwrap().is_dir());
+            assert_eq!(fs::read(t.join("a/b/file")).unwrap(), b"new-b");
+            assert!(db.record(&t.join("target_a")).unwrap().is_some());
+            assert!(db.record(&t.join("a/b/file")).unwrap().is_some());
+        }
+        => vec![EntryResult::Replaced, EntryResult::Replaced]
+        ; "replace_all_latches_via_target_prompt_then_removes_parent_obstruction_without_prompt"
+    )]
+    fn deploy_entry_replace_all_test<
+        F: Fn(&mut StateDatabase, &Path) -> Vec<config::DeploymentEntry>,
+        G: Fn(&StateDatabase, &Path),
+    >(
+        setup: F,
+        assert: G,
+    ) -> Vec<EntryResult> {
+        let tmp = tempdir().unwrap();
+        let mut database = StateDatabase::open_at(&tmp.path().join("db")).unwrap();
+        set_prompt_choice(ObstructionChoice::ReplaceAll);
+        let entries = setup(&mut database, tmp.path());
+        let mut replace_all = false;
+        let mut results = Vec::new();
+        for entry in &entries {
+            let result = deploy_entry(
+                &database,
+                tmp.path(),
+                entry,
+                &HashMap::new(),
+                &mut replace_all,
+            );
+            results.push(result.unwrap());
+        }
+        assert(&database, tmp.path());
+        results
+    }
 }
