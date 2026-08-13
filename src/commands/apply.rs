@@ -1,6 +1,4 @@
-// TODO optimize fs::read
 use std::{
-    cell::RefCell,
     fmt::Display,
     fs,
     io::Write,
@@ -9,10 +7,13 @@ use std::{
     process::{Command, Stdio},
 };
 
+#[cfg(any(test, feature = "testing"))]
+use std::cell::RefCell;
+
 use miette::{Result, WrapErr, miette};
 use similar::TextDiff;
 use strum::EnumIter;
-use tui::prompt::{PromptError, PromptOption, SelectPrompt};
+use tui::prompt::{PromptError, PromptOption};
 
 use crate::ExitStatus;
 use crate::config::{self, DeployType};
@@ -234,7 +235,7 @@ fn deploy_entry(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter)]
-enum ObstructionChoice {
+pub enum ObstructionChoice {
     Skip,
     ViewDetail,
     Replace,
@@ -250,8 +251,15 @@ impl PromptOption for ObstructionChoice {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 thread_local! {
-    static PROMPT_CHOICE: RefCell<Option<ObstructionChoice>> = const { RefCell::new(None) }
+    pub static PROMPT_CHOICE: RefCell<Option<ObstructionChoice>> = const { RefCell::new(None) };
+    pub static PROMPT_COUNT: RefCell<usize> = const { RefCell::new(0) };
+}
+
+#[cfg(any(test, feature = "testing"))]
+pub fn set_prompt_choice(choice: ObstructionChoice) {
+    PROMPT_CHOICE.with(|current| *current.borrow_mut() = Some(choice));
 }
 
 fn prompt_for_obstruction(
@@ -259,7 +267,8 @@ fn prompt_for_obstruction(
     obstruction: &Path,
     _context: &std::collections::HashMap<String, templater::value::Value>,
 ) -> std::result::Result<ObstructionChoice, PromptError> {
-    if cfg!(test) {
+    if cfg!(any(test, feature = "testing")) {
+        PROMPT_COUNT.with_borrow_mut(|c| *c += 1);
         Ok(PROMPT_CHOICE.with(|c| c.borrow().to_owned().unwrap()))
     } else {
         let question = format!(
@@ -274,7 +283,7 @@ How would you like to proceed?"#,
         let can_show_detail = fs::metadata(&entry.source_path)
             .is_ok_and(|metadata| metadata.is_file())
             && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
-        SelectPrompt::new()
+        tui::prompt::SelectPrompt::new()
             .question(question)
             .filter(move |choice| can_show_detail || *choice != ObstructionChoice::ViewDetail)
             .interact()
@@ -590,10 +599,6 @@ mod tests {
                 mode: $mode,
             }
         };
-    }
-
-    fn set_prompt_choice(choice: ObstructionChoice) {
-        PROMPT_CHOICE.with(|current| *current.borrow_mut() = Some(choice));
     }
 
     #[test_case(
@@ -982,6 +987,7 @@ mod tests {
             results.push(result.unwrap());
         }
         assert(&database, tmp.path());
+        assert_eq!(PROMPT_COUNT.with(|c| *c.borrow()), 1);
         results
     }
 }
