@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fmt::Display,
     fs,
     io::Write,
@@ -23,7 +24,24 @@ use crate::state::{Kind, StateDatabase, StateLock, StateRecord};
 use crate::template;
 
 /// Reconciles the desired deployment with the target directory.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ApplyOptions {
+    pub clean_up: bool,
+    pub prune_empty_dirs: bool,
+    pub dry_run: bool,
+    pub quiet: bool,
+    pub verbose: bool,
+}
+
 pub fn run(source: &Path, target_override: Option<std::path::PathBuf>) -> Result<ExitStatus> {
+    run_with_options(source, target_override, ApplyOptions::default())
+}
+
+pub fn run_with_options(
+    source: &Path,
+    target_override: Option<std::path::PathBuf>,
+    options: ApplyOptions,
+) -> Result<ExitStatus> {
     let _lock = StateLock::acquire()?;
     let deployment = config::read(source, target_override)?;
     let target = &deployment.target_directory;
@@ -37,22 +55,23 @@ pub fn run(source: &Path, target_override: Option<std::path::PathBuf>) -> Result
             target.display()
         ));
     }
-    if deployment.entries.is_empty() {
-        return Ok(ExitStatus::Success);
-    }
-    if fs::symlink_metadata(target).is_err() {
+    if !deployment.entries.is_empty() && fs::symlink_metadata(target).is_err() && !options.dry_run {
         fs::create_dir_all(target)
             .map_err(|error| miette!(error).wrap_err("cannot create target directory"))?;
     }
 
     let database = StateDatabase::open()?;
-    let mut entries = deployment.entries;
+    let mut entries = deployment.entries.clone();
     entries.sort_by(|left, right| left.target_path.cmp(&right.target_path));
     let mut replace_all = false;
     let mut skipped = 0;
     let mut deployed = 0;
     let mut replaced = 0;
     for entry in entries {
+        if options.dry_run {
+            report_dry_run_entry(&database, target, &entry)?;
+            continue;
+        }
         match deploy_entry(
             &database,
             target,
@@ -60,13 +79,57 @@ pub fn run(source: &Path, target_override: Option<std::path::PathBuf>) -> Result
             &deployment.variable_context,
             &mut replace_all,
         )? {
-            EntryResult::Deployed => deployed += 1,
-            EntryResult::Replaced => replaced += 1,
-            EntryResult::Skipped => skipped += 1,
+            EntryResult::Deployed => {
+                deployed += 1;
+                if options.verbose {
+                    println!("deployed {}", entry.target_path.display());
+                }
+            }
+            EntryResult::Replaced => {
+                replaced += 1;
+                if options.verbose {
+                    println!("replaced {}", entry.target_path.display());
+                }
+            }
+            EntryResult::Skipped => {
+                skipped += 1;
+                if options.verbose {
+                    println!("skipped {}", entry.target_path.display());
+                }
+            }
             EntryResult::Cancelled => return Ok(ExitStatus::Cancelled),
         }
     }
-    println!("deployed {deployed}, replaced {replaced}, skipped {skipped}");
+    if options.dry_run {
+        if options.clean_up {
+            let desired = deployment
+                .entries
+                .iter()
+                .map(|entry| entry.target_path.clone())
+                .collect();
+            let _ = cleanup(&database, target, &desired, options, true)?;
+        }
+        return Ok(ExitStatus::Success);
+    }
+    let mut removed = 0;
+    let mut pruned = 0;
+    if options.clean_up && skipped == 0 {
+        let desired = deployment
+            .entries
+            .iter()
+            .map(|entry| entry.target_path.clone())
+            .collect();
+        (removed, pruned) = cleanup(&database, target, &desired, options, false)?;
+    }
+    if !options.quiet {
+        if options.clean_up {
+            println!(
+                "deployed {deployed}, replaced {replaced}, skipped {skipped}, removed {removed}, pruned {pruned}"
+            );
+        } else {
+            println!("deployed {deployed}, replaced {replaced}, skipped {skipped}");
+        }
+    }
     if skipped > 0 {
         return Ok(ExitStatus::Skipped);
     }
@@ -232,6 +295,211 @@ fn deploy_entry(
     } else {
         EntryResult::Deployed
     })
+}
+
+fn report_dry_run_entry(
+    database: &StateDatabase,
+    target_root: &Path,
+    entry: &config::DeploymentEntry,
+) -> Result<()> {
+    let obstruction = parent_obstruction(target_root, &entry.target_path)?;
+    let target_exists = fs::symlink_metadata(&entry.target_path).is_ok();
+    let action = if obstruction.is_some()
+        || (target_exists && !is_target_managed(database, &entry.target_path)?)
+    {
+        "obstruction"
+    } else if target_exists {
+        "replaced"
+    } else {
+        "deployed"
+    };
+    println!("{action} {}", entry.target_path.display());
+    Ok(())
+}
+
+fn is_target_managed(database: &StateDatabase, path: &Path) -> Result<bool> {
+    match database.record(path)? {
+        Some(record) => managed::is_managed(&record),
+        None => Ok(false),
+    }
+}
+
+fn cleanup(
+    database: &StateDatabase,
+    target_root: &Path,
+    desired: &HashSet<std::path::PathBuf>,
+    options: ApplyOptions,
+    dry_run: bool,
+) -> Result<(usize, usize)> {
+    let mut removed = 0;
+    let mut pruned = 0;
+    let mut planned_removals = HashSet::new();
+    let mut records = database.managed_paths()?;
+    records.sort_by(|left, right| left.target_path.cmp(&right.target_path));
+    for record in records {
+        let path = &record.target_path;
+        if path == target_root || !path.starts_with(target_root) || desired.contains(path) {
+            continue;
+        }
+        let parent = path
+            .parent()
+            .ok_or_else(|| miette!("stale target path has no parent"))?;
+        if has_symlink_component(target_root, parent)? {
+            if !dry_run {
+                database.remove(path)?;
+            }
+            if dry_run {
+                println!("relinquished {}", path.display());
+            }
+            continue;
+        }
+        let exists = match fs::symlink_metadata(path) {
+            Ok(_) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(miette!(error).wrap_err("cannot inspect stale target")),
+        };
+        if !exists {
+            if !dry_run {
+                database.remove(path)?;
+            }
+            if dry_run {
+                println!("relinquished {}", path.display());
+            }
+            continue;
+        }
+        if !managed::is_managed(&record)? {
+            if !dry_run {
+                database.remove(path)?;
+            }
+            if dry_run {
+                println!("relinquished {}", path.display());
+            }
+            continue;
+        }
+        if dry_run {
+            planned_removals.insert(path.clone());
+            println!("removed {}", path.display());
+            continue;
+        }
+        remove_path(database, path)?;
+        removed += 1;
+        if options.verbose {
+            println!("removed {}", path.display());
+        }
+        if options.prune_empty_dirs {
+            pruned += prune_parents(target_root, path, options.verbose)?;
+        }
+    }
+    if dry_run && options.prune_empty_dirs {
+        report_dry_run_pruning(target_root, &planned_removals)?;
+    }
+    Ok((removed, pruned))
+}
+
+fn report_dry_run_pruning(
+    target_root: &Path,
+    removals: &HashSet<std::path::PathBuf>,
+) -> Result<()> {
+    let mut planned = removals.clone();
+    let mut parents = removals
+        .iter()
+        .filter_map(|path| path.parent())
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>();
+    parents.sort();
+    parents.dedup();
+    for parent in parents {
+        let mut current = Some(parent);
+        while let Some(directory) = current {
+            if directory == target_root || !directory.starts_with(target_root) {
+                break;
+            }
+            if has_symlink_component(target_root, &directory)? {
+                break;
+            }
+            if !would_be_empty(&directory, &planned)? {
+                break;
+            }
+            println!("pruned {}", directory.display());
+            planned.insert(directory.clone());
+            current = directory.parent().map(Path::to_path_buf);
+        }
+    }
+    Ok(())
+}
+
+fn would_be_empty(path: &Path, removals: &HashSet<std::path::PathBuf>) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(miette!(error).wrap_err("cannot inspect prune directory")),
+    };
+    if !metadata.file_type().is_dir() {
+        return Ok(false);
+    }
+    for child in fs::read_dir(path)
+        .map_err(|error| miette!(error).wrap_err("cannot inspect prune directory"))?
+    {
+        let child = child
+            .map_err(|error| miette!(error).wrap_err("cannot inspect prune directory"))?
+            .path();
+        if removals.contains(&child) {
+            continue;
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+fn has_symlink_component(target_root: &Path, path: &Path) -> Result<bool> {
+    let relative = path
+        .strip_prefix(target_root)
+        .map_err(|_| miette!("path is outside target directory"))?;
+    let mut current = target_root.to_path_buf();
+    for component in relative.components() {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(miette!(error).wrap_err("cannot inspect target parent")),
+        }
+    }
+    Ok(false)
+}
+
+fn prune_parents(target_root: &Path, removed_path: &Path, verbose: bool) -> Result<usize> {
+    let mut current = removed_path.parent();
+    let mut count = 0;
+    while let Some(parent) = current {
+        if parent == target_root || !parent.starts_with(target_root) {
+            break;
+        }
+        if has_symlink_component(target_root, parent)? {
+            break;
+        }
+        let metadata = match fs::symlink_metadata(parent) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => return Err(miette!(error).wrap_err("cannot inspect prune directory")),
+        };
+        if !metadata.file_type().is_dir() {
+            break;
+        }
+        let mut children = fs::read_dir(parent)
+            .map_err(|error| miette!(error).wrap_err("cannot inspect prune directory"))?;
+        if children.next().is_some() {
+            break;
+        }
+        fs::remove_dir(parent)
+            .map_err(|error| miette!(error).wrap_err("cannot prune empty directory"))?;
+        count += 1;
+        if verbose {
+            println!("pruned {}", parent.display());
+        }
+        current = parent.parent();
+    }
+    Ok(count)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter)]

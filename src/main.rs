@@ -10,10 +10,23 @@ fn main() -> Result<(), Error> {
     let mut status = ExitStatus::Success;
     match command {
         Command::Status => dotrift::commands::status::run()?,
-        Command::Apply => {
-            status = dotrift::commands::apply::run(
+        Command::Apply {
+            clean_up,
+            prune_empty_dirs,
+            dry_run,
+            quiet,
+            verbose,
+        } => {
+            status = dotrift::commands::apply::run_with_options(
                 &source.expect("apply source is unavailable"),
                 target,
+                dotrift::commands::apply::ApplyOptions {
+                    clean_up,
+                    prune_empty_dirs,
+                    dry_run,
+                    quiet,
+                    verbose,
+                },
             )?
         }
         Command::Profile { command } => {
