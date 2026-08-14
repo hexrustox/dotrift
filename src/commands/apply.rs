@@ -117,9 +117,9 @@ fn deploy_entry(
     if let Some(obstruction) = obstruction {
         if !*replace_all {
             loop {
-                match prompt_for_obstruction(entry, &obstruction, context) {
+                match prompt_for_obstruction(entry, &obstruction) {
                     Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
-                    Ok(ObstructionChoice::ViewDetail) => show_detail(entry, &obstruction, context)?,
+                    Ok(ObstructionChoice::ViewDiff) => show_diff(entry, &obstruction, context)?,
                     Ok(ObstructionChoice::Replace) => {
                         remove_path(database, &obstruction)?;
                         replaced = true;
@@ -153,10 +153,10 @@ fn deploy_entry(
             replaced = true;
         } else if !*replace_all {
             loop {
-                match prompt_for_obstruction(entry, &entry.target_path, context) {
+                match prompt_for_obstruction(entry, &entry.target_path) {
                     Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
-                    Ok(ObstructionChoice::ViewDetail) => {
-                        show_detail(entry, &entry.target_path, context)?
+                    Ok(ObstructionChoice::ViewDiff) => {
+                        show_diff(entry, &entry.target_path, context)?
                     }
                     Ok(ObstructionChoice::Replace) => {
                         remove_path(database, &entry.target_path)?;
@@ -237,7 +237,7 @@ fn deploy_entry(
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter)]
 pub enum ObstructionChoice {
     Skip,
-    ViewDetail,
+    ViewDiff,
     Replace,
     ReplaceAll,
 }
@@ -265,29 +265,29 @@ pub fn set_prompt_choice(choice: ObstructionChoice) {
 fn prompt_for_obstruction(
     entry: &config::DeploymentEntry,
     obstruction: &Path,
-    _context: &std::collections::HashMap<String, templater::value::Value>,
 ) -> std::result::Result<ObstructionChoice, PromptError> {
-    if cfg!(any(test, feature = "testing")) {
-        PROMPT_COUNT.with_borrow_mut(|c| *c += 1);
-        Ok(PROMPT_CHOICE.with(|c| c.borrow().to_owned().unwrap()))
-    } else {
-        let question = format!(
-            r#"Cannot deploy {} {}:
-{} {} is already present.
-How would you like to proceed?"#,
-            path_kind(&entry.source_path)?,
-            entry.source_path.display(),
-            path_kind(obstruction)?,
-            obstruction.display()
-        );
-        let can_show_detail = fs::metadata(&entry.source_path)
-            .is_ok_and(|metadata| metadata.is_file())
-            && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
-        tui::prompt::SelectPrompt::new()
-            .question(question)
-            .filter(move |choice| can_show_detail || *choice != ObstructionChoice::ViewDetail)
-            .interact()
+    #[cfg(any(test, feature = "testing"))]
+    if PROMPT_CHOICE.with(|choice| choice.borrow().is_some()) {
+        PROMPT_COUNT.with_borrow_mut(|count| *count += 1);
+        return Ok(PROMPT_CHOICE.with(|choice| choice.borrow().to_owned().unwrap()));
     }
+
+    println!(
+        r#"Cannot deploy {} {},
+{} {} is already present."#,
+        path_kind(&entry.source_path)?,
+        entry.source_path.display(),
+        path_kind(obstruction)?,
+        obstruction.display()
+    );
+    let question = "How would you like to proceed?";
+    let should_show_diff = fs::metadata(&entry.source_path)
+        .is_ok_and(|metadata| metadata.is_file())
+        && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
+    tui::prompt::SelectPrompt::new()
+        .question(question)
+        .filter(move |choice| should_show_diff || *choice != ObstructionChoice::ViewDiff)
+        .interact()
 }
 
 fn path_kind(path: &Path) -> std::io::Result<&'static str> {
@@ -298,59 +298,47 @@ fn path_kind(path: &Path) -> std::io::Result<&'static str> {
     })
 }
 
-fn show_detail(
+fn show_diff(
     entry: &config::DeploymentEntry,
     target: &Path,
     context: &std::collections::HashMap<String, templater::value::Value>,
 ) -> Result<()> {
-    let source = if entry.deploy_type == DeployType::Template {
+    let source_bytes = if entry.deploy_type == DeployType::Template {
         template::render_template(&entry.source_path, context)?
     } else {
         fs::read(&entry.source_path).map_err(|error| miette!(error))?
     };
-    let target = fs::read(target).map_err(|error| miette!(error))?;
-    let source_lossy = String::from_utf8_lossy(&source);
-    let target_lossy = String::from_utf8_lossy(&target);
-    let text_diff = TextDiff::from_lines(&source_lossy, &target_lossy);
+    let target_bytes = fs::read(target).map_err(|error| miette!(error))?;
+    let source_lossy = String::from_utf8_lossy(&source_bytes);
+    let target_lossy = String::from_utf8_lossy(&target_bytes);
+    let text_diff = TextDiff::from_lines(&target_lossy, &source_lossy);
     let mut diff = text_diff.unified_diff();
-    diff.header("source", "target");
+    diff.header(
+        &target.display().to_string(),
+        &entry.source_path.display().to_string(),
+    );
     std::io::stdout().flush().map_err(|error| miette!(error))?;
-    display_detail(
-        &diff,
-        std::env::var("DOTRIFT_PAGER").ok().as_deref(),
-        std::env::var("PAGER").ok().as_deref(),
-    )
-}
 
-enum PagerResolution<'a> {
-    DotriftPager(&'a str),
-    Pager(&'a str),
-    Stdout,
-}
+    enum PagerResolution<'a> {
+        DotriftPager(&'a str),
+        Pager(&'a str),
+        Stdout,
+    }
 
-fn resolve_pager<'a>(
-    dotrift_pager: Option<&'a str>,
-    pager: Option<&'a str>,
-) -> PagerResolution<'a> {
-    match dotrift_pager {
+    let dotrift_pager = std::env::var("DOTRIFT_PAGER").ok();
+    let pager = std::env::var("PAGER").ok();
+    let resolution = match dotrift_pager.as_deref() {
         Some(command) if !command.trim().is_empty() => PagerResolution::DotriftPager(command),
-        _ => match pager {
+        _ => match pager.as_deref() {
             Some(command) if !command.trim().is_empty() => PagerResolution::Pager(command),
             _ => PagerResolution::Stdout,
         },
-    }
-}
-
-fn display_detail(
-    diff: &dyn Display,
-    dotrift_pager: Option<&str>,
-    pager: Option<&str>,
-) -> Result<()> {
-    match resolve_pager(dotrift_pager, pager) {
-        PagerResolution::DotriftPager(command) => run_pager(command, diff)
+    };
+    match resolution {
+        PagerResolution::DotriftPager(command) => run_pager(command, &diff)
             .map_err(|error| miette!(error).wrap_err("cannot run DOTRIFT_PAGER")),
         PagerResolution::Pager(command) => {
-            if run_pager(command, diff).is_err() {
+            if run_pager(command, &diff).is_err() {
                 println!("{diff}");
             }
             Ok(())

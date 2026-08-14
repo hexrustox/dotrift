@@ -85,7 +85,7 @@
                   rust
                   taplo
 
-                  nano
+                  less
 
                   nodejs-slim
                   pnpm
