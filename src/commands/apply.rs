@@ -107,7 +107,7 @@ pub fn run_with_options(
                 .iter()
                 .map(|entry| entry.target_path.clone())
                 .collect();
-            let _ = cleanup(&database, target, &desired, options, true)?;
+            let _ = cleanup(&database, target, &desired, options)?;
         }
         return Ok(ExitStatus::Success);
     }
@@ -119,7 +119,7 @@ pub fn run_with_options(
             .iter()
             .map(|entry| entry.target_path.clone())
             .collect();
-        (removed, pruned) = cleanup(&database, target, &desired, options, false)?;
+        (removed, pruned) = cleanup(&database, target, &desired, options)?;
     }
     if !options.quiet {
         if options.clean_up {
@@ -329,8 +329,8 @@ fn cleanup(
     target_root: &Path,
     desired: &HashSet<std::path::PathBuf>,
     options: ApplyOptions,
-    dry_run: bool,
 ) -> Result<(usize, usize)> {
+    let dry_run = options.dry_run;
     let mut removed = 0;
     let mut pruned = 0;
     let mut planned_removals = HashSet::new();
@@ -461,7 +461,12 @@ fn has_symlink_component(target_root: &Path, path: &Path) -> Result<bool> {
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
             Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    || error.kind() == std::io::ErrorKind::NotADirectory =>
+            {
+                return Ok(false);
+            }
             Err(error) => return Err(miette!(error).wrap_err("cannot inspect target parent")),
         }
     }
@@ -687,7 +692,7 @@ fn parent_obstruction(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::path::{Path, PathBuf};
 
     use super::*;
@@ -1245,5 +1250,323 @@ mod tests {
         assert(&database, tmp.path());
         assert_eq!(PROMPT_COUNT.with(|c| *c.borrow()), 1);
         results
+    }
+
+    #[test_case(
+        |t| t.join("missing"),
+        |_t| HashSet::new() => true;
+        "missing_path_is_empty"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            t.join("a")
+        },
+        |_t| HashSet::new() => true;
+        "existing_empty_dir_is_empty"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            fs::write(t.join("a/child"), b"").unwrap();
+            t.join("a")
+        },
+        |_t| HashSet::new() => false;
+        "dir_with_unremoved_child_is_not_empty"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            fs::write(t.join("a/child"), b"").unwrap();
+            t.join("a")
+        },
+        |t| HashSet::from([t.join("a/child")]) => true;
+        "dir_with_removed_child_is_empty"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            fs::create_dir(t.join("a/sub")).unwrap();
+            t.join("a")
+        },
+        |t| HashSet::from([t.join("a/sub")]) => true;
+        "dir_with_removed_subdir_is_empty"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("parent")).unwrap();
+            fs::write(t.join("parent/a"), b"").unwrap();
+            t.join("parent/a")
+        },
+        |_t| HashSet::new() => false;
+        "path_is_a_regular_file"
+    )]
+    fn would_be_empty_test<F: Fn(&Path) -> PathBuf, G: Fn(&Path) -> HashSet<PathBuf>>(
+        setup: F,
+        removals: G,
+    ) -> bool {
+        let tmp = tempdir().unwrap();
+        would_be_empty(&setup(tmp.path()), &removals(tmp.path())).unwrap()
+    }
+
+    #[test_case(
+        |t| t.to_path_buf() => false;
+        "target_root_itself"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a/b")).unwrap();
+            fs::write(t.join("a/b/file"), b"").unwrap();
+            t.join("a/b/file")
+        } => false;
+        "no_symlinks_anywhere"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("real")).unwrap();
+            symlink(t.join("real"), t.join("link")).unwrap();
+            t.join("link/deep/file")
+        } => true;
+        "symlink_as_first_component"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            fs::create_dir(t.join("real")).unwrap();
+            symlink(t.join("real"), t.join("a/link")).unwrap();
+            t.join("a/link/deep/file")
+        } => true;
+        "symlink_as_deeper_component"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            fs::write(t.join("a/b"), b"").unwrap();
+            t.join("a/b/c/file")
+        } => false;
+        "intermediate_file_is_not_a_symlink"
+    )]
+    #[test_case(
+        |_t| PathBuf::from("/outside/target/file") => panics "";
+        "path_outside_target_root"
+    )]
+    #[test_case(
+        |_t| PathBuf::from("/") => panics "";
+        "absolute_path_with_no_strip_prefix"
+    )]
+    fn has_symlink_component_test<F: Fn(&Path) -> PathBuf>(setup: F) -> bool {
+        let tmp = tempdir().unwrap();
+        has_symlink_component(tmp.path(), &setup(tmp.path())).unwrap()
+    }
+
+    #[test_case(
+        |t| {
+            fs::write(t.join("file"), b"").unwrap();
+            t.join("file")
+        } => 0;
+        "parent_is_target_root"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a/b")).unwrap();
+            t.join("a/b/file")
+        } => 2;
+        "removes_empty_parent_chain"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a/b/c")).unwrap();
+            t.join("a/b/c/file")
+        } => 3;
+        "removes_deep_empty_chain"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a/b")).unwrap();
+            fs::write(t.join("a/b/sibling"), b"").unwrap();
+            t.join("a/b/file")
+        } => 0;
+        "parent_with_sibling_is_not_pruned"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            fs::write(t.join("a/b"), b"").unwrap();
+            t.join("a/b/file")
+        } => 0;
+        "parent_is_a_regular_file"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("real")).unwrap();
+            fs::create_dir(t.join("a")).unwrap();
+            symlink(t.join("real"), t.join("a/link")).unwrap();
+            t.join("a/link/deep/file")
+        } => 0;
+        "symlink_parent_chain_is_not_pruned"
+    )]
+    #[test_case(
+        |t| t.join("a/b/file") => 0;
+        "missing_parent_is_not_pruned"
+    )]
+    fn prune_parents_test<F: Fn(&Path) -> PathBuf>(setup: F) -> usize {
+        let tmp = tempdir().unwrap();
+        prune_parents(tmp.path(), &setup(tmp.path()), false).unwrap()
+    }
+
+    #[test_case(
+        |db, t| {
+            fs::write(t.join("stale"), b"data").unwrap();
+            db.put(&crate::record!(f, t.join("stale"), "src", hash::hash_bytes(b"data")))
+                .unwrap();
+        },
+        |_t| HashSet::new(),
+        ApplyOptions::default(),
+        |db, t, removed, pruned| {
+            assert_eq!((removed, pruned), (1, 0));
+            assert!(fs::symlink_metadata(t.join("stale")).is_err());
+            assert_eq!(db.record(&t.join("stale")).unwrap(), None);
+        };
+        "removes_stale_managed_file"
+    )]
+    #[test_case(
+        |db, t| {
+            fs::write(t.join("stale"), b"other").unwrap();
+            db.put(&crate::record!(f, t.join("stale"), "src", hash::hash_bytes(b"data")))
+                .unwrap();
+        },
+        |_t| HashSet::new(),
+        ApplyOptions::default(),
+        |db, t, removed, pruned| {
+            assert_eq!((removed, pruned), (0, 0));
+            assert_eq!(fs::read(t.join("stale")).unwrap(), b"other");
+            assert_eq!(db.record(&t.join("stale")).unwrap(), None);
+        };
+        "relinquishes_unmanaged_stale_file"
+    )]
+    #[test_case(
+        |db, t| {
+            db.put(&crate::record!(f, t.join("missing"), "src", hash::hash_bytes(b"data")))
+                .unwrap();
+        },
+        |_t| HashSet::new(),
+        ApplyOptions::default(),
+        |db, t, removed, pruned| {
+            assert_eq!((removed, pruned), (0, 0));
+            assert_eq!(db.record(&t.join("missing")).unwrap(), None);
+        };
+        "relinquishes_missing_stale_path"
+    )]
+    #[test_case(
+        |db, t| {
+            fs::create_dir(t.join("real")).unwrap();
+            fs::write(t.join("real/child"), b"x").unwrap();
+            symlink(t.join("real"), t.join("link")).unwrap();
+            db.put(&crate::record!(f, t.join("link/child"), "src", hash::hash_bytes(b"x")))
+                .unwrap();
+        },
+        |_t| HashSet::new(),
+        ApplyOptions::default(),
+        |db, t, removed, pruned| {
+            assert_eq!((removed, pruned), (0, 0));
+            assert_eq!(fs::read(t.join("real/child")).unwrap(), b"x");
+            assert_eq!(db.record(&t.join("link/child")).unwrap(), None);
+        };
+        "relinquishes_path_under_symlink_parent"
+    )]
+    #[test_case(
+        |db, _t| {
+            db.put(&crate::record!(f, "/outside/file", "src", "h")).unwrap();
+        },
+        |_t| HashSet::new(),
+        ApplyOptions::default(),
+        |db, _t, removed, pruned| {
+            assert_eq!((removed, pruned), (0, 0));
+            assert!(db.record(Path::new("/outside/file")).unwrap().is_some());
+        };
+        "skips_path_outside_target_root"
+    )]
+    #[test_case(
+        |db, t| {
+            db.put(&crate::record!(f, t, "src", "h")).unwrap();
+        },
+        |_t| HashSet::new(),
+        ApplyOptions::default(),
+        |db, t, removed, pruned| {
+            assert_eq!((removed, pruned), (0, 0));
+            assert!(db.record(t).unwrap().is_some());
+        };
+        "skips_path_that_is_target_root"
+    )]
+    #[test_case(
+        |db, t| {
+            fs::write(t.join("stale"), b"data").unwrap();
+            db.put(&crate::record!(f, t.join("stale"), "src", hash::hash_bytes(b"data")))
+                .unwrap();
+        },
+        |t| HashSet::from([t.join("stale")]),
+        ApplyOptions::default(),
+        |db, t, removed, pruned| {
+            assert_eq!((removed, pruned), (0, 0));
+            assert!(fs::symlink_metadata(t.join("stale")).is_ok());
+            assert!(db.record(&t.join("stale")).unwrap().is_some());
+        };
+        "skips_path_in_desired"
+    )]
+    #[test_case(
+        |db, t| {
+            fs::write(t.join("stale"), b"data").unwrap();
+            db.put(&crate::record!(f, t.join("stale"), "src", hash::hash_bytes(b"data")))
+                .unwrap();
+        },
+        |_t| HashSet::new(),
+        ApplyOptions {
+            dry_run: true,
+            ..ApplyOptions::default()
+        },
+        |db, t, removed, pruned| {
+            assert_eq!((removed, pruned), (0, 0));
+            assert!(fs::symlink_metadata(t.join("stale")).is_ok());
+            assert!(db.record(&t.join("stale")).unwrap().is_some());
+        };
+        "dry_run_removes_nothing"
+    )]
+    #[test_case(
+        |db, t| {
+            fs::create_dir_all(t.join("a/b")).unwrap();
+            fs::write(t.join("a/b/file"), b"data").unwrap();
+            db.put(&crate::record!(f, t.join("a/b/file"), "src", hash::hash_bytes(b"data")))
+                .unwrap();
+        },
+        |_t| HashSet::new(),
+        ApplyOptions {
+            prune_empty_dirs: true,
+            ..ApplyOptions::default()
+        },
+        |db, t, removed, pruned| {
+            assert_eq!(removed, 1);
+            assert_eq!(pruned, 2);
+            assert!(fs::symlink_metadata(t.join("a")).is_err());
+            assert!(fs::symlink_metadata(t.join("a/b")).is_err());
+            assert_eq!(db.record(&t.join("a/b/file")).unwrap(), None);
+        };
+        "prunes_empty_parent_dirs"
+    )]
+    fn cleanup_test<
+        F: Fn(&mut StateDatabase, &Path),
+        G: Fn(&Path) -> HashSet<PathBuf>,
+        H: Fn(&StateDatabase, &Path, usize, usize),
+    >(
+        setup: F,
+        desired: G,
+        options: ApplyOptions,
+        assert: H,
+    ) {
+        let tmp = tempdir().unwrap();
+        let mut database = StateDatabase::open_at(&tmp.path().join("db")).unwrap();
+        setup(&mut database, tmp.path());
+        let (removed, pruned) =
+            cleanup(&database, tmp.path(), &desired(tmp.path()), options).unwrap();
+        assert(&database, tmp.path(), removed, pruned);
     }
 }

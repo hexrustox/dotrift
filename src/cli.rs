@@ -1,3 +1,4 @@
+// TODO add doc comments
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -21,9 +22,9 @@ pub enum Command {
     Apply {
         #[arg(long)]
         clean_up: bool,
-        #[arg(long)]
+        #[arg(long, requires = "clean_up")]
         prune_empty_dirs: bool,
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["verbose", "quiet"])]
         dry_run: bool,
         #[arg(long, conflicts_with = "verbose")]
         quiet: bool,
@@ -52,34 +53,6 @@ impl Cli {
             source,
             target,
         } = self;
-        if let Command::Apply {
-            prune_empty_dirs: true,
-            clean_up: false,
-            ..
-        } = &command
-        {
-            return Err(miette::MietteDiagnostic::new(
-                "`--prune-empty-dirs` cannot be used without `--clean-up`",
-            )
-            .with_help("pass `--clean-up` with `--prune-empty-dirs`")
-            .into());
-        }
-        if let Command::Apply {
-            dry_run: true,
-            quiet: true,
-            ..
-        } = &command
-        {
-            return Err(miette!("`--dry-run` conflicts with `--quiet`"));
-        }
-        if let Command::Apply {
-            dry_run: true,
-            verbose: true,
-            ..
-        } = &command
-        {
-            return Err(miette!("`--dry-run` conflicts with `--verbose`"));
-        }
         let source = if matches!(
             &command,
             Command::Status
@@ -112,16 +85,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prune_requires_cleanup() {
-        let cli = Cli::try_parse_from(["dotrift", "apply", "--prune-empty-dirs"]).unwrap();
-        assert!(cli.resolve().is_err());
-    }
-
-    #[test]
-    fn dry_run_conflicts_with_quiet_and_verbose() {
-        for output_flag in ["--quiet", "--verbose"] {
-            let cli = Cli::try_parse_from(["dotrift", "apply", "--dry-run", output_flag]).unwrap();
-            assert!(cli.resolve().is_err());
-        }
+    fn assert_apply_flags() {
+        assert!(Cli::try_parse_from(["dotrift", "apply", "--prune-empty-dirs"]).is_err());
+        assert!(Cli::try_parse_from(["dotrift", "apply", "--dry-run", "--verbose"]).is_err());
+        assert!(Cli::try_parse_from(["dotrift", "apply", "--verbose", "--quiet"]).is_err());
     }
 }
