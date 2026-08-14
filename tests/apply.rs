@@ -355,3 +355,20 @@ fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setu
     dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf())).unwrap();
     assert(&source_dir, &target_dir);
 }
+
+#[test]
+fn creates_missing_target_directory() {
+    let env = TestEnv::new();
+    let source_dir = env.path("source");
+    let target_dir = env.path("target");
+    fs::create_dir_all(&source_dir).unwrap();
+    fs::write(source_dir.join("file.txt"), b"hello").unwrap();
+    fs::write(
+        source_dir.join("dotrift.toml"),
+        "[portal]\n\"file.txt\" = \"target.txt\"\n",
+    )
+    .unwrap();
+    dotrift::commands::apply::run(&source_dir, Some(target_dir.clone())).unwrap();
+    assert!(fs::symlink_metadata(&target_dir).unwrap().is_dir());
+    assert_eq!(fs::read(target_dir.join("target.txt")).unwrap(), b"hello");
+}

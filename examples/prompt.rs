@@ -14,21 +14,16 @@ fn main() {
         std::env::set_var("XDG_STATE_HOME", &state);
     }
 
-    fs::write(
-        source.join("dotrift.toml"),
-        "[portal]\n\"greeting.txt\" = \"greeting.txt\"\n",
-    )
-    .expect("cannot write dotrift.toml");
-    fs::write(source.join("greeting.txt"), "hello from the dotrift source")
-        .expect("cannot write source file");
-    fs::write(target.join("greeting.txt"), "this file was already here")
-        .expect("cannot write obstructing target file");
+    fs::write(source.join("dotrift.toml"), "[portal]\n\"**\" = \".\"\n").unwrap();
+    fs::write(source.join("file1"), "new").unwrap();
+    fs::write(source.join("file2"), "new").unwrap();
+    fs::write(target.join("file1"), "old").unwrap();
+    fs::write(target.join("file2"), "old").unwrap();
 
     let status = dotrift::commands::apply::run(&source, Some(target.clone())).unwrap();
 
-    println!(
-        "{}",
-        fs::read_to_string(target.join("greeting.txt")).unwrap()
-    );
+    for f in ["file1", "file2"] {
+        println!("{f}: {}", fs::read_to_string(target.join(f)).unwrap());
+    }
     println!("{status:?}");
 }
