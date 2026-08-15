@@ -1,13 +1,13 @@
 mod common;
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 
 use common::TestEnv;
 use dotrift::commands::apply::{ObstructionChoice, PROMPT_COUNT, set_prompt_choice};
 use dotrift::hash::hash_bytes;
-use dotrift::state::{Kind, StateDatabase, StateRecord};
+use dotrift::state::{Kind, StateDatabase};
 use test_case::test_case;
 
 #[test_case(
@@ -277,63 +277,6 @@ use test_case::test_case;
     ; "replace_all_latches"
 )]
 #[test_case(
-    |source: &Path, target: &Path| {
-        fs::write(target.join("target.txt"), b"old").unwrap();
-        StateDatabase::open()
-            .unwrap()
-            .put(&StateRecord {
-                target_path: target.join("target.txt"),
-                source_path: source.join("file.txt"),
-                kind: Kind::File,
-                link_target: None,
-                content_hash: Some(hash_bytes(b"old")),
-            })
-            .unwrap();
-        fs::write(source.join("file.txt"), b"new").unwrap();
-        "[portal]\n\"file.txt\" = \"target.txt\"\n"
-    },
-    |source: &Path, target: &Path| {
-        assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"new");
-        let record = StateDatabase::open()
-            .unwrap()
-            .record(&target.join("target.txt"))
-            .unwrap()
-            .unwrap();
-        assert_eq!(record.kind, Kind::Symlink);
-        assert_eq!(record.link_target, Some(source.join("file.txt")));
-    }
-    ; "managed_path_auto_replaced"
-)]
-#[test_case(
-    |source: &Path, target: &Path| {
-        set_prompt_choice(ObstructionChoice::Replace);
-        fs::write(target.join("target.txt"), b"tampered").unwrap();
-        StateDatabase::open()
-            .unwrap()
-            .put(&StateRecord {
-                target_path: target.join("target.txt"),
-                source_path: source.join("file.txt"),
-                kind: Kind::File,
-                link_target: None,
-                content_hash: Some(hash_bytes(b"old")),
-            })
-            .unwrap();
-        fs::write(source.join("file.txt"), b"new").unwrap();
-        "[portal]\n\"file.txt\" = \"target.txt\"\n"
-    },
-    |_source: &Path, target: &Path| {
-        assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"new");
-        assert!(
-            StateDatabase::open()
-                .unwrap()
-                .record(&target.join("target.txt"))
-                .unwrap()
-                .is_some()
-        );
-    }
-    ; "modified_managed_path_prompts"
-)]
-#[test_case(
     |source: &Path, _target: &Path| {
         fs::create_dir_all(source.join("empty")).unwrap();
         "[portal]\n\"empty\" = \"dst\"\n"
@@ -354,6 +297,574 @@ fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setu
     .unwrap();
     dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf())).unwrap();
     assert(&source_dir, &target_dir);
+}
+
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"hello").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n"
+    },
+    |_source: &Path, _target: &Path| None,
+    |source: &Path, target: &Path| {
+        let file = target.join("target.txt");
+        assert!(file.is_symlink());
+        assert_eq!(fs::read(&file).unwrap(), b"hello");
+        let record = StateDatabase::open()
+            .unwrap()
+            .record(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.kind, Kind::Symlink);
+        assert_eq!(record.link_target, Some(source.join("file.txt")));
+    }
+    ; "reapply_same_config_is_idempotent"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"old").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n"
+    },
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"new").unwrap();
+        None
+    },
+    |source: &Path, target: &Path| {
+        let file = target.join("target.txt");
+        assert!(file.is_symlink());
+        assert_eq!(fs::read_link(&file).unwrap(), source.join("file.txt"));
+        assert_eq!(fs::read(&file).unwrap(), b"new");
+        let record = StateDatabase::open()
+            .unwrap()
+            .record(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.kind, Kind::Symlink);
+        assert_eq!(record.link_target, Some(source.join("file.txt")));
+        assert_eq!(PROMPT_COUNT.with(|count| *count.borrow()), 0);
+    }
+    ; "symlink_replaces_on_source_change"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"old").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
+    },
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"new").unwrap();
+        None
+    },
+    |_source: &Path, target: &Path| {
+        let file = target.join("target.txt");
+        assert_eq!(fs::read(&file).unwrap(), b"new");
+        let record = StateDatabase::open()
+            .unwrap()
+            .record(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.kind, Kind::File);
+        assert_eq!(record.content_hash, Some(hash_bytes(b"new")));
+    }
+    ; "copy_replaces_on_source_change"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(
+            source.join("dotrift_data.toml"),
+            "[variable]\nmessage = \"hi\"\n",
+        )
+        .unwrap();
+        fs::write(source.join("greeting.txt"), "{{ message }}").unwrap();
+        "[portal]\n\"greeting.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"template\" }\n"
+    },
+    |source: &Path, target: &Path| {
+        assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"hi");
+        fs::write(
+            source.join("dotrift_data.toml"),
+            "[variable]\nmessage = \"bye\"\n",
+        )
+        .unwrap();
+        None
+    },
+    |_source: &Path, target: &Path| {
+        assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"bye");
+    }
+    ; "template_rerenders_on_variable_change"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"content").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n"
+    },
+    |_source: &Path, target: &Path| {
+        assert!(target.join("target.txt").is_symlink());
+        Some("[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n")
+    },
+    |_source: &Path, target: &Path| {
+        let file = target.join("target.txt");
+        assert!(fs::symlink_metadata(&file).unwrap().is_file());
+        assert_eq!(fs::read(&file).unwrap(), b"content");
+        let record = StateDatabase::open()
+            .unwrap()
+            .record(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.kind, Kind::File);
+        assert_eq!(record.content_hash, Some(hash_bytes(b"content")));
+    }
+    ; "symlink_rule_changes_to_copy"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"content").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
+    },
+    |_source: &Path, target: &Path| {
+        assert!(fs::symlink_metadata(target.join("target.txt")).unwrap().is_file());
+        Some("[portal]\n\"file.txt\" = \"target.txt\"\n")
+    },
+    |source: &Path, target: &Path| {
+        let file = target.join("target.txt");
+        assert!(file.is_symlink());
+        assert_eq!(fs::read_link(&file).unwrap(), source.join("file.txt"));
+        let record = StateDatabase::open()
+            .unwrap()
+            .record(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.kind, Kind::Symlink);
+        assert_eq!(record.link_target, Some(source.join("file.txt")));
+    }
+    ; "copy_rule_changes_to_symlink"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(
+            source.join("dotrift_data.toml"),
+            "[variable]\nname = \"x\"\n",
+        )
+        .unwrap();
+        fs::write(source.join("file.txt"), "{{ name }}").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
+    },
+    |_source: &Path, target: &Path| {
+        assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"{{ name }}");
+        Some("[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"template\" }\n")
+    },
+    |_source: &Path, target: &Path| {
+        let file = target.join("target.txt");
+        assert_eq!(fs::read(&file).unwrap(), b"x");
+        let record = StateDatabase::open()
+            .unwrap()
+            .record(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.kind, Kind::File);
+        assert_eq!(record.content_hash, Some(hash_bytes(b"x")));
+    }
+    ; "copy_rule_changes_to_template"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("script.sh"), b"#!/bin/sh\n").unwrap();
+        "[portal]\n\"script.sh\" = \"target.sh\"\n[rule]\n\"target.sh\" = { type = \"copy\", mode = \"600\" }\n"
+    },
+    |_source: &Path, target: &Path| {
+        let mode = fs::metadata(target.join("target.sh"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+        Some("[portal]\n\"script.sh\" = \"target.sh\"\n[rule]\n\"target.sh\" = { type = \"copy\", mode = \"644\" }\n")
+    },
+    |_source: &Path, target: &Path| {
+        let mode = fs::metadata(target.join("target.sh"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o644);
+    }
+    ; "mode_change_reapplies_permissions"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("old.txt"), b"hello").unwrap();
+        "[portal]\n\"old.txt\" = \"target.txt\"\n"
+    },
+    |source: &Path, _target: &Path| {
+        fs::rename(source.join("old.txt"), source.join("new.txt")).unwrap();
+        Some("[portal]\n\"new.txt\" = \"target.txt\"\n")
+    },
+    |source: &Path, target: &Path| {
+        let file = target.join("target.txt");
+        assert!(file.is_symlink());
+        assert_eq!(fs::read_link(&file).unwrap(), source.join("new.txt"));
+        assert_eq!(fs::read(&file).unwrap(), b"hello");
+        let record = StateDatabase::open()
+            .unwrap()
+            .record(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.link_target, Some(source.join("new.txt")));
+    }
+    ; "source_renamed_redirects_symlink"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"hello").unwrap();
+        "[portal]\n\"file.txt\" = \"old.txt\"\n"
+    },
+    |_source: &Path, _target: &Path| Some("[portal]\n\"file.txt\" = \"new.txt\"\n"),
+    |source: &Path, target: &Path| {
+        let new = target.join("new.txt");
+        assert!(new.is_symlink());
+        assert_eq!(fs::read(&new).unwrap(), b"hello");
+        let old = target.join("old.txt");
+        assert!(old.is_symlink());
+        assert_eq!(fs::read_link(&old).unwrap(), source.join("file.txt"));
+        assert!(
+            StateDatabase::open()
+                .unwrap()
+                .record(&old)
+                .unwrap()
+                .is_some()
+        );
+    }
+    ; "target_redirected_leaves_stale_path"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("a.txt"), b"A").unwrap();
+        fs::write(source.join("b.txt"), b"B").unwrap();
+        "[portal]\n\"a.txt\" = \"a.txt\"\n\"b.txt\" = \"b.txt\"\n"
+    },
+    |_source: &Path, _target: &Path| Some("[portal]\n\"a.txt\" = \"a.txt\"\n"),
+    |source: &Path, target: &Path| {
+        let file = target.join("b.txt");
+        assert!(file.is_symlink());
+        assert_eq!(fs::read_link(&file).unwrap(), source.join("b.txt"));
+        assert!(StateDatabase::open().unwrap().record(&file).unwrap().is_some());
+    }
+    ; "entry_removed_leaves_stale_managed_path"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("a.txt"), b"A").unwrap();
+        "[portal]\n\"a.txt\" = \"a.txt\"\n"
+    },
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("b.txt"), b"B").unwrap();
+        Some("[portal]\n\"a.txt\" = \"a.txt\"\n\"b.txt\" = \"b.txt\"\n")
+    },
+    |_source: &Path, target: &Path| {
+        assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"A");
+        assert_eq!(fs::read(target.join("b.txt")).unwrap(), b"B");
+    }
+    ; "entry_added_deploys_alongside"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("a.txt"), b"A").unwrap();
+        "[portal]\n\"*.txt\" = \".\"\n"
+    },
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("b.md"), b"B").unwrap();
+        Some("[portal]\n\"**\" = \".\"\n")
+    },
+    |_source: &Path, target: &Path| {
+        assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"A");
+        assert_eq!(fs::read(target.join("b.md")).unwrap(), b"B");
+        assert!(fs::symlink_metadata(target.join("dotrift.toml")).is_err());
+    }
+    ; "glob_widened_deploys_new_file"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"hello").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n"
+    },
+    |source: &Path, _target: &Path| {
+        fs::write(source.join(".dotriftignore"), "target.txt\n").unwrap();
+        None
+    },
+    |source: &Path, target: &Path| {
+        let file = target.join("target.txt");
+        assert!(file.is_symlink());
+        assert_eq!(fs::read_link(&file).unwrap(), source.join("file.txt"));
+        assert!(StateDatabase::open().unwrap().record(&file).unwrap().is_some());
+    }
+    ; "ignore_added_makes_path_stale"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(
+            source.join("dotrift_data.toml"),
+            "[variable]\nv = \"base\"\n[profile.work]\nv = \"over\"\n",
+        )
+        .unwrap();
+        fs::write(source.join("out.txt"), "{{ v }}").unwrap();
+        "[portal]\n\"out.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"template\" }\n"
+    },
+    |_source: &Path, target: &Path| {
+        assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"base");
+        StateDatabase::open()
+            .unwrap()
+            .activate_profile("work")
+            .unwrap();
+        None
+    },
+    |_source: &Path, target: &Path| {
+        assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"over");
+    }
+    ; "profile_activated_between_runs"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"original").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
+    },
+    |_source: &Path, target: &Path| {
+        set_prompt_choice(ObstructionChoice::Replace);
+        fs::write(target.join("target.txt"), b"tampered").unwrap();
+        None
+    },
+    |_source: &Path, target: &Path| {
+        let file = target.join("target.txt");
+        assert_eq!(fs::read(&file).unwrap(), b"original");
+        let record = StateDatabase::open()
+            .unwrap()
+            .record(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.content_hash, Some(hash_bytes(b"original")));
+        assert_eq!(PROMPT_COUNT.with(|count| *count.borrow()), 1);
+    }
+    ; "tampered_copy_prompt_replace_restores"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"original").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
+    },
+    |_source: &Path, target: &Path| {
+        set_prompt_choice(ObstructionChoice::Skip);
+        fs::write(target.join("target.txt"), b"tampered").unwrap();
+        None
+    },
+    |_source: &Path, target: &Path| {
+        let file = target.join("target.txt");
+        assert_eq!(fs::read(&file).unwrap(), b"tampered");
+        let record = StateDatabase::open()
+            .unwrap()
+            .record(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.content_hash, Some(hash_bytes(b"original")));
+        assert_eq!(PROMPT_COUNT.with(|count| *count.borrow()), 1);
+    }
+    ; "tampered_copy_prompt_skip_retains_record"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"hello").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n"
+    },
+    |_source: &Path, target: &Path| {
+        set_prompt_choice(ObstructionChoice::Replace);
+        fs::remove_file(target.join("target.txt")).unwrap();
+        fs::write(target.join("target.txt"), b"tampered").unwrap();
+        None
+    },
+    |source: &Path, target: &Path| {
+        let file = target.join("target.txt");
+        assert!(file.is_symlink());
+        assert_eq!(fs::read_link(&file).unwrap(), source.join("file.txt"));
+        assert_eq!(fs::read(&file).unwrap(), b"hello");
+        let record = StateDatabase::open()
+            .unwrap()
+            .record(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.kind, Kind::Symlink);
+        assert_eq!(record.link_target, Some(source.join("file.txt")));
+        assert_eq!(PROMPT_COUNT.with(|count| *count.borrow()), 1);
+    }
+    ; "tampered_symlink_prompt_replace_restores"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"hello").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
+    },
+    |_source: &Path, target: &Path| {
+        fs::remove_file(target.join("target.txt")).unwrap();
+        None
+    },
+    |_source: &Path, target: &Path| {
+        let file = target.join("target.txt");
+        assert_eq!(fs::read(&file).unwrap(), b"hello");
+        let record = StateDatabase::open()
+            .unwrap()
+            .record(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.kind, Kind::File);
+        assert_eq!(record.content_hash, Some(hash_bytes(b"hello")));
+    }
+    ; "deleted_target_redeploys_despite_stale_record"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"hello").unwrap();
+        "[portal]\n\"file.txt\" = \"sub/file.txt\"\n[rule]\n\"sub/file.txt\" = { type = \"copy\" }\n"
+    },
+    |_source: &Path, target: &Path| {
+        set_prompt_choice(ObstructionChoice::Replace);
+        fs::remove_file(target.join("sub/file.txt")).unwrap();
+        fs::remove_dir(target.join("sub")).unwrap();
+        fs::create_dir(target.join("real")).unwrap();
+        symlink(target.join("real"), target.join("sub")).unwrap();
+        None
+    },
+    |_source: &Path, target: &Path| {
+        assert!(fs::symlink_metadata(target.join("sub")).unwrap().is_dir());
+        assert_eq!(fs::read(target.join("sub/file.txt")).unwrap(), b"hello");
+        assert!(fs::symlink_metadata(target.join("real")).unwrap().is_dir());
+        assert_eq!(PROMPT_COUNT.with(|count| *count.borrow()), 1);
+    }
+    ; "parent_dir_replaced_by_symlink_prompts"
+)]
+fn run_apply_test_twice<
+    F: Fn(&Path, &Path) -> &'static str,
+    G: Fn(&Path, &Path) -> Option<&'static str>,
+    H: Fn(&Path, &Path),
+>(
+    setup: F,
+    modify: G,
+    assert: H,
+) {
+    let env = TestEnv::new();
+    let source_dir = env.path("source");
+    let target_dir = env.path("target");
+    fs::create_dir_all(&source_dir).unwrap();
+    fs::create_dir_all(&target_dir).unwrap();
+    let config = setup(&source_dir, &target_dir);
+    fs::write(env.path("source/dotrift.toml"), config).unwrap();
+    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf())).unwrap();
+    fs::write(
+        env.path("source/dotrift.toml"),
+        modify(&source_dir, &target_dir).unwrap_or(config),
+    )
+    .unwrap();
+    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf())).unwrap();
+    assert(&source_dir, &target_dir);
+}
+
+#[test_case(
+    |_source: &Path, _target: &Path| "[portal]\n\"missing.txt\" = \"target.txt\"\n"
+    => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("literal portal source"))
+    ; "literal_source_missing_fails"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("a.txt"), b"A").unwrap();
+        fs::write(source.join("b.txt"), b"B").unwrap();
+        "[portal]\n\"a.txt\" = \"same\"\n\"b.txt\" = \"same\"\n"
+    }
+    => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("collision at"))
+    ; "colliding_portals_fail"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("a.txt"), b"A").unwrap();
+        fs::write(source.join("b.txt"), b"B").unwrap();
+        "[portal]\n\"a.txt\" = \"dir\"\n\"b.txt\" = \"dir/x\"\n"
+    }
+    => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("structural conflict"))
+    ; "structural_conflict_fails"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), "{{ missing }}").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"template\" }\n"
+    }
+    => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("undefined variable"))
+    ; "template_undefined_variable_fails"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        symlink(source.join("missing"), source.join("dangling")).unwrap();
+        "[portal]\n\"dangling\" = \"target.txt\"\n"
+    }
+    => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("not a regular file"))
+    ; "broken_symlink_literal_source_fails"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"x").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"symlink\", mode = \"600\" }\n"
+    }
+    => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("mode"))
+    ; "mode_conflicts_with_symlink_rule_fails"
+)]
+#[test_case(
+    |source: &Path, target: &Path| {
+        fs::write(source.join("file.txt"), b"x").unwrap();
+        fs::remove_dir(target).unwrap();
+        fs::write(target, b"not a dir").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n"
+    }
+    => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("is not a directory"))
+    ; "target_directory_is_a_file_fails"
+)]
+fn run_apply_fails<F: Fn(&Path, &Path) -> &'static str>(
+    setup: F,
+) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
+    let env = TestEnv::new();
+    let source_dir = env.path("source");
+    let target_dir = env.path("target");
+    fs::create_dir_all(&source_dir).unwrap();
+    fs::create_dir_all(&target_dir).unwrap();
+    fs::write(
+        env.path("source/dotrift.toml"),
+        setup(&source_dir, &target_dir),
+    )
+    .unwrap();
+    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf()))
+}
+
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"hello").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n"
+    },
+    |source: &Path, _target: &Path| {
+        fs::remove_file(source.join("file.txt")).unwrap();
+        None
+    }
+    => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("literal portal source"))
+    ; "source_deleted_between_runs_fails"
+)]
+fn run_apply_test_twice_fails<
+    F: Fn(&Path, &Path) -> &'static str,
+    G: Fn(&Path, &Path) -> Option<&'static str>,
+>(
+    setup: F,
+    modify: G,
+) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
+    let env = TestEnv::new();
+    let source_dir = env.path("source");
+    let target_dir = env.path("target");
+    fs::create_dir_all(&source_dir).unwrap();
+    fs::create_dir_all(&target_dir).unwrap();
+    let config = setup(&source_dir, &target_dir);
+    fs::write(env.path("source/dotrift.toml"), config).unwrap();
+    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf())).unwrap();
+    fs::write(
+        env.path("source/dotrift.toml"),
+        modify(&source_dir, &target_dir).unwrap_or(config),
+    )
+    .unwrap();
+    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf()))
 }
 
 #[test]
