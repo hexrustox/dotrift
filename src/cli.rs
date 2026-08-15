@@ -88,6 +88,7 @@ mod tests {
     fn assert_apply_flags() {
         assert!(Cli::try_parse_from(["dotrift", "apply", "--prune-empty-dirs"]).is_err());
         assert!(Cli::try_parse_from(["dotrift", "apply", "--dry-run", "--verbose"]).is_err());
+        assert!(Cli::try_parse_from(["dotrift", "apply", "--dry-run", "--quiet"]).is_err());
         assert!(Cli::try_parse_from(["dotrift", "apply", "--verbose", "--quiet"]).is_err());
     }
 }

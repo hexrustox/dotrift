@@ -1,0 +1,5 @@
+---
+source: tests/apply.rs
+expression: captured
+---
+deployed 0, replaced 1, skipped 0, removed 1, pruned 0

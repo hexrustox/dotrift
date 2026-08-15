@@ -1,0 +1,8 @@
+---
+source: tests/apply.rs
+expression: captured
+---
+deployed <root>/target/copy.txt
+deployed <root>/target/link.txt
+deployed <root>/target/tmpl.txt
+deployed 3, replaced 0, skipped 0

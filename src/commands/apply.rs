@@ -16,12 +16,12 @@ use similar::TextDiff;
 use strum::EnumIter;
 use tui::prompt::{PromptError, PromptOption};
 
-use crate::ExitStatus;
 use crate::config::{self, DeployType};
 use crate::hash;
 use crate::managed;
 use crate::state::{Kind, StateDatabase, StateLock, StateRecord};
 use crate::template;
+use crate::{ExitStatus, println_capture};
 
 /// Reconciles the desired deployment with the target directory.
 #[derive(Debug, Clone, Copy, Default)]
@@ -82,19 +82,19 @@ pub fn run_with_options(
             EntryResult::Deployed => {
                 deployed += 1;
                 if options.verbose {
-                    println!("deployed {}", entry.target_path.display());
+                    println_capture!("deployed {}", entry.target_path.display());
                 }
             }
             EntryResult::Replaced => {
                 replaced += 1;
                 if options.verbose {
-                    println!("replaced {}", entry.target_path.display());
+                    println_capture!("replaced {}", entry.target_path.display());
                 }
             }
             EntryResult::Skipped => {
                 skipped += 1;
                 if options.verbose {
-                    println!("skipped {}", entry.target_path.display());
+                    println_capture!("skipped {}", entry.target_path.display());
                 }
             }
             EntryResult::Cancelled => return Ok(ExitStatus::Cancelled),
@@ -123,11 +123,11 @@ pub fn run_with_options(
     }
     if !options.quiet {
         if options.clean_up {
-            println!(
+            println_capture!(
                 "deployed {deployed}, replaced {replaced}, skipped {skipped}, removed {removed}, pruned {pruned}"
             );
         } else {
-            println!("deployed {deployed}, replaced {replaced}, skipped {skipped}");
+            println_capture!("deployed {deployed}, replaced {replaced}, skipped {skipped}");
         }
     }
     if skipped > 0 {
@@ -313,7 +313,7 @@ fn report_dry_run_entry(
     } else {
         "deployed"
     };
-    println!("{action} {}", entry.target_path.display());
+    println_capture!("{action} {}", entry.target_path.display());
     Ok(())
 }
 
@@ -348,9 +348,6 @@ fn cleanup(
             if !dry_run {
                 database.remove(path)?;
             }
-            if dry_run {
-                println!("relinquished {}", path.display());
-            }
             continue;
         }
         let exists = match fs::symlink_metadata(path) {
@@ -362,29 +359,23 @@ fn cleanup(
             if !dry_run {
                 database.remove(path)?;
             }
-            if dry_run {
-                println!("relinquished {}", path.display());
-            }
             continue;
         }
         if !managed::is_managed(&record)? {
             if !dry_run {
                 database.remove(path)?;
             }
-            if dry_run {
-                println!("relinquished {}", path.display());
-            }
             continue;
         }
         if dry_run {
             planned_removals.insert(path.clone());
-            println!("removed {}", path.display());
+            println_capture!("removed {}", path.display());
             continue;
         }
         remove_path(database, path)?;
         removed += 1;
         if options.verbose {
-            println!("removed {}", path.display());
+            println_capture!("removed {}", path.display());
         }
         if options.prune_empty_dirs {
             pruned += prune_parents(target_root, path, options.verbose)?;
@@ -420,7 +411,7 @@ fn report_dry_run_pruning(
             if !would_be_empty(&directory, &planned)? {
                 break;
             }
-            println!("pruned {}", directory.display());
+            println_capture!("pruned {}", directory.display());
             planned.insert(directory.clone());
             current = directory.parent().map(Path::to_path_buf);
         }
@@ -500,7 +491,7 @@ fn prune_parents(target_root: &Path, removed_path: &Path, verbose: bool) -> Resu
             .map_err(|error| miette!(error).wrap_err("cannot prune empty directory"))?;
         count += 1;
         if verbose {
-            println!("pruned {}", parent.display());
+            println_capture!("pruned {}", parent.display());
         }
         current = parent.parent();
     }
@@ -571,6 +562,7 @@ fn path_kind(path: &Path) -> std::io::Result<&'static str> {
     })
 }
 
+// TODO optimize with stream
 fn show_diff(
     entry: &config::DeploymentEntry,
     target: &Path,
