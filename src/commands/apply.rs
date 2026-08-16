@@ -8,9 +8,6 @@ use std::{
     process::{Command, Stdio},
 };
 
-#[cfg(any(test, feature = "testing"))]
-use std::cell::RefCell;
-
 use miette::{Result, WrapErr, miette};
 use similar::TextDiff;
 use strum::EnumIter;
@@ -516,44 +513,79 @@ impl PromptOption for ObstructionChoice {
 }
 
 #[cfg(any(test, feature = "testing"))]
-thread_local! {
-    pub static PROMPT_CHOICE: RefCell<Option<ObstructionChoice>> = const { RefCell::new(None) };
-    pub static PROMPT_COUNT: RefCell<usize> = const { RefCell::new(0) };
+mod test_hooks {
+    use std::cell::RefCell;
+
+    use super::ObstructionChoice;
+
+    pub enum PromptChoices {
+        Single(Option<ObstructionChoice>),
+        Sequence(Vec<ObstructionChoice>),
+    }
+
+    thread_local! {
+        pub static PROMPT_CHOICE: RefCell<PromptChoices> =
+            const { RefCell::new(PromptChoices::Single(None)) };
+        pub static PROMPT_COUNT: RefCell<usize> = const { RefCell::new(0) };
+    }
+
+    pub fn set_prompt_choice(choice: ObstructionChoice) {
+        PROMPT_CHOICE.with(|current| *current.borrow_mut() = PromptChoices::Single(Some(choice)));
+    }
+
+    pub fn set_prompt_choices(choices: impl IntoIterator<Item = ObstructionChoice>) {
+        let mut choices: Vec<_> = choices.into_iter().collect();
+        choices.reverse();
+        PROMPT_CHOICE.with(|current| *current.borrow_mut() = PromptChoices::Sequence(choices));
+    }
 }
 
 #[cfg(any(test, feature = "testing"))]
-pub fn set_prompt_choice(choice: ObstructionChoice) {
-    PROMPT_CHOICE.with(|current| *current.borrow_mut() = Some(choice));
-}
+pub use test_hooks::{PROMPT_CHOICE, PROMPT_COUNT, set_prompt_choice, set_prompt_choices};
 
+#[cfg_attr(any(test, feature = "testing"), allow(unused_variables))]
 fn prompt_for_obstruction(
     entry: &config::DeploymentEntry,
     obstruction: &Path,
 ) -> std::result::Result<ObstructionChoice, PromptError> {
     #[cfg(any(test, feature = "testing"))]
-    if PROMPT_CHOICE.with(|choice| choice.borrow().is_some()) {
+    {
         PROMPT_COUNT.with_borrow_mut(|count| *count += 1);
-        return Ok(PROMPT_CHOICE.with(|choice| choice.borrow().to_owned().unwrap()));
+        Ok(
+            PROMPT_CHOICE.with(|current| match &mut *current.borrow_mut() {
+                test_hooks::PromptChoices::Single(choice) => choice
+                    .as_ref()
+                    .expect("obstruction prompt reached without a test choice set")
+                    .clone(),
+                test_hooks::PromptChoices::Sequence(choices) => choices
+                    .pop()
+                    .expect("obstruction prompt choices exhausted by test"),
+            }),
+        )
     }
 
-    println!(
-        r#"Cannot deploy {} {},
+    #[cfg(not(any(test, feature = "testing")))]
+    {
+        println!(
+            r#"Cannot deploy {} {},
 {} {} is already present."#,
-        path_kind(&entry.source_path)?,
-        entry.source_path.display(),
-        path_kind(obstruction)?,
-        obstruction.display()
-    );
-    let question = "How would you like to proceed?";
-    let should_show_diff = fs::metadata(&entry.source_path)
-        .is_ok_and(|metadata| metadata.is_file())
-        && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
-    tui::prompt::SelectPrompt::new()
-        .question(question)
-        .filter(move |choice| should_show_diff || *choice != ObstructionChoice::ViewDiff)
-        .interact()
+            path_kind(&entry.source_path)?,
+            entry.source_path.display(),
+            path_kind(obstruction)?,
+            obstruction.display()
+        );
+        let question = "How would you like to proceed?";
+        let should_show_diff = fs::metadata(&entry.source_path)
+            .is_ok_and(|metadata| metadata.is_file())
+            && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
+        tui::prompt::SelectPrompt::new()
+            .question(question)
+            .filter(move |choice| should_show_diff || *choice != ObstructionChoice::ViewDiff)
+            .interact()
+    }
 }
 
+#[cfg(not(any(test, feature = "testing")))]
 fn path_kind(path: &Path) -> std::io::Result<&'static str> {
     Ok(if fs::symlink_metadata(path)?.is_dir() {
         "directory"

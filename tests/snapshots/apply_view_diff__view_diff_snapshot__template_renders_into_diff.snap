@@ -1,0 +1,9 @@
+---
+source: tests/apply_view_diff.rs
+expression: diff
+---
+--- <root>/target/target.txt
++++ <root>/source/greeting.txt
+@@ -1 +1 @@
+-old
++hello
