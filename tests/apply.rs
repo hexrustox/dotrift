@@ -7,7 +7,7 @@ use std::path::Path;
 use common::TestEnv;
 use dotrift::commands::apply::{ApplyOptions, ObstructionChoice, PROMPT_COUNT, set_prompt_choice};
 use dotrift::hash::hash_bytes;
-use dotrift::state::{Kind, StateDatabase, StateRecord};
+use dotrift::state::{Kind, StateDatabase};
 use test_case::test_case;
 
 #[test_case(
@@ -315,7 +315,7 @@ fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setu
             .unwrap()
             .unwrap();
         assert_eq!(record.kind, Kind::Symlink);
-        assert_eq!(record.link_target, Some(source.join("file.txt")));
+        assert_eq!(record.source_path, source.join("file.txt"));
     }
     ; "reapply_same_config_is_idempotent"
 )]
@@ -339,7 +339,7 @@ fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setu
             .unwrap()
             .unwrap();
         assert_eq!(record.kind, Kind::Symlink);
-        assert_eq!(record.link_target, Some(source.join("file.txt")));
+        assert_eq!(record.source_path, source.join("file.txt"));
         assert_eq!(PROMPT_COUNT.with(|count| *count.borrow()), 0);
     }
     ; "symlink_replaces_on_source_change"
@@ -432,7 +432,7 @@ fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setu
             .unwrap()
             .unwrap();
         assert_eq!(record.kind, Kind::Symlink);
-        assert_eq!(record.link_target, Some(source.join("file.txt")));
+        assert_eq!(record.source_path, source.join("file.txt"));
     }
     ; "copy_rule_changes_to_symlink"
 )]
@@ -504,7 +504,7 @@ fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setu
             .record(&file)
             .unwrap()
             .unwrap();
-        assert_eq!(record.link_target, Some(source.join("new.txt")));
+        assert_eq!(record.source_path, source.join("new.txt"));
     }
     ; "source_renamed_redirects_symlink"
 )]
@@ -685,7 +685,7 @@ fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setu
             .unwrap()
             .unwrap();
         assert_eq!(record.kind, Kind::Symlink);
-        assert_eq!(record.link_target, Some(source.join("file.txt")));
+        assert_eq!(record.source_path, source.join("file.txt"));
         assert_eq!(PROMPT_COUNT.with(|count| *count.borrow()), 1);
     }
     ; "tampered_symlink_prompt_replace_restores"
@@ -1246,13 +1246,7 @@ fn test_apply_clean_up<
         symlink(source.join("file.txt"), target.join("target.txt")).unwrap();
         StateDatabase::open()
             .unwrap()
-            .put(&StateRecord {
-                target_path: target.join("target.txt"),
-                source_path: source.join("file.txt"),
-                kind: Kind::Symlink,
-                link_target: Some(source.join("file.txt")),
-                content_hash: None,
-            })
+            .put(&dotrift::record!(s, target.join("target.txt"), source.join("file.txt")))
             .unwrap();
         "[portal]\n\"file.txt\" = \"target.txt\"\n"
     },
@@ -1284,13 +1278,7 @@ fn test_apply_clean_up<
         symlink(source.join("a.txt"), target.join("a.txt")).unwrap();
         StateDatabase::open()
             .unwrap()
-            .put(&StateRecord {
-                target_path: target.join("a.txt"),
-                source_path: source.join("a.txt"),
-                kind: Kind::Symlink,
-                link_target: Some(source.join("a.txt")),
-                content_hash: None,
-            })
+            .put(&dotrift::record!(s, target.join("a.txt"), source.join("a.txt")))
             .unwrap();
         fs::write(target.join("c.txt"), b"unmanaged").unwrap();
         "[portal]\n\"a.txt\" = \"a.txt\"\n\"b.txt\" = \"b.txt\"\n\"c.txt\" = \"c.txt\"\n"
@@ -1308,13 +1296,7 @@ fn test_apply_clean_up<
         symlink(source.join("file.txt"), target.join("stale.txt")).unwrap();
         StateDatabase::open()
             .unwrap()
-            .put(&StateRecord {
-                target_path: target.join("stale.txt"),
-                source_path: source.join("file.txt"),
-                kind: Kind::Symlink,
-                link_target: Some(source.join("file.txt")),
-                content_hash: None,
-            })
+            .put(&dotrift::record!(s, target.join("stale.txt"), source.join("file.txt")))
             .unwrap();
         "[portal]\n\"file.txt\" = \"file.txt\"\n"
     },
@@ -1332,13 +1314,7 @@ fn test_apply_clean_up<
         symlink(source.join("file.txt"), target.join("a/b/stale.txt")).unwrap();
         StateDatabase::open()
             .unwrap()
-            .put(&StateRecord {
-                target_path: target.join("a/b/stale.txt"),
-                source_path: source.join("file.txt"),
-                kind: Kind::Symlink,
-                link_target: Some(source.join("file.txt")),
-                content_hash: None,
-            })
+            .put(&dotrift::record!(s, target.join("a/b/stale.txt"), source.join("file.txt")))
             .unwrap();
         "[portal]\n\"file.txt\" = \"file.txt\"\n"
     },
@@ -1370,13 +1346,7 @@ fn test_apply_clean_up<
         fs::write(target.join("target.txt"), b"tampered").unwrap();
         StateDatabase::open()
             .unwrap()
-            .put(&StateRecord {
-                target_path: target.join("target.txt"),
-                source_path: source.join("file.txt"),
-                kind: Kind::File,
-                link_target: None,
-                content_hash: Some(hash_bytes(b"A")),
-            })
+            .put(&dotrift::record!(f, target.join("target.txt"), hash_bytes(b"A")))
             .unwrap();
         "[portal]\n\"file.txt\" = \"target.txt\"\n"
     },
@@ -1394,13 +1364,7 @@ fn test_apply_clean_up<
         symlink(source.join("file.txt"), target.join("a/b/stale.txt")).unwrap();
         StateDatabase::open()
             .unwrap()
-            .put(&StateRecord {
-                target_path: target.join("a/b/stale.txt"),
-                source_path: source.join("file.txt"),
-                kind: Kind::Symlink,
-                link_target: Some(source.join("file.txt")),
-                content_hash: None,
-            })
+            .put(&dotrift::record!(s, target.join("a/b/stale.txt"), source.join("file.txt")))
             .unwrap();
         "[portal]\n\"file.txt\" = \"file.txt\"\n"
     },
@@ -1633,8 +1597,12 @@ fn test_apply_verbose_twice<
     )
     .unwrap();
     dotrift::capture::clear();
-    dotrift::commands::apply::run_with_options(&source_dir, Some(target_dir.to_path_buf()), options)
-        .unwrap();
+    dotrift::commands::apply::run_with_options(
+        &source_dir,
+        Some(target_dir.to_path_buf()),
+        options,
+    )
+    .unwrap();
     let test_name = std::thread::current().name().unwrap().replace(":", "_");
     let captured = dotrift::capture::take();
     let mut settings = insta::Settings::clone_current();

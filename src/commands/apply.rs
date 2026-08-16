@@ -257,7 +257,6 @@ fn deploy_entry(
                 target_path: entry.target_path.clone(),
                 source_path: entry.source_path.clone(),
                 kind: Kind::Symlink,
-                link_target: Some(entry.source_path.clone()),
                 content_hash: None,
             }
         }
@@ -276,7 +275,6 @@ fn deploy_entry(
                 target_path: entry.target_path.clone(),
                 source_path: entry.source_path.clone(),
                 kind: Kind::File,
-                link_target: None,
                 content_hash: Some(hash::hash_bytes(&bytes)),
             }
         }
@@ -755,7 +753,7 @@ mod tests {
     #[test_case(
         |db, t| {
             fs::write(t.join("file"), b"data").unwrap();
-            db.put(&crate::record!(f, t.join("file"), "src", hash::hash_bytes(b"data"))).unwrap();
+            db.put(&crate::record!(f, t.join("file"), hash::hash_bytes(b"data"))).unwrap();
             t.join("file")
         },
         |db, t| {
@@ -768,7 +766,7 @@ mod tests {
         |db, t| {
             fs::write(t.join("real"), b"data").unwrap();
             symlink(t.join("real"), t.join("link")).unwrap();
-            db.put(&crate::record!(s, t.join("link"), "src", t.join("real"))).unwrap();
+            db.put(&crate::record!(s, t.join("link"), t.join("real"))).unwrap();
             t.join("link")
         },
         |db, t| {
@@ -794,9 +792,9 @@ mod tests {
         |db, t| {
             fs::create_dir_all(t.join("a/b/c")).unwrap();
             fs::write(t.join("a/b/c/deep"), b"").unwrap();
-            db.put(&crate::record!(f, t.join("a"), "src/a", "h1")).unwrap();
-            db.put(&crate::record!(f, t.join("a/b/c"), "src/c", "h2")).unwrap();
-            db.put(&crate::record!(f, t.join("a/b/c/deep"), "src/deep", "h3")).unwrap();
+            db.put(&crate::record!(f, t.join("a"), "h1")).unwrap();
+            db.put(&crate::record!(f, t.join("a/b/c"), "h2")).unwrap();
+            db.put(&crate::record!(f, t.join("a/b/c/deep"), "h3")).unwrap();
             t.join("a")
         },
         |db, t| {
@@ -812,8 +810,8 @@ mod tests {
             fs::create_dir(t.join("a")).unwrap();
             fs::write(t.join("real"), b"").unwrap();
             symlink(t.join("real"), t.join("a/link")).unwrap();
-            db.put(&crate::record!(f, t.join("a"), "src/a", "h1")).unwrap();
-            db.put(&crate::record!(s, t.join("a/link"), "src/link", t.join("real"))).unwrap();
+            db.put(&crate::record!(f, t.join("a"), "h1")).unwrap();
+            db.put(&crate::record!(s, t.join("a/link"), t.join("real"))).unwrap();
             t.join("a")
         },
         |db, t| {
@@ -829,7 +827,7 @@ mod tests {
             fs::create_dir_all(t.join("a")).unwrap();
             fs::write(t.join("a/child"), b"").unwrap();
             fs::write(t.join("other"), b"").unwrap();
-            db.put(&crate::record!(f, t.join("a"), "src/a", "h1")).unwrap();
+            db.put(&crate::record!(f, t.join("a"), "h1")).unwrap();
             t.join("a")
         },
         |db, t| {
@@ -868,20 +866,20 @@ mod tests {
     }
 
     macro_rules! entry {
-        ($source:expr, $target:expr, $deploy_type:expr) => {
+        ($source:expr, $target:expr, $deploy_type:ident) => {
             config::DeploymentEntry {
                 source_path: $source,
                 target_path: $target,
-                deploy_type: $deploy_type,
+                deploy_type: DeployType::$deploy_type,
                 mode: None,
             }
         };
-        ($source:expr, $target:expr, $deploy_type:expr, $mode:expr) => {
+        ($source:expr, $target:expr, $deploy_type:ident, $mode:expr) => {
             config::DeploymentEntry {
                 source_path: $source,
                 target_path: $target,
-                deploy_type: $deploy_type,
-                mode: $mode,
+                deploy_type: DeployType::$deploy_type,
+                mode: Some(config::DeployMode::try_from($mode).unwrap()),
             }
         };
     }
@@ -890,7 +888,7 @@ mod tests {
         |_db, t| {
             let source = t.join("src");
             fs::write(&source, b"content").unwrap();
-            entry!(source, t.join("target"), DeployType::Symlink)
+            entry!(source, t.join("target"), Symlink)
         },
         |db, t| {
             let source = t.join("src");
@@ -900,7 +898,6 @@ mod tests {
             let record = db.record(&t.join("target")).unwrap().unwrap();
             assert_eq!(record.kind, Kind::Symlink);
             assert_eq!(record.source_path, source);
-            assert_eq!(record.link_target, Some(source));
             assert_eq!(record.content_hash, None);
         }
         => EntryResult::Deployed
@@ -910,7 +907,7 @@ mod tests {
         |_db, t| {
             let source = t.join("src");
             fs::write(&source, b"copy").unwrap();
-            entry!(source, t.join("target"), DeployType::Copy)
+            entry!(source, t.join("target"), Copy)
         },
         |db, t| {
             assert_eq!(fs::read(t.join("target")).unwrap(), b"copy");
@@ -919,7 +916,6 @@ mod tests {
             let record = db.record(&t.join("target")).unwrap().unwrap();
             assert_eq!(record.kind, Kind::File);
             assert_eq!(record.content_hash, Some(hash::hash_bytes(b"copy")));
-            assert_eq!(record.link_target, None);
         }
         => EntryResult::Deployed
         ; "deploys_copy"
@@ -928,7 +924,7 @@ mod tests {
         |_db, t| {
             let source = t.join("src");
             fs::write(&source, br#"{{"rendered"}}"#).unwrap();
-            entry!(source, t.join("target"), DeployType::Template)
+            entry!(source, t.join("target"), Template)
         },
         |db, t| {
             assert_eq!(fs::read(t.join("target")).unwrap(), b"rendered");
@@ -945,8 +941,7 @@ mod tests {
         |_db, t| {
             let source = t.join("src");
             fs::write(&source, b"copy").unwrap();
-            let mode = config::DeployMode::try_from(0o600).unwrap();
-            entry!(source, t.join("target"), DeployType::Copy, Some(mode))
+            entry!(source, t.join("target"), Copy, 0o600)
         },
         |_db, t| {
             use std::os::unix::fs::PermissionsExt;
@@ -961,7 +956,7 @@ mod tests {
         |_db, t| {
             let source = t.join("src");
             fs::write(&source, b"deep").unwrap();
-            entry!(source, t.join("a/b/c/file"), DeployType::Copy)
+            entry!(source, t.join("a/b/c/file"), Copy)
         },
         |db, t| {
             assert_eq!(fs::read(t.join("a/b/c/file")).unwrap(), b"deep");
@@ -975,10 +970,10 @@ mod tests {
         |db, t| {
             let target = t.join("target");
             fs::write(&target, b"old").unwrap();
-            db.put(&crate::record!(f, target.clone(), "old-src", hash::hash_bytes(b"old"))).unwrap();
+            db.put(&crate::record!(f, target.clone(), hash::hash_bytes(b"old"))).unwrap();
             let source = t.join("src");
             fs::write(&source, b"new").unwrap();
-            entry!(source, target, DeployType::Copy)
+            entry!(source, target, Copy)
         },
         |db, t| {
             assert_eq!(fs::read(t.join("target")).unwrap(), b"new");
@@ -994,17 +989,16 @@ mod tests {
             let old_source = t.join("old-src");
             fs::write(&old_source, b"old").unwrap();
             symlink(&old_source, &target).unwrap();
-            db.put(&crate::record!(s, target.clone(), "old-src", old_source.clone())).unwrap();
+            db.put(&crate::record!(s, target.clone(), old_source.clone())).unwrap();
             let source = t.join("src");
             fs::write(&source, b"new").unwrap();
-            entry!(source, target, DeployType::Symlink)
+            entry!(source, target, Symlink)
         },
         |db, t| {
             assert_eq!(fs::read_link(t.join("target")).unwrap(), t.join("src"));
             let record = db.record(&t.join("target")).unwrap().unwrap();
             assert_eq!(record.kind, Kind::Symlink);
             assert_eq!(record.source_path, t.join("src"));
-            assert_eq!(record.link_target, Some(t.join("src")));
         }
         => EntryResult::Replaced
         ; "replaces_managed_symlink_target"
@@ -1016,7 +1010,7 @@ mod tests {
             fs::write(&target, b"old").unwrap();
             let source = t.join("src");
             fs::write(&source, b"new").unwrap();
-            entry!(source, target, DeployType::Copy)
+            entry!(source, target, Copy)
         },
         |db, t| {
             assert_eq!(fs::read(t.join("target")).unwrap(), b"new");
@@ -1032,7 +1026,7 @@ mod tests {
             fs::write(&target, b"old").unwrap();
             let source = t.join("src");
             fs::write(&source, b"new").unwrap();
-            entry!(source, target, DeployType::Copy)
+            entry!(source, target, Copy)
         },
         |db, t| {
             assert_eq!(fs::read(t.join("target")).unwrap(), b"old");
@@ -1048,7 +1042,7 @@ mod tests {
             fs::write(t.join("a/b"), b"").unwrap();
             let source = t.join("src");
             fs::write(&source, b"new").unwrap();
-            entry!(source, t.join("a/b/file"), DeployType::Copy)
+            entry!(source, t.join("a/b/file"), Copy)
         },
         |db, t| {
             assert!(fs::symlink_metadata(t.join("a/b")).unwrap().is_file());
@@ -1065,7 +1059,7 @@ mod tests {
             fs::write(t.join("a/b"), b"").unwrap();
             let source = t.join("src");
             fs::write(&source, b"new").unwrap();
-            entry!(source, t.join("a/b/file"), DeployType::Copy)
+            entry!(source, t.join("a/b/file"), Copy)
         },
         |db, t| {
             assert!(fs::metadata(t.join("a/b")).unwrap().is_dir());
@@ -1083,7 +1077,7 @@ mod tests {
             symlink(t.join("real"), t.join("a/b")).unwrap();
             let source = t.join("src");
             fs::write(&source, b"new").unwrap();
-            entry!(source, t.join("a/b/file"), DeployType::Copy)
+            entry!(source, t.join("a/b/file"), Copy)
         },
         |db, t| {
             assert!(fs::metadata(t.join("a/b")).unwrap().is_dir());
@@ -1102,7 +1096,7 @@ mod tests {
             symlink(t.join("real"), t.join("a/b")).unwrap();
             let source = t.join("src");
             fs::write(&source, b"new").unwrap();
-            entry!(source, t.join("a/b/file"), DeployType::Copy)
+            entry!(source, t.join("a/b/file"), Copy)
         },
         |db, t| {
             assert!(fs::metadata(t.join("a/b")).unwrap().is_dir());
@@ -1117,7 +1111,7 @@ mod tests {
         |_db, t| {
             let source = t.join("src");
             symlink(t.join("missing"), &source).unwrap();
-            entry!(source, t.join("target"), DeployType::Copy)
+            entry!(source, t.join("target"), Copy)
         },
         |db, t| {
             assert!(fs::symlink_metadata(t.join("target")).is_err());
@@ -1130,7 +1124,7 @@ mod tests {
         |_db, t| {
             let source = t.join("srcdir");
             fs::create_dir(&source).unwrap();
-            entry!(source, t.join("target"), DeployType::Copy)
+            entry!(source, t.join("target"), Copy)
         },
         |db, t| {
             assert!(fs::symlink_metadata(t.join("target")).is_err());
@@ -1143,7 +1137,7 @@ mod tests {
         |_db, t| {
             let source = t.join("src");
             fs::write(&source, b"{{ missing }}").unwrap();
-            entry!(source, t.join("target"), DeployType::Template)
+            entry!(source, t.join("target"), Template)
         },
         |db, t| {
             assert!(fs::symlink_metadata(t.join("target")).is_err());
@@ -1185,8 +1179,8 @@ mod tests {
             let source_b = t.join("src_b");
             fs::write(&source_b, b"new-b").unwrap();
             vec![
-                entry!(source_a, target_a, DeployType::Copy),
-                entry!(source_b, target_b, DeployType::Copy),
+                entry!(source_a, target_a, Copy),
+                entry!(source_b, target_b, Copy),
             ]
         },
         |db, t| {
@@ -1209,8 +1203,8 @@ mod tests {
             let source_b = t.join("src_b");
             fs::write(&source_b, b"new-b").unwrap();
             vec![
-                entry!(source, t.join("a/b/file"), DeployType::Copy),
-                entry!(source_b, target_b, DeployType::Copy),
+                entry!(source, t.join("a/b/file"), Copy),
+                entry!(source_b, target_b, Copy),
             ]
         },
         |db, t| {
@@ -1234,8 +1228,8 @@ mod tests {
             let source_b = t.join("src_b");
             fs::write(&source_b, b"new-b").unwrap();
             vec![
-                entry!(source_a, target_a, DeployType::Copy),
-                entry!(source_b, t.join("a/b/file"), DeployType::Copy),
+                entry!(source_a, target_a, Copy),
+                entry!(source_b, t.join("a/b/file"), Copy),
             ]
         },
         |db, t| {
@@ -1441,7 +1435,7 @@ mod tests {
     #[test_case(
         |db, t| {
             fs::write(t.join("stale"), b"data").unwrap();
-            db.put(&crate::record!(f, t.join("stale"), "src", hash::hash_bytes(b"data")))
+            db.put(&crate::record!(f, t.join("stale"), hash::hash_bytes(b"data")))
                 .unwrap();
         },
         |_t| HashSet::new(),
@@ -1456,7 +1450,7 @@ mod tests {
     #[test_case(
         |db, t| {
             fs::write(t.join("stale"), b"other").unwrap();
-            db.put(&crate::record!(f, t.join("stale"), "src", hash::hash_bytes(b"data")))
+            db.put(&crate::record!(f, t.join("stale"), hash::hash_bytes(b"data")))
                 .unwrap();
         },
         |_t| HashSet::new(),
@@ -1470,7 +1464,7 @@ mod tests {
     )]
     #[test_case(
         |db, t| {
-            db.put(&crate::record!(f, t.join("missing"), "src", hash::hash_bytes(b"data")))
+            db.put(&crate::record!(f, t.join("missing"), hash::hash_bytes(b"data")))
                 .unwrap();
         },
         |_t| HashSet::new(),
@@ -1486,7 +1480,7 @@ mod tests {
             fs::create_dir(t.join("real")).unwrap();
             fs::write(t.join("real/child"), b"x").unwrap();
             symlink(t.join("real"), t.join("link")).unwrap();
-            db.put(&crate::record!(f, t.join("link/child"), "src", hash::hash_bytes(b"x")))
+            db.put(&crate::record!(f, t.join("link/child"), hash::hash_bytes(b"x")))
                 .unwrap();
         },
         |_t| HashSet::new(),
@@ -1500,7 +1494,7 @@ mod tests {
     )]
     #[test_case(
         |db, _t| {
-            db.put(&crate::record!(f, "/outside/file", "src", "h")).unwrap();
+            db.put(&crate::record!(f, "/outside/file", "h")).unwrap();
         },
         |_t| HashSet::new(),
         ApplyOptions::default(),
@@ -1512,7 +1506,7 @@ mod tests {
     )]
     #[test_case(
         |db, t| {
-            db.put(&crate::record!(f, t, "src", "h")).unwrap();
+            db.put(&crate::record!(f, t, "h")).unwrap();
         },
         |_t| HashSet::new(),
         ApplyOptions::default(),
@@ -1525,7 +1519,7 @@ mod tests {
     #[test_case(
         |db, t| {
             fs::write(t.join("stale"), b"data").unwrap();
-            db.put(&crate::record!(f, t.join("stale"), "src", hash::hash_bytes(b"data")))
+            db.put(&crate::record!(f, t.join("stale"), hash::hash_bytes(b"data")))
                 .unwrap();
         },
         |t| HashSet::from([t.join("stale")]),
@@ -1540,7 +1534,7 @@ mod tests {
     #[test_case(
         |db, t| {
             fs::write(t.join("stale"), b"data").unwrap();
-            db.put(&crate::record!(f, t.join("stale"), "src", hash::hash_bytes(b"data")))
+            db.put(&crate::record!(f, t.join("stale"), hash::hash_bytes(b"data")))
                 .unwrap();
         },
         |_t| HashSet::new(),
@@ -1559,7 +1553,7 @@ mod tests {
         |db, t| {
             fs::create_dir_all(t.join("a/b")).unwrap();
             fs::write(t.join("a/b/file"), b"data").unwrap();
-            db.put(&crate::record!(f, t.join("a/b/file"), "src", hash::hash_bytes(b"data")))
+            db.put(&crate::record!(f, t.join("a/b/file"), hash::hash_bytes(b"data")))
                 .unwrap();
         },
         |_t| HashSet::new(),

@@ -62,8 +62,8 @@ metadata or content cannot be read fails the check and is not a managed path.
 _Avoid_: tracked path
 
 **Fingerprint**:
-The recorded last-applied state of a target path dotrift created: the link
-target for a symlink deploy, or a hash of the deployed bytes for a copy or
+The recorded last-applied state of a target path dotrift created: the source
+path for a symlink deploy, or a hash of the deployed bytes for a copy or
 template deploy. Directories have no fingerprint. Comparing the current
 fingerprint against the record decides whether the path is still managed.
 _Avoid_: checksum, hash (when meaning the recorded state)

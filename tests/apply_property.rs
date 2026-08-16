@@ -1,3 +1,4 @@
+// TODO
 mod common;
 
 use std::collections::BTreeMap;
@@ -196,7 +197,7 @@ fn collect_snapshot(base: &Path, current: &Path, snapshot: &mut BTreeMap<PathBuf
     }
 }
 
-fn db_snapshot() -> BTreeMap<PathBuf, (Kind, PathBuf, Option<PathBuf>, Option<String>)> {
+fn db_snapshot() -> BTreeMap<PathBuf, (Kind, PathBuf, Option<String>)> {
     StateDatabase::open()
         .expect("cannot open state database")
         .managed_paths()
@@ -205,12 +206,7 @@ fn db_snapshot() -> BTreeMap<PathBuf, (Kind, PathBuf, Option<PathBuf>, Option<St
         .map(|record: StateRecord| {
             (
                 record.target_path,
-                (
-                    record.kind,
-                    record.source_path,
-                    record.link_target,
-                    record.content_hash,
-                ),
+                (record.kind, record.source_path, record.content_hash),
             )
         })
         .collect()

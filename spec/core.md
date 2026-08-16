@@ -36,25 +36,23 @@ CREATE TABLE managed_paths (
     target_path  TEXT PRIMARY KEY,
     source_path  TEXT NOT NULL,
     kind         TEXT NOT NULL CHECK (kind IN ('file', 'symlink')),
-    link_target  TEXT,
     content_hash TEXT,
-    CHECK (kind = 'symlink' AND link_target IS NOT NULL AND content_hash IS NULL
-        OR kind = 'file'    AND content_hash IS NOT NULL AND link_target IS NULL)
+    CHECK (kind = 'symlink' AND content_hash IS NULL
+        OR kind = 'file'    AND content_hash IS NOT NULL)
 );
 ```
 
 * `target_path` — the absolute target path dotrift wrote to. Primary key.
-* `source_path` — the source path the entry was deployed from.
+* `source_path` — the source path the entry was deployed from; also the
+  fingerprint for a symlink record, whose on-disk link target is that path.
 * `kind` — whether the deployed path is a file or a symlink. The deploy type
   (symlink, copy, template) is a config concern and is not recorded; the
   fingerprint distinguishes content.
-* `link_target` — the fingerprint for a symlink record: the link target of
-  the symlink dotrift created.
 * `content_hash` — the fingerprint for a file record: an xxHash64 of the
   deployed bytes, hex-encoded.
 
-Directories are never recorded. The CHECK constraint enforces that exactly
-one fingerprint column is set, matching the kind.
+Directories are never recorded. The CHECK constraint enforces that a file
+record carries `content_hash` while a symlink record never does.
 
 State mirrors completed filesystem actions: a successful write creates or
 updates the record, a successful removal deletes it, and skipped or failed
@@ -64,7 +62,8 @@ entries retain their prior records.
 
 The recorded last-applied state of a target path dotrift created:
 
-* **Symlink:** the link target of the symlink, as a string.
+* **Symlink:** the source path the entry was deployed from, which is the
+  symlink's on-disk link target, as a string.
 * **File:** an xxHash64 of the deployed bytes, hex-encoded (for example
   `a1b2c3d4e5f67890`).
 
@@ -107,7 +106,7 @@ Given a target path on disk and a record keyed by that path:
 2. **Kind mismatch** — the on-disk filesystem kind does not match the
    recorded `kind` — unmanaged.
 3. **Symlink record:** the on-disk target must be a symlink whose link target
-   equals `link_target` — managed; otherwise unmanaged.
+   equals the recorded `source_path` — managed; otherwise unmanaged.
 4. **File record:** the on-disk target must be a regular file. The current
    bytes are hashed (xxHash64) and compared against `content_hash` — equal is
    managed, otherwise unmanaged. There is no mtime fast-path: the current

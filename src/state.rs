@@ -44,28 +44,25 @@ pub struct StateRecord {
     pub target_path: PathBuf,
     pub source_path: PathBuf,
     pub kind: Kind,
-    pub link_target: Option<PathBuf>,
     pub content_hash: Option<String>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 #[macro_export]
 macro_rules! record {
-    (f, $target:expr, $source:expr, $hash:expr) => {
-        StateRecord {
-            target_path: PathBuf::from($target),
-            source_path: PathBuf::from($source),
-            kind: Kind::File,
-            link_target: None,
+    (f, $target:expr, $hash:expr) => {
+        $crate::state::StateRecord {
+            target_path: std::path::PathBuf::from($target),
+            source_path: std::path::PathBuf::new(),
+            kind: $crate::state::Kind::File,
             content_hash: Some($hash.into()),
         }
     };
-    (s, $target:expr, $source:expr, $link_target:expr) => {
-        StateRecord {
-            target_path: PathBuf::from($target),
-            source_path: PathBuf::from($source),
-            kind: Kind::Symlink,
-            link_target: Some(PathBuf::from($link_target)),
+    (s, $target:expr, $source:expr) => {
+        $crate::state::StateRecord {
+            target_path: std::path::PathBuf::from($target),
+            source_path: std::path::PathBuf::from($source),
+            kind: $crate::state::Kind::Symlink,
             content_hash: None,
         }
     };
@@ -104,10 +101,9 @@ impl StateDatabase {
                 target_path TEXT PRIMARY KEY,
                 source_path TEXT NOT NULL,
                 kind TEXT NOT NULL CHECK (kind IN ('file', 'symlink')),
-                link_target TEXT,
                 content_hash TEXT,
-                CHECK ((kind = 'symlink' AND link_target IS NOT NULL AND content_hash IS NULL)
-                    OR (kind = 'file' AND content_hash IS NOT NULL AND link_target IS NULL))
+                CHECK ((kind = 'symlink' AND content_hash IS NULL)
+                    OR (kind = 'file' AND content_hash IS NOT NULL))
             );
             CREATE TABLE IF NOT EXISTS active_profiles (
                 name TEXT PRIMARY KEY,
@@ -138,7 +134,7 @@ impl StateDatabase {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT target_path, source_path, kind, link_target, content_hash
+                "SELECT target_path, source_path, kind, content_hash
                  FROM managed_paths",
             )
             .map_err(|error| miette!(error))
@@ -149,8 +145,7 @@ impl StateDatabase {
                     PathBuf::from(row.get::<_, String>(0)?),
                     PathBuf::from(row.get::<_, String>(1)?),
                     row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?.map(PathBuf::from),
-                    row.get(4)?,
+                    row.get(3)?,
                 ))
             })
             .map_err(|error| miette!(error))
@@ -160,12 +155,11 @@ impl StateDatabase {
             .map_err(|error| miette!(error))
             .wrap_err("cannot read managed paths")?;
         let mut records = Vec::with_capacity(tuples.len());
-        for (target_path, source_path, kind, link_target, content_hash) in tuples {
+        for (target_path, source_path, kind, content_hash) in tuples {
             records.push(StateRecord {
                 target_path,
                 source_path,
                 kind: Kind::parse(&kind)?,
-                link_target,
                 content_hash,
             });
         }
@@ -176,16 +170,12 @@ impl StateDatabase {
         self.connection
             .execute(
                 "INSERT OR REPLACE INTO managed_paths
-                 (target_path, source_path, kind, link_target, content_hash)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                 (target_path, source_path, kind, content_hash)
+                 VALUES (?1, ?2, ?3, ?4)",
                 params![
                     record.target_path.to_string_lossy(),
                     record.source_path.to_string_lossy(),
                     record.kind.as_str(),
-                    record
-                        .link_target
-                        .as_ref()
-                        .map(|path| path.to_string_lossy()),
                     record.content_hash,
                 ],
             )
@@ -204,7 +194,7 @@ impl StateDatabase {
         let record = self
             .connection
             .query_row(
-                "SELECT target_path, source_path, kind, link_target, content_hash
+                "SELECT target_path, source_path, kind, content_hash
                  FROM managed_paths WHERE target_path = ?1",
                 [target_path.to_string_lossy()],
                 |row| {
@@ -212,8 +202,7 @@ impl StateDatabase {
                         PathBuf::from(row.get::<_, String>(0)?),
                         PathBuf::from(row.get::<_, String>(1)?),
                         row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?.map(PathBuf::from),
-                        row.get(4)?,
+                        row.get(3)?,
                     ))
                 },
             )
@@ -223,17 +212,14 @@ impl StateDatabase {
                 format!("cannot read state record for `{}`", target_path.display())
             })?;
         record
-            .map(
-                |(target_path, source_path, kind, link_target, content_hash)| {
-                    Ok(StateRecord {
-                        target_path,
-                        source_path,
-                        kind: Kind::parse(&kind)?,
-                        link_target,
-                        content_hash,
-                    })
-                },
-            )
+            .map(|(target_path, source_path, kind, content_hash)| {
+                Ok(StateRecord {
+                    target_path,
+                    source_path,
+                    kind: Kind::parse(&kind)?,
+                    content_hash,
+                })
+            })
             .transpose()
     }
 
@@ -368,8 +354,8 @@ mod tests {
         Kind::parse(value)
     }
 
-    #[test_case(crate::record!(f, "/home/user/.gitconfig", "dotfiles/git/config", "abc123"); "file")]
-    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc", "/home/user/.config/bashrc"); "symlink")]
+    #[test_case(crate::record!(f, "/home/user/.gitconfig", "abc123"); "file")]
+    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"); "symlink")]
     fn put_round_trips(record: StateRecord) {
         let (_dir, database) = database();
         database.put(&record).expect("cannot store record");
@@ -380,13 +366,13 @@ mod tests {
     }
 
     #[test_case(
-        crate::record!(f, "/home/user/.gitconfig", "dotfiles/git/config", "abc123"),
-        crate::record!(s, "/home/user/.gitconfig", "dotfiles/git/global", "/home/user/.config/git/config");
+        crate::record!(f, "/home/user/.gitconfig", "abc123"),
+        crate::record!(s, "/home/user/.gitconfig", "dotfiles/git/global");
         "file replaced by symlink"
     )]
     #[test_case(
-        crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc", "/home/user/.config/bashrc"),
-        crate::record!(f, "/home/user/.bashrc", "dotfiles/bash/rc", "deadbeef");
+        crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"),
+        crate::record!(f, "/home/user/.bashrc", "deadbeef");
         "symlink replaced by file"
     )]
     fn put_replaces_existing_record(original: StateRecord, replacement: StateRecord) {
@@ -408,17 +394,15 @@ mod tests {
             target_path: PathBuf::from("/home/user/x"),
             source_path: PathBuf::from("dotfiles/x"),
             kind: Kind::File,
-            link_target: Some(PathBuf::from("/some/link")),
             content_hash: None,
         };
-        "file with link_target"
+        "file without content_hash"
     )]
     #[test_case(
         StateRecord {
             target_path: PathBuf::from("/home/user/y"),
             source_path: PathBuf::from("dotfiles/y"),
             kind: Kind::Symlink,
-            link_target: None,
             content_hash: Some("abc".into()),
         };
         "symlink with content_hash"
@@ -431,13 +415,8 @@ mod tests {
     #[test]
     fn managed_paths_returns_all_records() {
         let (_dir, database) = database();
-        let first = crate::record!(f, "/home/user/.gitconfig", "dotfiles/git/config", "abc123");
-        let second = crate::record!(
-            s,
-            "/home/user/.bashrc",
-            "dotfiles/bash/bashrc",
-            "/home/user/.config/bashrc"
-        );
+        let first = crate::record!(f, "/home/user/.gitconfig", "abc123");
+        let second = crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc");
         database.put(&first).expect("cannot store first record");
         database.put(&second).expect("cannot store second record");
         let mut records = database.managed_paths().expect("cannot read records");
@@ -447,8 +426,8 @@ mod tests {
         assert_eq!(records, expected);
     }
 
-    #[test_case(crate::record!(f, "/home/user/.gitconfig", "dotfiles/git/config", "abc123"); "file")]
-    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc", "/home/user/.config/bashrc"); "symlink")]
+    #[test_case(crate::record!(f, "/home/user/.gitconfig", "abc123"); "file")]
+    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"); "symlink")]
     fn record_returns_stored_record(record: StateRecord) {
         let (_dir, database) = database();
         database.put(&record).expect("cannot store record");
@@ -482,18 +461,17 @@ mod tests {
                      target_path TEXT PRIMARY KEY,
                      source_path TEXT NOT NULL,
                      kind TEXT NOT NULL,
-                     link_target TEXT,
                      content_hash TEXT
                  );
                  INSERT INTO managed_paths VALUES
-                     ('/home/user/.gitconfig', 'dotfiles/git/config', 'link', NULL, 'abc123');",
+                     ('/home/user/.gitconfig', 'dotfiles/git/config', 'link', 'abc123');",
             )
             .expect("cannot seed corrupt record");
         assert!(database.record(Path::new("/home/user/.gitconfig")).is_err());
     }
 
-    #[test_case(crate::record!(f, "/home/user/.gitconfig", "dotfiles/git/config", "abc123"); "file")]
-    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc", "/home/user/.config/bashrc"); "symlink")]
+    #[test_case(crate::record!(f, "/home/user/.gitconfig", "abc123"); "file")]
+    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"); "symlink")]
     fn remove_deletes_record(record: StateRecord) {
         let (_dir, database) = database();
         database.put(&record).expect("cannot store record");
