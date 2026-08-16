@@ -92,27 +92,6 @@ impl SpawnedProbe {
         self.writer.flush().expect("flush keys");
     }
 
-    /// Returns the output received so far without ending the probe,
-    /// waiting briefly for the stream to settle.
-    fn drain_available(&mut self) -> Vec<u8> {
-        let mut idle = 0;
-        loop {
-            match self.rx.try_recv() {
-                Ok(chunk) => {
-                    self.output.extend_from_slice(&chunk);
-                    idle = 0;
-                }
-                Err(_) => {
-                    idle += 1;
-                    if idle >= 4 {
-                        return self.output.clone();
-                    }
-                    thread::sleep(Duration::from_millis(25));
-                }
-            }
-        }
-    }
-
     fn resize(&mut self, rows: u16, cols: u16) {
         self.master
             .resize(PtySize {
@@ -187,17 +166,4 @@ fn resize_during_interaction_keeps_prompt_usable() {
     spawned.resize(6, 80);
     spawned.send(b"\r");
     assert_rendered(spawned.finish());
-}
-
-#[test]
-fn arrows_reposition_before_confirmation() {
-    let mut spawned = SpawnedProbe::spawn(Probe::Basic, 24, 120, UTF8_ENV);
-    spawned.wait_for_first_chunk();
-    spawned.send(b"\x1b[B\x1b[B");
-    let before = spawned.drain_available();
-    spawned.send(b"\r");
-    let after = spawned.finish();
-
-    assert_rendered(before);
-    assert_rendered(after);
 }

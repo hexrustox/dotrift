@@ -138,6 +138,14 @@ where
     E: Clone + Debug + Eq + IntoEnumIterator + PromptOption,
 {
     /// Runs the prompt and returns the confirmed enum variant.
+    ///
+    /// # Errors
+    ///
+    /// - Returns [`PromptError::EmptyOptions`] if every variant was filtered out.
+    /// - Returns [`PromptError::InvalidHotkey`] if an option's hotkey is not ASCII A-Z.
+    /// - Returns [`PromptError::DuplicateHotkey`] if two options share a hotkey.
+    /// - Returns [`PromptError::Cancelled`] if the prompt is cancelled.
+    /// - Returns [`PromptError::Io`] on terminal interaction failures.
     pub fn interact(self) -> Result<E, PromptError> {
         let options = make_options(self.filter.as_deref())?;
         let selected = self
@@ -147,7 +155,8 @@ where
             .unwrap_or(0);
 
         if !io::stdin().is_terminal() {
-            return Ok(options[selected].value.clone());
+            let mut options = options;
+            return Ok(options.swap_remove(selected).value);
         }
 
         let unicode = is_unicode();
@@ -501,19 +510,40 @@ mod tests {
     }
 
     #[test]
-    fn selection_wraps_in_both_directions() {
-        let mut state = SelectionState::new(Vec::new(), 0);
-        state.options = vec![1, 2, 3]
-            .into_iter()
-            .map(|value| super::OptionEntry {
-                value,
-                label: value.to_string(),
-                hotkey: char::from_digit(value, 10).unwrap(),
-            })
-            .collect();
+    fn selection_previous_wraps_to_last() {
+        let mut state = SelectionState {
+            options: vec![1, 2, 3]
+                .into_iter()
+                .map(|value| super::OptionEntry {
+                    value,
+                    label: value.to_string(),
+                    hotkey: char::from_digit(value, 10).unwrap(),
+                })
+                .collect(),
+            selected: 0,
+        };
+
         state.previous();
+
         assert_eq!(state.selected, 2);
+    }
+
+    #[test]
+    fn selection_next_wraps_to_first() {
+        let mut state = SelectionState {
+            options: vec![1, 2, 3]
+                .into_iter()
+                .map(|value| super::OptionEntry {
+                    value,
+                    label: value.to_string(),
+                    hotkey: char::from_digit(value, 10).unwrap(),
+                })
+                .collect(),
+            selected: 2,
+        };
+
         state.next();
+
         assert_eq!(state.selected, 0);
     }
 }
