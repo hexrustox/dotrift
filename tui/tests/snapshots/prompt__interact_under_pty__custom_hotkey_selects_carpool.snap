@@ -1,0 +1,18 @@
+---
+source: tui/tests/prompt.rs
+expression: "String::from_utf8_lossy(&bytes)"
+---
+Pick an option
+  ● [w] two wheeler
+  ○ [s] streetcar
+  ○ [z] shared ride
+
+  ↑/↓ navigate  Enter select  A-Z jump  Esc cancel
+Pick an option
+  ○ [w] two wheeler
+  ○ [s] streetcar
+  ● [z] shared ride
+
+  ↑/↓ navigate  Enter select  A-Z jump  Esc cancel
+Pick an option (shared ride) ✓
+confirmed: Carpool

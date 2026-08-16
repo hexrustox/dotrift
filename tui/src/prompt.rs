@@ -397,32 +397,33 @@ mod tests {
 
     #[derive(Clone, Debug, PartialEq, Eq, EnumIter)]
     enum Choice {
-        Skip,
-        HTTPServer,
-        First,
-        Third,
+        Bike,
+        Carpool,
+        EVScooter,
+        Metro,
+        Tram,
     }
 
     impl super::PromptOption for Choice {
         fn label(&self) -> Option<&str> {
             match self {
-                Choice::First => Some("custom label"),
+                Choice::Tram => Some("custom label"),
                 _ => None,
             }
         }
 
         fn hotkey(&self) -> Option<char> {
             match self {
-                Choice::Third => Some('z'),
+                Choice::Carpool => Some('z'),
                 _ => None,
             }
         }
     }
 
-    #[test_case(Choice::Skip, "skip", 's'; "derived")]
-    #[test_case(Choice::HTTPServer, "http server", 'h'; "derived_acronym")]
-    #[test_case(Choice::First, "custom label", 'f'; "label_overridden_hotkey_derived")]
-    #[test_case(Choice::Third, "third", 'z'; "hotkey_overridden_label_derived")]
+    #[test_case(Choice::Bike, "bike", 'b'; "derived")]
+    #[test_case(Choice::EVScooter, "ev scooter", 'e'; "derived_acronym")]
+    #[test_case(Choice::Tram, "custom label", 't'; "label_overridden_hotkey_derived")]
+    #[test_case(Choice::Carpool, "carpool", 'z'; "hotkey_overridden_label_derived")]
     fn make_options_produces_labels_and_hotkeys(variant: Choice, label: &str, hotkey: char) {
         let options = make_options::<Choice>(None).unwrap();
         let option = options
@@ -435,15 +436,14 @@ mod tests {
 
     #[test]
     fn make_options_filters_variants_before_building_options() {
-        let options =
-            make_options::<Choice>(Some(&|choice| *choice != Choice::HTTPServer)).unwrap();
+        let options = make_options::<Choice>(Some(&|choice| *choice != Choice::EVScooter)).unwrap();
 
         assert_eq!(
             options
                 .iter()
                 .map(|option| option.value.clone())
                 .collect::<Vec<_>>(),
-            vec![Choice::Skip, Choice::First, Choice::Third]
+            vec![Choice::Bike, Choice::Carpool, Choice::Metro, Choice::Tram]
         );
     }
 

@@ -14,5 +14,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+portable-pty.workspace = true
 tempfile.workspace = true
 test-case.workspace = true

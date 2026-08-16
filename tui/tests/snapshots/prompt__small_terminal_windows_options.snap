@@ -1,0 +1,17 @@
+---
+source: tui/tests/prompt.rs
+expression: "String::from_utf8_lossy(&bytes)"
+---
+Pick an option
+  ● [b] bike
+
+  ↑/↓ navigate  Enter select  A-Z jump  Esc cancel
+Pick an option
+  ● [c] carpool
+
+  ↑/↓ navigate  Enter select  A-Z jump  Esc cancel
+Pick an option
+  ● [e] ev scooter
+
+  ↑/↓ navigate  Enter select  A-Z jump  Esc cancel
+cancelled
