@@ -1,0 +1,10 @@
+---
+source: tests/profile.rs
+expression: "run_and_take(Some(&source), ProfileCommand::Show)"
+---
+count      42
+editor     vim
+enabled    true
+settings   {"indent": 2, "lang": "rust"}
+tags       ["a", "b"]
+theme      dark

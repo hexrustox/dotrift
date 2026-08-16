@@ -1,5 +1,0 @@
----
-source: tests/profile.rs
-expression: setup(&env)
----
-value   a
