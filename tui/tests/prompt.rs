@@ -11,23 +11,34 @@ const READY_TIMEOUT: Duration = Duration::from_secs(10);
 const UTF8_ENV: &[(&str, &str)] = &[("LC_ALL", "en_US.UTF-8")];
 
 #[derive(Clone, Copy)]
-enum Probe {
+enum PromptFixture {
     Basic,
     Many,
     Default,
     Custom,
 }
 
-const fn probe_bin(probe: Probe) -> &'static str {
-    match probe {
-        Probe::Basic => env!("CARGO_BIN_EXE_prompt_basic"),
-        Probe::Many => env!("CARGO_BIN_EXE_prompt_many_options"),
-        Probe::Default => env!("CARGO_BIN_EXE_prompt_default"),
-        Probe::Custom => env!("CARGO_BIN_EXE_prompt_custom"),
+impl PromptFixture {
+    const fn bin(self) -> &'static str {
+        match self {
+            PromptFixture::Basic => env!("CARGO_BIN_EXE_prompt_basic"),
+            PromptFixture::Many => env!("CARGO_BIN_EXE_prompt_many_options"),
+            PromptFixture::Default => env!("CARGO_BIN_EXE_prompt_default"),
+            PromptFixture::Custom => env!("CARGO_BIN_EXE_prompt_custom"),
+        }
     }
 }
 
-struct SpawnedProbe {
+fn pty_size(rows: u16, cols: u16) -> PtySize {
+    PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    }
+}
+
+struct PromptSession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
@@ -35,18 +46,13 @@ struct SpawnedProbe {
     output: Vec<u8>,
 }
 
-impl SpawnedProbe {
-    fn spawn(probe: Probe, rows: u16, cols: u16, env: &[(&str, &str)]) -> Self {
+impl PromptSession {
+    fn spawn(fixture: PromptFixture, rows: u16, cols: u16, env: &[(&str, &str)]) -> Self {
         let pair = native_pty_system()
-            .openpty(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
+            .openpty(pty_size(rows, cols))
             .expect("openpty");
 
-        let mut command = CommandBuilder::new(probe_bin(probe));
+        let mut command = CommandBuilder::new(fixture.bin());
         for (key, value) in env {
             command.env(*key, *value);
         }
@@ -76,14 +82,19 @@ impl SpawnedProbe {
         }
     }
 
-    /// Blocks until the probe's first output chunk arrives. The prompt only
+    /// Spawns the fixture in a default 24×120 UTF-8 terminal.
+    fn spawn_standard(fixture: PromptFixture) -> Self {
+        Self::spawn(fixture, 24, 120, UTF8_ENV)
+    }
+
+    /// Blocks until the prompt's first output chunk arrives. The prompt only
     /// emits output after entering raw mode, so this signals that sending
     /// input is now safe.
     fn wait_for_first_chunk(&mut self) {
         let chunk = self
             .rx
             .recv_timeout(READY_TIMEOUT)
-            .expect("probe never rendered anything (timeout)");
+            .expect("prompt never rendered anything (timeout)");
         self.output.extend_from_slice(&chunk);
     }
 
@@ -93,14 +104,7 @@ impl SpawnedProbe {
     }
 
     fn resize(&mut self, rows: u16, cols: u16) {
-        self.master
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .expect("resize");
+        self.master.resize(pty_size(rows, cols)).expect("resize");
     }
 
     fn finish(mut self) -> Vec<u8> {
@@ -110,60 +114,61 @@ impl SpawnedProbe {
         self.child.wait().expect("child status");
         self.output
     }
+
+    /// Drains the remaining output and snapshots the full render.
+    fn finish_and_snapshot(self) {
+        let bytes = self.finish();
+        let name = std::thread::current().name().unwrap().replace(":", "_");
+        let mut settings = insta::Settings::new();
+        settings.set_strip_ansi_escape_codes(true);
+        settings.bind(|| assert_snapshot!(name, String::from_utf8_lossy(&bytes)));
+    }
 }
 
-fn assert_rendered(bytes: Vec<u8>) {
-    let name = std::thread::current().name().unwrap().replace(":", "_");
-    let mut settings = insta::Settings::new();
-    settings.set_strip_ansi_escape_codes(true);
-    settings.bind(|| assert_snapshot!(name, String::from_utf8_lossy(&bytes)));
-}
-
-#[test_case(Probe::Basic, b"\x1b" ; "baseline_esc_cancels")]
-#[test_case(Probe::Basic, b"\x1b[B\r" ; "down_confirms_second")]
-#[test_case(Probe::Basic, b"\t\r" ; "tab_confirms_next")]
-#[test_case(Probe::Basic, b"\x1b[Z\r" ; "shift_tab_wraps_to_last")]
-#[test_case(Probe::Basic, b"m\r" ; "hotkey_m_selects_metro")]
-#[test_case(Probe::Basic, b"\x03" ; "ctrl_c_cancels")]
-#[test_case(Probe::Basic, b"!\r" ; "ignores_non_hotkey_then_confirms")]
-#[test_case(Probe::Default, b"\x1b" ; "default_selects_metro")]
-#[test_case(Probe::Custom, b"z\r" ; "custom_hotkey_selects_carpool")]
-fn interact_under_pty(probe: Probe, keys: &[u8]) {
-    let mut spawned = SpawnedProbe::spawn(probe, 24, 120, UTF8_ENV);
-    spawned.wait_for_first_chunk();
-    spawned.send(keys);
-    let bytes = spawned.finish();
-    assert_rendered(bytes);
+#[test_case(PromptFixture::Basic, b"\x1b" ; "baseline_esc_cancels")]
+#[test_case(PromptFixture::Basic, b"\x1b[B\r" ; "down_confirms_second")]
+#[test_case(PromptFixture::Basic, b"\t\r" ; "tab_confirms_next")]
+#[test_case(PromptFixture::Basic, b"\x1b[Z\r" ; "shift_tab_wraps_to_last")]
+#[test_case(PromptFixture::Basic, b"m\r" ; "hotkey_m_selects_metro")]
+#[test_case(PromptFixture::Basic, b"\x03" ; "ctrl_c_cancels")]
+#[test_case(PromptFixture::Basic, b"!\r" ; "ignores_non_hotkey_then_confirms")]
+#[test_case(PromptFixture::Default, b"\x1b" ; "default_selects_metro")]
+#[test_case(PromptFixture::Custom, b"z\r" ; "custom_hotkey_selects_carpool")]
+fn interact_under_pty(fixture: PromptFixture, keys: &[u8]) {
+    let mut session = PromptSession::spawn_standard(fixture);
+    session.wait_for_first_chunk();
+    session.send(keys);
+    session.finish_and_snapshot();
 }
 
 #[test]
 fn unicode_off_ascii_markers() {
-    let mut spawned = SpawnedProbe::spawn(
-        Probe::Basic,
+    let mut session = PromptSession::spawn(
+        PromptFixture::Basic,
         24,
         120,
         &[("LANG", "C"), ("LC_CTYPE", "C"), ("LC_ALL", "C")],
     );
-    spawned.wait_for_first_chunk();
-    spawned.send(b"\x1b");
-    assert_rendered(spawned.finish());
+    session.wait_for_first_chunk();
+    session.send(b"\x1b");
+    session.finish_and_snapshot();
 }
 
 #[test]
 fn small_terminal_windows_options() {
-    let mut spawned = SpawnedProbe::spawn(Probe::Many, 4, 120, UTF8_ENV);
-    spawned.wait_for_first_chunk();
-    spawned.send(b"\x1b[B");
-    spawned.send(b"\x1b[B");
-    spawned.send(b"\x1b");
-    assert_rendered(spawned.finish());
+    let mut session = PromptSession::spawn(PromptFixture::Many, 4, 120, UTF8_ENV);
+    session.wait_for_first_chunk();
+    session.send(b"\x1b[B");
+    session.send(b"\x1b[B");
+    session.send(b"\x1b");
+    session.finish_and_snapshot();
 }
 
 #[test]
 fn resize_during_interaction_keeps_prompt_usable() {
-    let mut spawned = SpawnedProbe::spawn(Probe::Basic, 24, 120, UTF8_ENV);
-    spawned.wait_for_first_chunk();
-    spawned.resize(6, 80);
-    spawned.send(b"\r");
-    assert_rendered(spawned.finish());
+    let mut session = PromptSession::spawn_standard(PromptFixture::Basic);
+    session.wait_for_first_chunk();
+    session.resize(6, 80);
+    session.send(b"\r");
+    session.finish_and_snapshot();
 }
