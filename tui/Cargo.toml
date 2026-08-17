@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
+[features]
+testing = []
+
+[[bin]]
+name = "prompt_fixture"
+path = "src/bin/prompt_fixture.rs"
+required-features = ["testing"]
+
 [dependencies]
 crossterm.workspace = true
 memmap2.workspace = true
@@ -14,6 +22,7 @@ supports-color.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+tui = { path = ".", features = ["testing"] }
 insta.workspace = true
 portable-pty.workspace = true
 tempfile.workspace = true

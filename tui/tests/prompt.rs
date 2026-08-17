@@ -20,11 +20,15 @@ enum PromptFixture {
 
 impl PromptFixture {
     const fn bin(self) -> &'static str {
+        env!("CARGO_BIN_EXE_prompt_fixture")
+    }
+
+    const fn arg(self) -> &'static str {
         match self {
-            PromptFixture::Basic => env!("CARGO_BIN_EXE_prompt_basic"),
-            PromptFixture::Many => env!("CARGO_BIN_EXE_prompt_many_options"),
-            PromptFixture::Default => env!("CARGO_BIN_EXE_prompt_default"),
-            PromptFixture::Custom => env!("CARGO_BIN_EXE_prompt_custom"),
+            PromptFixture::Basic => "basic",
+            PromptFixture::Many => "many",
+            PromptFixture::Default => "default",
+            PromptFixture::Custom => "custom",
         }
     }
 }
@@ -53,6 +57,7 @@ impl PromptSession {
             .expect("openpty");
 
         let mut command = CommandBuilder::new(fixture.bin());
+        command.arg(fixture.arg());
         for (key, value) in env {
             command.env(*key, *value);
         }
