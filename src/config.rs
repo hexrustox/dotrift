@@ -472,6 +472,176 @@ mod tests {
 
     use super::*;
 
+    #[test_case(r#""600""# => 0o600; "string_octal")]
+    #[test_case(r#"0o600"# => 0o600; "octal_literal_prefix")]
+    #[test_case(r#""000""# => 0; "string_zero")]
+    #[test_case(r#""755""# => 0o755; "string_common_mode")]
+    #[test_case(r#""644""# => 0o644; "string_rw_r__r")]
+    #[test_case(r#""777""# => 0o777; "string_max_mode")]
+    #[test_case("0" => 0; "integer_zero")]
+    #[test_case("511" => 0o777; "integer_max_mode")]
+    #[test_case("0o777" => 0o777; "octal_literal_max")]
+    #[test_case(r#""""# => panics ""; "empty_string")]
+    #[test_case(r#""75""# => panics ""; "string_too_short")]
+    #[test_case(r#""7555""# => panics ""; "string_too_long")]
+    #[test_case(r#""800""# => panics ""; "digit_out_of_octal_range")]
+    #[test_case(r#""7a5""# => panics ""; "non_octal_character")]
+    #[test_case("512" => panics ""; "decimal_above_max")]
+    #[test_case("0o1000" => panics ""; "octal_literal_above_max")]
+    #[test_case("-1" => panics ""; "negative_integer_rejected")]
+    #[test_case("1.5" => panics ""; "float_rejected")]
+    fn parse_deploy_mode(value: &str) -> u32 {
+        #[derive(Debug, Deserialize)]
+        struct X {
+            x: DeployMode,
+        }
+        toml::from_str::<X>(&format!("x = {value}")).unwrap().x.0
+    }
+
+    #[test]
+    fn parse_rule_rejects_mode_with_symlink() {
+        #[derive(Debug, Deserialize)]
+        #[allow(dead_code)]
+        struct X {
+            rule: RuleConfig,
+        }
+        let result = toml::from_str::<X>(r#"rule = { type = "symlink", mode = "755" }"#);
+        assert!(result.is_err());
+    }
+
+    struct ReadEnv {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        root: tempfile::TempDir,
+    }
+
+    static STATE_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    impl ReadEnv {
+        fn new() -> Self {
+            let _guard = STATE_HOME_LOCK.lock().expect("state home lock poisoned");
+            let root = tempfile::tempdir().expect("cannot create temp dir");
+            unsafe {
+                std::env::set_var("XDG_STATE_HOME", root.path().join("state"));
+            }
+            Self { _guard, root }
+        }
+
+        fn source(&self) -> PathBuf {
+            self.root.path().join("source")
+        }
+
+        fn write_config(&self, contents: &str) {
+            let source = self.source();
+            fs::create_dir_all(&source).expect("cannot create source dir");
+            fs::write(source.join("dotrift.toml"), contents).expect("cannot write dotrift.toml");
+        }
+    }
+
+    #[test_case(
+        |t: &Path| t.join("does_not_exist") => panics "source directory";
+        "nonexistent"
+    )]
+    #[test_case(
+        |t: &Path| {
+            let path = t.join("a_file");
+            fs::write(&path, b"x").unwrap();
+            path
+        } => panics "source directory";
+        "regular_file"
+    )]
+    fn read_rejects_non_directory_source<F: Fn(&Path) -> PathBuf>(source: F) {
+        let dir = tempdir().expect("cannot create temp dir");
+        read(&source(dir.path()), None).unwrap_or_else(|e| panic!("{e}"));
+    }
+
+    #[test]
+    fn read_rejects_relative_target_override() {
+        let env = ReadEnv::new();
+        env.write_config("");
+        let error = read(&env.source(), Some(PathBuf::from("relative")))
+            .expect_err("relative override must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("target directory must be an absolute path")
+        );
+    }
+
+    #[test]
+    fn read_rejects_relative_target_directory() {
+        let env = ReadEnv::new();
+        env.write_config("target-directory = \"relative\"\n");
+        let error =
+            read(&env.source(), None).expect_err("relative target-directory must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("target directory must be an absolute path")
+        );
+    }
+
+    #[test]
+    fn read_rejects_overlap_with_equal_paths() {
+        let env = ReadEnv::new();
+        env.write_config("");
+        let error = read(&env.source(), Some(env.source().to_path_buf()))
+            .expect_err("equal source and target must be rejected");
+        assert!(error.to_string().contains("overlap"));
+    }
+
+    #[test]
+    fn read_rejects_overlap_with_target_inside_source() {
+        let env = ReadEnv::new();
+        env.write_config("");
+        let error = read(&env.source(), Some(env.source().join("nested")))
+            .expect_err("target inside source must be rejected");
+        assert!(error.to_string().contains("overlap"));
+    }
+
+    #[test]
+    fn read_builds_desired_deployment() {
+        let env = ReadEnv::new();
+        env.write_config("[portal]\n\"a.txt\" = \"out.txt\"\n\"ignored.txt\" = \"drop.txt\"\n");
+        fs::write(env.source().join("a.txt"), b"a").expect("cannot write a.txt");
+        fs::write(env.source().join("ignored.txt"), b"i").expect("cannot write ignored.txt");
+        fs::write(env.source().join(".dotriftignore"), "drop.txt\n")
+            .expect("cannot write .dotriftignore");
+        let target = env.root.path().join("target");
+
+        let deployment = read(&env.source(), Some(target.clone())).expect("cannot read deployment");
+
+        assert_eq!(deployment.target_directory, target);
+        assert_eq!(deployment.entries.len(), 1);
+        let entry = &deployment.entries[0];
+        assert_eq!(entry.source_path, env.source().join("a.txt"));
+        assert_eq!(entry.target_path, target.join("out.txt"));
+        assert_eq!(entry.deploy_type, DeployType::Symlink);
+        assert_eq!(entry.mode, None);
+    }
+
+    #[test]
+    fn read_prefers_target_override_over_config() {
+        let env = ReadEnv::new();
+        env.write_config(&format!(
+            "target-directory = \"{}\"\n",
+            env.root.path().join("config-target").display()
+        ));
+        let override_target = env.root.path().join("override-target");
+
+        let deployment =
+            read(&env.source(), Some(override_target.clone())).expect("cannot read deployment");
+
+        assert_eq!(deployment.target_directory, override_target);
+    }
+
+    #[test]
+    fn read_rejects_invalid_dotriftignore() {
+        let env = ReadEnv::new();
+        env.write_config("");
+        fs::write(env.source().join(".dotriftignore"), "[\n").expect("cannot write .dotriftignore");
+        read(&env.source(), Some(env.root.path().join("target"))).unwrap_or_else(|e| panic!("{e}"));
+    }
+
     macro_rules! portals {
         ($($key:expr => $value:expr),* $(,)?) => {
             BTreeMap::from([$(($key.to_string(), $value.to_string())),*])

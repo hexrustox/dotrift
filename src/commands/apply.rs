@@ -633,12 +633,12 @@ fn show_diff(
             .map_err(|error| miette!(error).wrap_err("cannot run DOTRIFT_PAGER")),
         PagerResolution::Pager(command) => {
             if run_pager(command, &diff).is_err() {
-                println!("{diff}");
+                println_capture!("{diff}");
             }
             Ok(())
         }
         PagerResolution::Stdout => {
-            println!("{diff}");
+            println_capture!("{diff}");
             Ok(())
         }
     }
