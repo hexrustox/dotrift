@@ -29,8 +29,8 @@ defined in `core.md` (Managed check); the storage schema is defined in
 Each record prints one line:
 
 ```
-managed     symlink   ~/.zshrc
-unmanaged   file      ~/.config/nvim/init.lua
+managed    symlink  ~/.zshrc <- dotfiles/.zshrc
+unmanaged  file     ~/.config/nvim/init.lua <- dotfiles/config/nvim/init.lua
 ```
 
 - The verdict prefix is `[managed]` when the managed check passes and
@@ -38,6 +38,8 @@ unmanaged   file      ~/.config/nvim/init.lua
 - The kind is the *recorded* kind (`file` or `symlink`), even when the on-disk
   kind no longer matches.
 - The target path is the recorded absolute target path.
+- The source path is the recorded path the target maps from: the entry's path
+  inside the source directory, or the link destination for a symlink deploy.
 
 Lines are sorted lexicographically by target path. An empty database, or a
 database with no records, prints nothing.

@@ -2,7 +2,6 @@ mod common;
 
 use std::fs;
 use std::os::unix::fs::symlink;
-use std::path::PathBuf;
 
 use common::TestEnv;
 use dotrift::hash::hash_bytes;
@@ -32,6 +31,18 @@ fn prints_sorted_lines_with_verdicts() {
     let env = TestEnv::new();
     let database = env.database();
 
+    let managed_source = env.path("dotfiles/config/app.conf");
+
+    let changed_source = env.path("dotfiles/zsh/zshrc");
+    fs::create_dir_all(changed_source.parent().unwrap()).unwrap();
+    fs::write(&changed_source, b"original content").unwrap();
+
+    let managed_link_source = env.path("dotfiles/editor");
+
+    let missing_link_source = env.path("dotfiles/missing-link");
+    fs::create_dir_all(missing_link_source.parent().unwrap()).unwrap();
+    fs::write(&missing_link_source, b"#!/bin/sh\n").unwrap();
+
     let managed_file = env.path("config/app.conf");
     fs::create_dir_all(managed_file.parent().unwrap()).unwrap();
     fs::write(&managed_file, b"key=value").unwrap();
@@ -42,7 +53,7 @@ fn prints_sorted_lines_with_verdicts() {
 
     let managed_link = env.path("links/editor");
     fs::create_dir_all(managed_link.parent().unwrap()).unwrap();
-    symlink(env.path("links/elsewhere"), &managed_link).unwrap();
+    symlink(&managed_link_source, &managed_link).unwrap();
 
     let missing_link = env.path("links/missing");
     fs::create_dir_all(missing_link.parent().unwrap()).unwrap();
@@ -50,25 +61,25 @@ fn prints_sorted_lines_with_verdicts() {
     let records = [
         StateRecord {
             target_path: managed_file,
-            source_path: PathBuf::from("dotfiles/config/app.conf"),
+            source_path: managed_source,
             kind: Kind::File,
             content_hash: Some(hash_bytes(b"key=value")),
         },
         StateRecord {
             target_path: changed_file,
-            source_path: PathBuf::from("dotfiles/zsh/zshrc"),
+            source_path: changed_source,
             kind: Kind::File,
             content_hash: Some(hash_bytes(b"original content")),
         },
         StateRecord {
             target_path: managed_link,
-            source_path: env.path("links/elsewhere"),
+            source_path: managed_link_source,
             kind: Kind::Symlink,
             content_hash: None,
         },
         StateRecord {
             target_path: missing_link,
-            source_path: env.path("links/elsewhere"),
+            source_path: missing_link_source,
             kind: Kind::Symlink,
             content_hash: None,
         },

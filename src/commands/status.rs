@@ -13,11 +13,13 @@ pub fn run() -> Result<()> {
     for record in records {
         let managed = managed::is_managed(&record)?;
         let verdict = if managed { "managed" } else { "unmanaged" };
+        // TODO improve
         println_capture!(
-            "{:<9}   {:<9} {}",
+            "{:<10} {:<8} {} <- {}",
             verdict,
             record.kind.as_str(),
-            record.target_path.display()
+            record.target_path.display(),
+            record.source_path.display()
         );
     }
     Ok(())

@@ -2,7 +2,7 @@
 source: tests/status.rs
 expression: captured
 ---
-managed     file      <root>/config/app.conf
-managed     symlink   <root>/links/editor
-unmanaged   symlink   <root>/links/missing
-unmanaged   file      <root>/zsh/zshrc
+managed    file     <root>/config/app.conf <- <root>/dotfiles/config/app.conf
+managed    symlink  <root>/links/editor <- <root>/dotfiles/editor
+unmanaged  symlink  <root>/links/missing <- <root>/dotfiles/missing-link
+unmanaged  file     <root>/zsh/zshrc <- <root>/dotfiles/zsh/zshrc
