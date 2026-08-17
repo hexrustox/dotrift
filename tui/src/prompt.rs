@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    fmt::Debug,
+    fmt::{Debug, Display},
     io::{self, IsTerminal, Write},
 };
 
@@ -12,6 +12,7 @@ use crossterm::{
     terminal::{self, ClearType},
 };
 use strum::IntoEnumIterator;
+use supports_color::Stream;
 
 /// Optional per-variant presentation overrides for [`SelectPrompt`].
 pub trait PromptOption {
@@ -31,6 +32,11 @@ pub trait PromptOption {
 /// The defaults render the selected option row and the confirmation line in
 /// green; everything else is unstyled. Build on the defaults with struct
 /// update syntax to change only the elements you care about.
+///
+/// Colors are applied only when the terminal supports them — detected via
+/// `supports_color` (honoring `NO_COLOR`, `FORCE_COLOR`, `CLICOLOR`, and
+/// `TERM=dumb`). In a color-less terminal the prompt renders plain text with
+/// no escape codes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PromptStyle {
     /// Color of the question title line.
@@ -159,7 +165,8 @@ where
             return Ok(options.swap_remove(selected).value);
         }
 
-        let unicode = is_unicode();
+        let unicode_support = is_unicode();
+        let color_support = supports_color::on(Stream::Stdout).is_some();
         let mut stdout = io::stdout();
         terminal::enable_raw_mode()?;
         let _guard = TerminalGuard;
@@ -173,7 +180,8 @@ where
                 &self.question,
                 &self.style,
                 &state,
-                unicode,
+                unicode_support,
+                color_support,
                 rendered_lines,
             )?;
             stdout.flush()?;
@@ -200,13 +208,13 @@ where
                     KeyCode::Enter if key.modifiers.is_empty() => {
                         clear_prompt(&mut stdout, rendered_lines)?;
                         let option = &state.options[state.selected];
-                        let marker = if unicode { "✓" } else { "done" };
+                        let marker = if unicode_support { "✓" } else { "done" };
                         writeln!(
                             stdout,
                             "{} ({}) {}",
                             self.question,
                             option.label,
-                            marker.with(self.style.done)
+                            apply_color(marker, self.style.done, color_support)
                         )?;
                         stdout.flush()?;
                         return Ok(option.value.clone());
@@ -319,7 +327,8 @@ fn render<E>(
     question: &str,
     style: &PromptStyle,
     state: &SelectionState<E>,
-    unicode: bool,
+    unicode_support: bool,
+    color_support: bool,
     previous_lines: usize,
 ) -> io::Result<usize> {
     clear_prompt(stdout, previous_lines)?;
@@ -330,9 +339,17 @@ fn render<E>(
         .saturating_sub(visible_count.saturating_sub(1))
         .min(state.options.len().saturating_sub(visible_count));
     let end = (start + visible_count).min(state.options.len());
-    writeln!(stdout, "{}", question.with(style.question))?;
+    writeln!(
+        stdout,
+        "{}",
+        apply_color(question, style.question, color_support)
+    )?;
     queue!(stdout, cursor::MoveToColumn(0))?;
-    let (selected, unselected) = if unicode { ('●', '○') } else { ('*', ' ') };
+    let (selected, unselected) = if unicode_support {
+        ('●', '○')
+    } else {
+        ('*', ' ')
+    };
     for (index, option) in state.options[start..end].iter().enumerate() {
         let index = index + start;
         let is_selected = index == state.selected;
@@ -350,17 +367,37 @@ fn render<E>(
         writeln!(
             stdout,
             "  {}{}",
-            marker.with(marker_color),
-            format!(" [{}] {}", option.hotkey, option.label).with(row_color)
+            apply_color(marker, marker_color, color_support),
+            apply_color(
+                format!(" [{}] {}", option.hotkey, option.label),
+                row_color,
+                color_support
+            )
         )?;
         queue!(stdout, cursor::MoveToColumn(0))?;
     }
     writeln!(
         stdout,
         "{}",
-        "\n  ↑/↓ navigate  Enter select  A-Z jump  Esc cancel".with(style.help)
+        apply_color(
+            "\n  ↑/↓ navigate  Enter select  A-Z jump  Esc cancel",
+            style.help,
+            color_support
+        )
     )?;
     Ok(end - start + 3)
+}
+
+fn apply_color<T>(content: T, color: Color, enabled: bool) -> String
+where
+    T: Display + Stylize,
+    T::Styled: Display,
+{
+    if enabled {
+        content.with(color).to_string()
+    } else {
+        content.to_string()
+    }
 }
 
 fn clear_prompt(stdout: &mut impl Write, lines: usize) -> io::Result<()> {

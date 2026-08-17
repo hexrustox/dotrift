@@ -172,3 +172,30 @@ fn resize_during_interaction_keeps_prompt_usable() {
     session.send(b"\r");
     session.finish_and_snapshot();
 }
+
+fn assert_color_free(output: &[u8]) {
+    assert!(
+        !output.windows(7).any(|window| window == b"\x1b[38;5;"),
+        "output contains foreground color escape: {output:?}"
+    );
+    assert!(
+        !output.windows(5).any(|window| window == b"\x1b[39m"),
+        "output contains color reset escape: {output:?}"
+    );
+}
+
+#[test]
+fn no_color_env_disables_color_escapes() {
+    let mut session = PromptSession::spawn(PromptFixture::Basic, 24, 120, &[("NO_COLOR", "1")]);
+    session.wait_for_first_chunk();
+    session.send(b"\x1b");
+    assert_color_free(&session.finish());
+}
+
+#[test]
+fn dumb_terminal_disables_color_escapes() {
+    let mut session = PromptSession::spawn(PromptFixture::Basic, 24, 120, &[("TERM", "dumb")]);
+    session.wait_for_first_chunk();
+    session.send(b"\x1b");
+    assert_color_free(&session.finish());
+}
