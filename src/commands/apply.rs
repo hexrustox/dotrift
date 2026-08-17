@@ -565,8 +565,7 @@ fn prompt_for_obstruction(
     #[cfg(not(any(test, feature = "testing")))]
     {
         println!(
-            r#"Cannot deploy {} {},
-{} {} is already present."#,
+            "Cannot deploy {} {}: {} {} is already present.",
             path_kind(&entry.source_path)?,
             entry.source_path.display(),
             path_kind(obstruction)?,

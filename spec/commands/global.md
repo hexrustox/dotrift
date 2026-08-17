@@ -42,8 +42,11 @@ When the target directory is needed, it is resolved in order:
    `dotrift-toml.md`).
 3. `$HOME`.
 
-When `--target` is provided, the config-side `target-directory` is never
-parsed or validated — the CLI override wins outright.
+When `--target` is provided, the CLI override wins outright: the config-side
+`target-directory` value is unused and its absolute-path rule is not enforced.
+The config file is still parsed in full for its other content, so a malformed
+file — including a structurally invalid `target-directory` — fails regardless
+of the override.
 
 ## Source directory requirement
 

@@ -134,7 +134,7 @@ literal values, with no template-specific exceptions.
 * **Invalid target directory:** `target-directory` is not an absolute path.
 * **Collision:** any two resolved portal entries producing the same target
   path, including identical declarations for the same source path. The error
-  lists the target and every contributing source/declaration.
+  lists the target and the colliding sources/declarations.
 * **Path rule violations:** absolute paths, embedded `.`/`..` components, or
   empty strings in portal keys/values or rule keys.
 * **Unknown fields:** unknown top-level keys, unknown sections, or unknown

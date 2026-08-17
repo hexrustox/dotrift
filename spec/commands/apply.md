@@ -96,8 +96,7 @@ absolute location and its kind, and reports that the obstructing path is
 already present:
 
 ```
-Cannot deploy {kind} {source}:
-{kind} {obstruction} is already present.
+Cannot deploy {kind} {source}: {kind} {obstruction} is already present.
 How would you like to proceed?
 ```
 
@@ -250,8 +249,8 @@ obstruction skips) still prints the summary, reflecting the skips.
 
 `--clean-up` removes *stale paths*: managed paths in the target directory that
 are not part of the desired deployment. It runs after a successful deploy walk
-only — a run that failed during deployment leaves clean-up for the next
-invocation.
+only — an unsuccessful run (see Exit status: a skip or a failure) leaves
+clean-up for the next invocation.
 
 ### Candidates
 
