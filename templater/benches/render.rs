@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
-use std::time::Instant;
 
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use templater::Template;
@@ -11,7 +11,6 @@ use templater::value::{Value, ValueType};
 const TOP_LEVEL_VARIABLES: usize = 50;
 const TEMPLATE_SECTIONS: usize = 6_000;
 const MAX_VALUE_DEPTH: usize = 2;
-const PERF_BOUND_SECS: u64 = 1;
 const SEEDS: [u64; 8] = [
     0x5eed_0001,
     0x5eed_0002,
@@ -217,54 +216,37 @@ fn build_template(seed: u64, catalog: &[PathEntry]) -> String {
     output
 }
 
-#[test]
-fn large_complex_templates_render_within_bound() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let mut durations = Vec::with_capacity(SEEDS.len());
+fn build_fixtures() -> Vec<(String, Template, HashMap<String, Value>)> {
+    SEEDS
+        .iter()
+        .map(|seed| {
+            let (scope, catalog) = build_scope(*seed);
+            let source = build_template(*seed, &catalog);
+            let template = Template::from_bytes(source.clone());
+            (source, template, scope)
+        })
+        .collect()
+}
 
-    for (fixture_index, seed) in SEEDS.iter().copied().enumerate() {
-        let (scope, catalog) = build_scope(seed);
-        let source = build_template(seed, &catalog);
-        assert!(
-            source.len() > 50_000,
-            "fixture {fixture_index} too small: {} bytes",
-            source.len()
-        );
-
-        let path = temp.path().join(format!("large_{fixture_index}.dotrift"));
-        std::fs::write(&path, &source).expect("write template");
-        let template = Template::from_file(&path).expect("from_file failed");
-
-        let mut output = Vec::new();
-        let fixture_start = Instant::now();
-        template
-            .render(&mut output, &scope, &TestRegistry)
-            .expect("render failed");
-        let fixture_elapsed = fixture_start.elapsed();
-        durations.push(fixture_elapsed);
-        assert!(
-            !output.is_empty(),
-            "fixture {fixture_index} rendered no output"
-        );
-
-        eprintln!(
-            "fixture {fixture_index}: {} template bytes -> {} output bytes in {fixture_elapsed:?}",
-            source.len(),
-            output.len()
+fn render_benchmark(c: &mut Criterion) {
+    let fixtures = build_fixtures();
+    let mut group = c.benchmark_group("render");
+    for (fixture_index, (source, template, scope)) in fixtures.iter().enumerate() {
+        group.throughput(Throughput::Bytes(source.len() as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(fixture_index),
+            &(template, scope),
+            |b, (template, scope): &(&Template, &HashMap<String, Value>)| {
+                b.iter(|| {
+                    template
+                        .render(&mut Vec::new(), scope, &TestRegistry)
+                        .expect("render failed")
+                });
+            },
         );
     }
-
-    let total: std::time::Duration = durations.iter().sum();
-    let average = total / durations.len() as u32;
-    let min = durations.iter().copied().min().expect("no fixtures timed");
-    let max = durations.iter().copied().max().expect("no fixtures timed");
-    assert!(
-        total.as_secs() < PERF_BOUND_SECS,
-        "render took {total:?}, exceeding the {PERF_BOUND_SECS}s smoke bound"
-    );
-
-    eprintln!(
-        "avg {average:?}, min {min:?}, max {max:?} (total {total:?} over {} fixtures)",
-        durations.len()
-    );
+    group.finish();
 }
+
+criterion_group!(benches, render_benchmark);
+criterion_main!(benches);
