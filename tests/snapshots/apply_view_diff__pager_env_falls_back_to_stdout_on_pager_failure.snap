@@ -3,7 +3,8 @@ source: tests/apply_view_diff.rs
 expression: output
 ---
 --- <root>/target/target.txt
-+++ <root>/source/greeting.txt
++++ <root>/source/file.txt
 @@ -1 +1 @@
--old
-+hello
+-old content
++new content
+deployed 0, replaced 0, skipped 1

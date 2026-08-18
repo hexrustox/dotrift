@@ -1,17 +1,17 @@
 use std::{
     collections::HashSet,
-    fmt::Display,
     fs,
+    hash::Hasher,
     io::Write,
-    os::unix::fs::{PermissionsExt, symlink},
-    path::Path,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink},
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
 use miette::{Result, WrapErr, miette};
-use similar::TextDiff;
 use strum::EnumIter;
 use tui::prompt::{PromptError, PromptOption};
+use twox_hash::XxHash64;
 
 use crate::config::{self, DeployType};
 use crate::hash;
@@ -179,7 +179,7 @@ fn deploy_entry(
             loop {
                 match prompt_for_obstruction(entry, &obstruction) {
                     Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
-                    Ok(ObstructionChoice::ViewDiff) => show_diff(entry, &obstruction, context)?,
+                    Ok(ObstructionChoice::ViewDiff) => view_diff(entry, &obstruction, context)?,
                     Ok(ObstructionChoice::Replace) => {
                         remove_path(database, &obstruction)?;
                         replaced = true;
@@ -216,7 +216,7 @@ fn deploy_entry(
                 match prompt_for_obstruction(entry, &entry.target_path) {
                     Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
                     Ok(ObstructionChoice::ViewDiff) => {
-                        show_diff(entry, &entry.target_path, context)?
+                        view_diff(entry, &entry.target_path, context)?
                     }
                     Ok(ObstructionChoice::Replace) => {
                         remove_path(database, &entry.target_path)?;
@@ -591,26 +591,21 @@ fn path_kind(path: &Path) -> std::io::Result<&'static str> {
     })
 }
 
-// TODO optimize with stream
-fn show_diff(
+fn view_diff(
     entry: &config::DeploymentEntry,
     target: &Path,
     context: &std::collections::HashMap<String, templater::value::Value>,
 ) -> Result<()> {
-    let source_bytes = if entry.deploy_type == DeployType::Template {
-        template::render_template(&entry.source_path, context)?
+    let rendered = if entry.deploy_type == DeployType::Template {
+        let rendered = template::render_template(&entry.source_path, context)?;
+        Some(render_to_temp(&rendered)?)
     } else {
-        fs::read(&entry.source_path).map_err(|error| miette!(error))?
+        None
     };
-    let target_bytes = fs::read(target).map_err(|error| miette!(error))?;
-    let source_lossy = String::from_utf8_lossy(&source_bytes);
-    let target_lossy = String::from_utf8_lossy(&target_bytes);
-    let text_diff = TextDiff::from_lines(&target_lossy, &source_lossy);
-    let mut diff = text_diff.unified_diff();
-    diff.header(
-        &target.display().to_string(),
-        &entry.source_path.display().to_string(),
-    );
+    let source = rendered
+        .as_ref()
+        .map_or(entry.source_path.as_path(), |path| path.as_path());
+
     std::io::stdout().flush().map_err(|error| miette!(error))?;
 
     enum PagerResolution<'a> {
@@ -629,35 +624,118 @@ fn show_diff(
         },
     };
     match resolution {
-        PagerResolution::DotriftPager(command) => run_pager(command, &diff)
-            .map_err(|error| miette!(error).wrap_err("cannot run DOTRIFT_PAGER")),
-        PagerResolution::Pager(command) => {
-            if run_pager(command, &diff).is_err() {
-                println_capture!("{diff}");
-            }
+        PagerResolution::DotriftPager(command) => {
+            let mut child = spawn_pager(command)
+                .map_err(|error| miette!(error).wrap_err("cannot run DOTRIFT_PAGER"))?;
+            let mut stdin = child.stdin.take().expect("piped stdin");
+            run_diff_into(target, &entry.source_path, source, &mut stdin)?;
+            drop(stdin);
+            child.wait().map_err(|error| miette!(error))?;
             Ok(())
         }
+        PagerResolution::Pager(command) => match spawn_pager(command) {
+            Ok(mut child) => {
+                let mut stdin = child.stdin.take().expect("piped stdin");
+                run_diff_into(target, &entry.source_path, source, &mut stdin)?;
+                drop(stdin);
+                child.wait().map_err(|error| miette!(error))?;
+                Ok(())
+            }
+            Err(_) => {
+                let mut output = diff_output();
+                run_diff_into(target, &entry.source_path, source, &mut output)
+            }
+        },
         PagerResolution::Stdout => {
-            println_capture!("{diff}");
-            Ok(())
+            let mut output = diff_output();
+            run_diff_into(target, &entry.source_path, source, &mut output)
         }
     }
 }
 
-fn run_pager(command: &str, diff: &dyn Display) -> std::io::Result<()> {
+const RENDER_TEMP_DIR: &str = "dotrift-render";
+
+fn render_to_temp(rendered: &[u8]) -> Result<PathBuf> {
+    let dir = std::env::temp_dir().join(RENDER_TEMP_DIR);
+    fs::create_dir_all(&dir)
+        .map_err(|error| miette!(error))
+        .wrap_err("cannot create diff temp directory")?;
+    for _ in 0..3 {
+        let name = random_hash()?;
+        let path = dir.join(format!("dotrift-{name}.tmp"));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                file.write_all(rendered)
+                    .map_err(|error| miette!(error))
+                    .wrap_err("cannot write diff temp file")?;
+                return Ok(path);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(miette!(error).wrap_err("cannot create diff temp file")),
+        }
+    }
+    Err(miette!("cannot create a unique diff temp file"))
+}
+
+fn random_hash() -> Result<String> {
+    let mut bytes = [0u8; 16];
+    // SAFETY: the buffer is writable and its length matches the request.
+    let written = unsafe { libc::getrandom(bytes.as_mut_ptr().cast(), bytes.len(), 0) };
+    if written != bytes.len() as isize {
+        return Err(miette!("cannot read random bytes for diff temp file"));
+    }
+    let mut hasher = XxHash64::with_seed(0);
+    hasher.write(&bytes);
+    Ok(format!("{:016x}", hasher.finish()))
+}
+
+fn run_diff_into<W: Write>(
+    target: &Path,
+    source_label: &Path,
+    source: &Path,
+    dest: &mut W,
+) -> Result<()> {
+    let mut child = Command::new("diff")
+        .arg("-u")
+        .arg("--label")
+        .arg(target)
+        .arg("--label")
+        .arg(source_label)
+        .arg(target)
+        .arg(source)
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|error| miette!(error).wrap_err("cannot run diff"))?;
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    std::io::copy(&mut stdout, dest).map_err(|error| miette!(error))?;
+    if child.wait().map_err(|error| miette!(error))?.code() == Some(2) {
+        return Err(miette!("diff exited with an error"));
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "testing"))]
+fn diff_output() -> std::io::Stdout {
+    std::io::stdout()
+}
+
+#[cfg(feature = "testing")]
+fn diff_output() -> crate::capture::CaptureWriter {
+    crate::capture::CaptureWriter
+}
+
+fn spawn_pager(command: &str) -> std::io::Result<std::process::Child> {
     let mut parts = command.split_whitespace();
     let program = parts.next().expect("non-empty pager command");
-    let mut child = Command::new(program)
+    Command::new(program)
         .args(parts)
         .stdin(Stdio::piped())
-        .spawn()?;
-    child
-        .stdin
-        .take()
-        .expect("piped stdin")
-        .write_fmt(format_args!("{diff}"))?;
-    child.wait()?;
-    Ok(())
+        .spawn()
 }
 
 fn remove_path(database: &StateDatabase, path: &Path) -> Result<()> {

@@ -134,7 +134,7 @@ fn dotrift_pager_blank_defers_to_pager() {
     let (script, output) = write_capture_script(&env);
     run_view_diff_with_env(&env, Some(""), Some(script.to_str().unwrap()));
     let diff = fs::read_to_string(output).unwrap();
-    assert!(!diff.trim().is_empty());
+    snapshot_with_root_filter(&env, &diff);
 }
 
 #[test]
@@ -143,14 +143,15 @@ fn dotrift_pager_whitespace_defers_to_pager() {
     let (script, output) = write_capture_script(&env);
     run_view_diff_with_env(&env, Some("   "), Some(script.to_str().unwrap()));
     let diff = fs::read_to_string(output).unwrap();
-    assert!(!diff.trim().is_empty());
+    snapshot_with_root_filter(&env, &diff);
 }
 
 #[test]
 fn pager_env_unset_prints_to_stdout() {
     let env = TestEnv::new();
     run_view_diff_with_env(&env, None, None);
-    assert!(!dotrift::capture::take().trim().is_empty());
+    let captured = dotrift::capture::take();
+    snapshot_with_root_filter(&env, &captured);
 }
 
 #[test]
@@ -158,7 +159,8 @@ fn pager_env_falls_back_to_stdout_on_pager_failure() {
     let env = TestEnv::new();
     let missing = env.path("no-such-pager");
     run_view_diff_with_env(&env, Some(""), Some(missing.to_str().unwrap()));
-    assert!(!dotrift::capture::take().trim().is_empty());
+    let captured = dotrift::capture::take();
+    snapshot_with_root_filter(&env, &captured);
 }
 
 #[test]

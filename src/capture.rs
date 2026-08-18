@@ -29,6 +29,21 @@ pub fn push(line: &str) {
     BUFFER.with(|buffer| buffer.borrow_mut().push_str(line));
 }
 
+#[cfg(feature = "testing")]
+pub struct CaptureWriter;
+
+#[cfg(feature = "testing")]
+impl std::io::Write for CaptureWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        push(String::from_utf8_lossy(buf).as_ref());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 pub fn take() -> String {
     BUFFER.with(|buffer| std::mem::take(&mut *buffer.borrow_mut()))
 }

@@ -25,7 +25,6 @@ miette.workspace = true
 normalize-path = "0.2"
 rusqlite = { version = "0.39", features = ["bundled"] }
 serde.workspace = true
-similar.workspace = true
 strum.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
@@ -54,7 +53,6 @@ ratatui = { version = "0.30", default-features = false, features = [
   "crossterm",
 ] }
 serde = { version = "1", features = ["derive"] }
-similar = "2"
 strum = { version = "0.28", features = ["derive"] }
 supports-color = "3"
 tempfile = "3"

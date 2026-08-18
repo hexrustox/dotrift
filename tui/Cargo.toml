@@ -16,7 +16,6 @@ required-features = ["testing"]
 crossterm.workspace = true
 memmap2.workspace = true
 ratatui.workspace = true
-similar.workspace = true
 strum.workspace = true
 supports-color.workspace = true
 thiserror.workspace = true
