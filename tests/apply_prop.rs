@@ -275,7 +275,7 @@ proptest! {
     })]
 
     #[test]
-    fn apply_matches_target_tree((source_tree, target_tree) in world_strategy()) {
+    fn arbitrary_apply_deploys_exact_symlink_tree((source_tree, target_tree) in world_strategy()) {
         let env = TestEnv::new();
         let source = env.path("source");
         let target = env.path("target");
@@ -292,7 +292,7 @@ proptest! {
     }
 
     #[test]
-    fn apply_cleanup_removes_dropped_targets(
+    fn arbitrary_apply_cleanup_drops_removed_targets(
         (source_tree, target_tree, pruned_tree) in cleanup_world_strategy(),
     ) {
         let env = TestEnv::new();

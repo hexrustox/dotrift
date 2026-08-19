@@ -470,7 +470,11 @@ mod tests {
     #[test_case(Choice::EVScooter, "ev scooter", 'e'; "splits_acronym_in_derived_label")]
     #[test_case(Choice::Tram, "custom label", 't'; "derives_hotkey_from_overridden_label")]
     #[test_case(Choice::Carpool, "carpool", 'z'; "keeps_overridden_hotkey")]
-    fn make_options_derives_or_overrides_label_and_hotkey(variant: Choice, label: &str, hotkey: char) {
+    fn make_options_derives_or_overrides_label_and_hotkey(
+        variant: Choice,
+        label: &str,
+        hotkey: char,
+    ) {
         let options = make_options::<Choice>(None).unwrap();
         let option = options
             .iter()

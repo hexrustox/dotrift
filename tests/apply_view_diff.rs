@@ -31,7 +31,7 @@ fn install_capture_pager(env: &TestEnv) -> (EnvVarGuard, PathBuf) {
         fs::write(target.join("target.txt"), b"old content\n").unwrap();
         "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
     }
-    ; "copy_changes_single_line"
+    ; "shows_single_line_copy_diff"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -40,9 +40,9 @@ fn install_capture_pager(env: &TestEnv) -> (EnvVarGuard, PathBuf) {
         fs::write(target.join("target.txt"), b"old\n").unwrap();
         "[portal]\n\"greeting.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"template\" }\n"
     }
-    ; "template_renders_into_diff"
+    ; "shows_rendered_template_diff"
 )]
-fn view_diff_snapshot(setup: impl Fn(&Path, &Path) -> &'static str) {
+fn view_diff_prompt_output(setup: impl Fn(&Path, &Path) -> &'static str) {
     let scenario = ApplyScenario::new(setup);
     let (_pager, diff_file) = install_capture_pager(&scenario.env);
     set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
@@ -77,7 +77,7 @@ fn run_view_diff_with_env(env: &TestEnv, dotrift_pager: Option<&str>, pager: Opt
 }
 
 #[test]
-fn dotrift_pager_blank_defers_to_pager() {
+fn blank_dotrift_pager_falls_back_to_pager() {
     let env = TestEnv::new();
     let (script, output) = write_capture_script(&env);
     run_view_diff_with_env(&env, Some(""), Some(script.to_str().unwrap()));
@@ -88,7 +88,7 @@ fn dotrift_pager_blank_defers_to_pager() {
 }
 
 #[test]
-fn dotrift_pager_whitespace_defers_to_pager() {
+fn whitespace_dotrift_pager_falls_back_to_pager() {
     let env = TestEnv::new();
     let (script, output) = write_capture_script(&env);
     run_view_diff_with_env(&env, Some("   "), Some(script.to_str().unwrap()));
@@ -99,7 +99,7 @@ fn dotrift_pager_whitespace_defers_to_pager() {
 }
 
 #[test]
-fn pager_env_unset_prints_to_stdout() {
+fn no_pager_configured_prints_diff_to_stdout() {
     let env = TestEnv::new();
     run_view_diff_with_env(&env, None, None);
     let captured = dotrift::capture::take();
@@ -109,7 +109,7 @@ fn pager_env_unset_prints_to_stdout() {
 }
 
 #[test]
-fn pager_env_falls_back_to_stdout_on_pager_failure() {
+fn failing_pager_falls_back_to_stdout() {
     let env = TestEnv::new();
     let missing = env.path("no-such-pager");
     run_view_diff_with_env(&env, Some(""), Some(missing.to_str().unwrap()));
@@ -120,7 +120,7 @@ fn pager_env_falls_back_to_stdout_on_pager_failure() {
 }
 
 #[test]
-fn dotrift_pager_failure_is_an_error() {
+fn failing_dotrift_pager_raises_error() {
     let env = TestEnv::new();
     let missing = env.path("no-such-pager");
     let (source, target) = write_copy_diff_fixture(&env);

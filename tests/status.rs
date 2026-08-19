@@ -15,20 +15,20 @@ fn run_status_and_take() -> String {
 }
 
 #[test]
-fn missing_database_prints_nothing() {
+fn status_reports_nothing_without_database() {
     let _env = TestEnv::new();
     assert_eq!(run_status_and_take(), "");
 }
 
 #[test]
-fn empty_database_prints_nothing() {
+fn status_reports_nothing_for_empty_database() {
     let env = TestEnv::new();
     let _database = env.database();
     assert_eq!(run_status_and_take(), "");
 }
 
 #[test]
-fn prints_sorted_lines_with_verdicts() {
+fn status_prints_sorted_lines_with_verdicts() {
     let env = TestEnv::new();
     let database = env.database();
 

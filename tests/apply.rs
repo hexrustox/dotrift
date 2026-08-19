@@ -20,7 +20,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
         assert!(target.join("target.txt").is_symlink());
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"hello");
     }
-    ; "deploys_portal_file"
+    ; "single_file_portal_deploys_symlink"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -33,7 +33,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
         assert_eq!(fs::read(target.join("dst/a.txt")).unwrap(), b"A");
         assert_eq!(fs::read(target.join("dst/sub/b.txt")).unwrap(), b"B");
     }
-    ; "deploys_literal_directory_recursively"
+    ; "literal_directory_portal_deploys_nested_files"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -46,7 +46,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
         assert_eq!(fs::read(target.join("cfg/a.txt")).unwrap(), b"A");
         assert_eq!(fs::read(target.join("cfg/sub/b.txt")).unwrap(), b"B");
     }
-    ; "deploys_glob_with_stripping_prefix"
+    ; "glob_portal_deploys_files_with_prefix_stripped"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -61,7 +61,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
         assert_eq!(record.kind, Kind::File);
         assert_eq!(record.content_hash, Some(hash_bytes(b"copy me")));
     }
-    ; "copy_rule_overrides_symlink"
+    ; "copy_rule_deploys_plain_file_with_recorded_hash"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -72,7 +72,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
     |_source: &Path, target: &Path| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"hi");
     }
-    ; "template_rule_renders"
+    ; "template_rule_renders_variables_into_target"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -86,7 +86,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
             .mode();
         assert_eq!(mode & 0o777, 0o600);
     }
-    ; "mode_rule_applies"
+    ; "mode_rule_sets_permissions_on_deployed_copy"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -97,7 +97,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
     |_source: &Path, target: &Path| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"payload");
     }
-    ; "dotrift_toml_renders_from_variable"
+    ; "templated_source_path_resolves_from_data_file_variable"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -116,7 +116,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
     |_source: &Path, target: &Path| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"over");
     }
-    ; "active_profile_overrides_base"
+    ; "active_profile_value_overrides_base_value"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -131,7 +131,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
     |_source: &Path, target: &Path| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"base");
     }
-    ; "stale_active_profile_ignored"
+    ; "active_profile_without_definition_falls_back_to_base"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -142,7 +142,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
     |_source: &Path, target: &Path| {
         assert!(fs::symlink_metadata(target.join("target.txt")).is_err());
     }
-    ; "ignores_target"
+    ; "dotriftignore_excludes_deploying_matching_target"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -155,7 +155,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
         assert_eq!(fs::read(target.join("out/keep.txt")).unwrap(), b"K");
         assert!(fs::symlink_metadata(target.join("out/a.txt")).is_err());
     }
-    ; "negation_reincludes"
+    ; "dotriftignore_negation_reincludes_matching_file"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -170,7 +170,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
         assert!(fs::symlink_metadata(target.join("dotrift_data.toml")).is_err());
         assert!(fs::symlink_metadata(target.join(".dotriftignore")).is_err());
     }
-    ; "control_files_implicitly_excluded"
+    ; "control_files_are_implicitly_excluded_from_deploy"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -185,7 +185,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
         );
         assert!(fs::symlink_metadata(target.join("one.txt")).is_err());
     }
-    ; "ignore_applies_per_target"
+    ; "dotriftignore_applies_to_target_path_not_source"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -204,7 +204,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
             None
         );
     }
-    ; "skip_unmanaged_target"
+    ; "skipping_unmanaged_target_leaves_original_and_record"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -223,7 +223,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
                 .is_some()
         );
     }
-    ; "replace_unmanaged_target"
+    ; "replacing_unmanaged_target_deploys_and_records_file"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -238,7 +238,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
         assert_eq!(fs::read(target.join("a/b")).unwrap(), b"block");
         assert!(fs::symlink_metadata(target.join("a/b/file.txt")).is_err());
     }
-    ; "skip_parent_obstruction"
+    ; "skipping_parent_obstruction_keeps_blocking_file"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -259,7 +259,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
                 .is_some()
         );
     }
-    ; "replace_parent_obstruction"
+    ; "replacing_parent_obstruction_deploys_nested_file"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -275,7 +275,7 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
         assert_eq!(fs::read(target.join("b.txt")).unwrap(), b"new-b");
         assert_eq!(prompt_count(), 1);
     }
-    ; "replace_all_latches"
+    ; "replace_all_choice_latches_for_subsequent_obstructions"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -283,9 +283,12 @@ use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name}
         "[portal]\n\"empty\" = \"dst\"\n"
     },
     |_source: &Path, _target: &Path| {}
-    ; "empty_deployment_succeeds"
+    ; "deploying_empty_directory_succeeds"
 )]
-fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(&Path, &Path)) {
+fn first_apply_behaviors(
+    setup: impl Fn(&Path, &Path) -> &'static str,
+    assert: impl Fn(&Path, &Path),
+) {
     let scenario = ApplyScenario::new(setup);
     scenario.run();
     assert(&scenario.source, &scenario.target);
@@ -309,7 +312,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(record.kind, Kind::Symlink);
         assert_eq!(record.source_path, source.join("file.txt"));
     }
-    ; "reapply_same_config_is_idempotent"
+    ; "reapplying_unchanged_config_is_idempotent"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -334,7 +337,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(record.source_path, source.join("file.txt"));
         assert_eq!(prompt_count(), 0);
     }
-    ; "symlink_replaces_on_source_change"
+    ; "source_content_change_rewires_symlink_without_prompt"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -356,7 +359,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(record.kind, Kind::File);
         assert_eq!(record.content_hash, Some(hash_bytes(b"new")));
     }
-    ; "copy_replaces_on_source_change"
+    ; "source_change_redeploys_copy_with_updated_hash"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -380,7 +383,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
     |_source: &Path, target: &Path| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"bye");
     }
-    ; "template_rerenders_on_variable_change"
+    ; "variable_change_rerenders_template_output"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -403,7 +406,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(record.kind, Kind::File);
         assert_eq!(record.content_hash, Some(hash_bytes(b"content")));
     }
-    ; "symlink_rule_changes_to_copy"
+    ; "adding_copy_rule_converts_symlink_to_plain_file"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -426,7 +429,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(record.kind, Kind::Symlink);
         assert_eq!(record.source_path, source.join("file.txt"));
     }
-    ; "copy_rule_changes_to_symlink"
+    ; "removing_copy_rule_reverts_target_to_symlink"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -453,7 +456,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(record.kind, Kind::File);
         assert_eq!(record.content_hash, Some(hash_bytes(b"x")));
     }
-    ; "copy_rule_changes_to_template"
+    ; "switching_copy_rule_to_template_renders_output"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -475,7 +478,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
             .mode();
         assert_eq!(mode & 0o777, 0o644);
     }
-    ; "mode_change_reapplies_permissions"
+    ; "mode_change_updates_permissions_on_existing_copy"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -498,7 +501,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
             .unwrap();
         assert_eq!(record.source_path, source.join("new.txt"));
     }
-    ; "source_renamed_redirects_symlink"
+    ; "renamed_source_redirects_symlink_to_new_path"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -521,7 +524,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
                 .is_some()
         );
     }
-    ; "target_redirected_leaves_stale_path"
+    ; "moved_target_path_leaves_old_managed_path_stale"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -536,7 +539,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(fs::read_link(&file).unwrap(), source.join("b.txt"));
         assert!(StateDatabase::open().unwrap().record(&file).unwrap().is_some());
     }
-    ; "entry_removed_leaves_stale_managed_path"
+    ; "removing_portal_entry_leaves_target_path_stale"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -551,7 +554,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"A");
         assert_eq!(fs::read(target.join("b.txt")).unwrap(), b"B");
     }
-    ; "entry_added_deploys_alongside"
+    ; "adding_portal_entry_deploys_alongside_existing"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -567,7 +570,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(fs::read(target.join("b.md")).unwrap(), b"B");
         assert!(fs::symlink_metadata(target.join("dotrift.toml")).is_err());
     }
-    ; "glob_widened_deploys_new_file"
+    ; "widened_glob_deploys_newly_matched_file"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -584,7 +587,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(fs::read_link(&file).unwrap(), source.join("file.txt"));
         assert!(StateDatabase::open().unwrap().record(&file).unwrap().is_some());
     }
-    ; "ignore_added_makes_path_stale"
+    ; "added_ignore_rule_makes_existing_target_stale"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -607,7 +610,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
     |_source: &Path, target: &Path| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"over");
     }
-    ; "profile_activated_between_runs"
+    ; "activating_profile_between_runs_rerenders_override"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -630,7 +633,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(record.content_hash, Some(hash_bytes(b"original")));
         assert_eq!(prompt_count(), 1);
     }
-    ; "tampered_copy_prompt_replace_restores"
+    ; "replacing_tampered_copy_restores_source_content"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -653,7 +656,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(record.content_hash, Some(hash_bytes(b"original")));
         assert_eq!(prompt_count(), 1);
     }
-    ; "tampered_copy_prompt_skip_retains_record"
+    ; "skipping_tampered_copy_keeps_record_and_tamper"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -680,7 +683,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(record.source_path, source.join("file.txt"));
         assert_eq!(prompt_count(), 1);
     }
-    ; "tampered_symlink_prompt_replace_restores"
+    ; "replacing_tampered_symlink_restores_link"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -702,7 +705,7 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert_eq!(record.kind, Kind::File);
         assert_eq!(record.content_hash, Some(hash_bytes(b"hello")));
     }
-    ; "deleted_target_redeploys_despite_stale_record"
+    ; "deleted_copy_target_redeploys_despite_stale_record"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -723,9 +726,9 @@ fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(
         assert!(fs::symlink_metadata(target.join("real")).unwrap().is_dir());
         assert_eq!(prompt_count(), 1);
     }
-    ; "parent_dir_replaced_by_symlink_prompts"
+    ; "parent_path_replaced_by_symlink_prompts"
 )]
-fn run_apply_test_twice(
+fn reapply_behaviors(
     setup: impl Fn(&Path, &Path) -> &'static str,
     modify: impl Fn(&Path, &Path) -> Option<&'static str>,
     assert: impl Fn(&Path, &Path),
@@ -740,7 +743,7 @@ fn run_apply_test_twice(
 #[test_case(
     |_source: &Path, _target: &Path| "[portal]\n\"missing.txt\" = \"target.txt\"\n"
     => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("literal portal source"))
-    ; "literal_source_missing_fails"
+    ; "missing_literal_source_reports_error"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -749,7 +752,7 @@ fn run_apply_test_twice(
         "[portal]\n\"a.txt\" = \"same\"\n\"b.txt\" = \"same\"\n"
     }
     => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("collision at"))
-    ; "colliding_portals_fail"
+    ; "sources_colliding_on_one_target_reports_error"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -758,7 +761,7 @@ fn run_apply_test_twice(
         "[portal]\n\"a.txt\" = \"dir\"\n\"b.txt\" = \"dir/x\"\n"
     }
     => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("structural conflict"))
-    ; "structural_conflict_fails"
+    ; "target_used_as_both_file_and_directory_reports_error"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -766,7 +769,7 @@ fn run_apply_test_twice(
         "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"template\" }\n"
     }
     => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("undefined variable"))
-    ; "template_undefined_variable_fails"
+    ; "template_with_undefined_variable_reports_error"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -774,7 +777,7 @@ fn run_apply_test_twice(
         "[portal]\n\"dangling\" = \"target.txt\"\n"
     }
     => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("not a regular file"))
-    ; "broken_symlink_literal_source_fails"
+    ; "dangling_source_symlink_reports_error"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -782,7 +785,7 @@ fn run_apply_test_twice(
         "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"symlink\", mode = \"600\" }\n"
     }
     => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("mode"))
-    ; "mode_conflicts_with_symlink_rule_fails"
+    ; "mode_rule_on_symlink_type_reports_error"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -792,9 +795,9 @@ fn run_apply_test_twice(
         "[portal]\n\"file.txt\" = \"target.txt\"\n"
     }
     => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("is not a directory"))
-    ; "target_directory_is_a_file_fails"
+    ; "target_root_being_a_file_reports_error"
 )]
-fn run_apply_fails(
+fn apply_error_cases(
     setup: impl Fn(&Path, &Path) -> &'static str,
 ) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
     ApplyScenario::new(setup).try_run()
@@ -810,9 +813,9 @@ fn run_apply_fails(
         None
     }
     => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("literal portal source"))
-    ; "source_deleted_between_runs_fails"
+    ; "deleting_source_between_runs_reports_error"
 )]
-fn run_apply_test_twice_fails(
+fn reapply_error_cases(
     setup: impl Fn(&Path, &Path) -> &'static str,
     modify: impl Fn(&Path, &Path) -> Option<&'static str>,
 ) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
@@ -823,7 +826,7 @@ fn run_apply_test_twice_fails(
 }
 
 #[test]
-fn creates_missing_target_directory() {
+fn creates_missing_target_dir_and_deploys_file() {
     let env = TestEnv::new();
     let source = env.source_dir();
     fs::write(source.join("file.txt"), b"hello").unwrap();
@@ -851,7 +854,7 @@ fn creates_missing_target_directory() {
             None
         );
     }
-    ; "removes_stale_symlink"
+    ; "clean_up_removes_stale_symlink"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -870,7 +873,7 @@ fn creates_missing_target_directory() {
             None
         );
     }
-    ; "removes_stale_copy"
+    ; "clean_up_removes_stale_copy"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -890,7 +893,7 @@ fn creates_missing_target_directory() {
             None
         );
     }
-    ; "removes_stale_template"
+    ; "clean_up_removes_stale_template"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -908,7 +911,7 @@ fn creates_missing_target_directory() {
         assert_eq!(database.record(&target.join("dst/a.txt")).unwrap(), None);
         assert_eq!(database.record(&target.join("dst/sub/b.txt")).unwrap(), None);
     }
-    ; "removes_stale_directory_portal"
+    ; "clean_up_removes_every_file_of_removed_directory_portal"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -925,7 +928,7 @@ fn creates_missing_target_directory() {
         assert_eq!(database.record(&target.join("a.txt")).unwrap(), None);
         assert_eq!(database.record(&target.join("sub/b.txt")).unwrap(), None);
     }
-    ; "removes_multiple_stale_targets"
+    ; "clean_up_removes_all_stale_targets"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -946,7 +949,7 @@ fn creates_missing_target_directory() {
                 .is_some()
         );
     }
-    ; "keeps_desired_and_removes_stale"
+    ; "clean_up_keeps_desired_target_and_removes_stale"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -965,7 +968,7 @@ fn creates_missing_target_directory() {
         assert!(database.record(&target.join("a.txt")).unwrap().is_some());
         assert!(database.record(&target.join("sub/b.txt")).unwrap().is_some());
     }
-    ; "no_op_when_nothing_stale"
+    ; "clean_up_is_no_op_when_nothing_is_stale"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -987,7 +990,7 @@ fn creates_missing_target_directory() {
             None
         );
     }
-    ; "relinquishes_tampered_stale"
+    ; "clean_up_relinquishes_tampered_target"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1009,7 +1012,7 @@ fn creates_missing_target_directory() {
             None
         );
     }
-    ; "relinquishes_missing_stale"
+    ; "clean_up_relinquishes_missing_target"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1036,7 +1039,7 @@ fn creates_missing_target_directory() {
             None
         );
     }
-    ; "relinquishes_path_under_symlink_parent"
+    ; "clean_up_relinquishes_target_under_symlink_parent"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1057,7 +1060,7 @@ fn creates_missing_target_directory() {
             None
         );
     }
-    ; "prunes_empty_parent_dirs"
+    ; "clean_up_prunes_emptied_parent_directories"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1078,7 +1081,7 @@ fn creates_missing_target_directory() {
             None
         );
     }
-    ; "leaves_empty_dirs_without_prune_flag"
+    ; "clean_up_keeps_empty_directories_without_prune"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1100,7 +1103,7 @@ fn creates_missing_target_directory() {
             None
         );
     }
-    ; "prune_keeps_non_empty_parent"
+    ; "prune_keeps_parent_holding_remaining_target"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1118,7 +1121,7 @@ fn creates_missing_target_directory() {
         assert_eq!(database.record(&target.join("a/x.txt")).unwrap(), None);
         assert_eq!(database.record(&target.join("a/y.txt")).unwrap(), None);
     }
-    ; "prunes_parent_after_last_removal"
+    ; "prune_drops_parent_after_last_target_removed"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1139,9 +1142,9 @@ fn creates_missing_target_directory() {
         assert!(database.record(&target.join("a.txt")).unwrap().is_some());
         assert!(database.record(&target.join("b.txt")).unwrap().is_some());
     }
-    ; "clean_up_skipped_when_entry_skipped"
+    ; "clean_up_keeps_target_skipped_at_deploy"
 )]
-fn test_apply_clean_up(
+fn clean_up_behaviors(
     setup: impl Fn(&Path, &Path) -> &'static str,
     modify: impl Fn(&Path, &Path) -> Option<&'static str>,
     prune: bool,
@@ -1168,7 +1171,7 @@ fn test_apply_clean_up(
         dry_run: true,
         ..Default::default()
     }
-    ; "deploys_lists_new_targets"
+    ; "lists_new_targets_to_deploy"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -1185,7 +1188,7 @@ fn test_apply_clean_up(
         dry_run: true,
         ..Default::default()
     }
-    ; "labels_managed_target_replaced"
+    ; "labels_replacing_managed_target"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -1198,7 +1201,7 @@ fn test_apply_clean_up(
         dry_run: true,
         ..Default::default()
     }
-    ; "labels_unmanaged_target_obstruction"
+    ; "labels_unmanaged_target_as_obstruction"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -1218,7 +1221,7 @@ fn test_apply_clean_up(
         dry_run: true,
         ..Default::default()
     }
-    ; "mixed_states_sorted"
+    ; "reports_mixed_target_states_in_sorted_order"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -1236,7 +1239,7 @@ fn test_apply_clean_up(
         clean_up: true,
         ..Default::default()
     }
-    ; "clean_up_reports_removal"
+    ; "reports_stale_target_removal"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -1255,7 +1258,7 @@ fn test_apply_clean_up(
         prune_empty_dirs: true,
         ..Default::default()
     }
-    ; "clean_up_prune_empty_dirs_reports_pruning"
+    ; "reports_emptied_directory_pruning"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -1268,7 +1271,7 @@ fn test_apply_clean_up(
         dry_run: true,
         ..Default::default()
     }
-    ; "labels_parent_obstruction"
+    ; "labels_parent_directory_obstruction"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -1285,7 +1288,7 @@ fn test_apply_clean_up(
         dry_run: true,
         ..Default::default()
     }
-    ; "labels_tampered_managed_target_obstruction"
+    ; "labels_tampered_target_as_obstruction"
 )]
 #[test_case(
     |source: &Path, target: &Path| {
@@ -1305,9 +1308,9 @@ fn test_apply_clean_up(
         prune_empty_dirs: true,
         ..Default::default()
     }
-    ; "clean_up_prune_skips_non_empty_parent"
+    ; "keeps_non_empty_parent_out_of_prune_report"
 )]
-fn test_dry_run(setup: impl Fn(&Path, &Path) -> &'static str, options: ApplyOptions) {
+fn dry_run_output(setup: impl Fn(&Path, &Path) -> &'static str, options: ApplyOptions) {
     dotrift::capture::clear();
     let scenario = ApplyScenario::new(setup);
     scenario.run_with_options(options);
@@ -1326,7 +1329,7 @@ fn test_dry_run(setup: impl Fn(&Path, &Path) -> &'static str, options: ApplyOpti
         verbose: true,
         ..Default::default()
     }
-    ; "deployed_lines"
+    ; "prints_lines_for_deployed_targets"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1335,7 +1338,7 @@ fn test_dry_run(setup: impl Fn(&Path, &Path) -> &'static str, options: ApplyOpti
         "[portal]\n\"a.txt\" = \"a.txt\"\n\"b.txt\" = \"sub/b.txt\"\n"
     },
     ApplyOptions::default()
-    ; "default_prints_only_summary"
+    ; "default_flags_print_only_summary"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1349,9 +1352,9 @@ fn test_dry_run(setup: impl Fn(&Path, &Path) -> &'static str, options: ApplyOpti
         verbose: true,
         ..Default::default()
     }
-    ; "mixed_deploy_types_deployed"
+    ; "reports_symlink_copy_and_template_deploys"
 )]
-fn test_apply_verbose(setup: impl Fn(&Path, &Path) -> &'static str, options: ApplyOptions) {
+fn verbose_output(setup: impl Fn(&Path, &Path) -> &'static str, options: ApplyOptions) {
     dotrift::capture::clear();
     let scenario = ApplyScenario::new(setup);
     scenario.run_with_options(options);
@@ -1371,7 +1374,7 @@ fn test_apply_verbose(setup: impl Fn(&Path, &Path) -> &'static str, options: App
         verbose: true,
         ..Default::default()
     }
-    ; "replaced_lines"
+    ; "prints_lines_for_replaced_targets"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1387,7 +1390,7 @@ fn test_apply_verbose(setup: impl Fn(&Path, &Path) -> &'static str, options: App
         verbose: true,
         ..Default::default()
     }
-    ; "skipped_lines"
+    ; "prints_lines_for_skipped_targets"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1405,7 +1408,7 @@ fn test_apply_verbose(setup: impl Fn(&Path, &Path) -> &'static str, options: App
         verbose: true,
         ..Default::default()
     }
-    ; "mixed_walk_sorted"
+    ; "reports_mixed_states_in_sorted_order"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1419,7 +1422,7 @@ fn test_apply_verbose(setup: impl Fn(&Path, &Path) -> &'static str, options: App
         clean_up: true,
         ..Default::default()
     }
-    ; "clean_up_removed_lines"
+    ; "reports_clean_up_removals"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1433,7 +1436,7 @@ fn test_apply_verbose(setup: impl Fn(&Path, &Path) -> &'static str, options: App
         prune_empty_dirs: true,
         ..Default::default()
     }
-    ; "clean_up_pruned_lines"
+    ; "reports_clean_up_pruning"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1446,7 +1449,7 @@ fn test_apply_verbose(setup: impl Fn(&Path, &Path) -> &'static str, options: App
         clean_up: true,
         ..Default::default()
     }
-    ; "clean_up_silent_without_verbose"
+    ; "clean_up_prints_nothing_without_verbose"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1462,7 +1465,7 @@ fn test_apply_verbose(setup: impl Fn(&Path, &Path) -> &'static str, options: App
         clean_up: true,
         ..Default::default()
     }
-    ; "relinquished_not_printed"
+    ; "withholds_relinquished_targets_from_report"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -1476,9 +1479,9 @@ fn test_apply_verbose(setup: impl Fn(&Path, &Path) -> &'static str, options: App
         clean_up: true,
         ..Default::default()
     }
-    ; "no_op_clean_up"
+    ; "clean_up_no_op_prints_nothing"
 )]
-fn test_apply_verbose_twice(
+fn verbose_reapply_output(
     setup: impl Fn(&Path, &Path) -> &'static str,
     modify: impl Fn(&Path, &Path) -> Option<&'static str>,
     options: ApplyOptions,
@@ -1494,7 +1497,7 @@ fn test_apply_verbose_twice(
 }
 
 #[test]
-fn quiet_suppresses_summary() {
+fn quiet_flag_suppresses_all_output() {
     let scenario = ApplyScenario::new(|source, _target| {
         fs::write(source.join("a.txt"), b"A").unwrap();
         fs::write(source.join("b.txt"), b"B").unwrap();

@@ -18,40 +18,40 @@ fn run_expects_error(source: Option<&Path>, command: ProfileCommand, needle: &st
     common::assert_error_chain(&error, needle);
 }
 
-#[test_case(None, &[], ProfileCommand::List => ""; "list_without_data_file_prints_nothing")]
-#[test_case(Some("[variable]\n"), &[], ProfileCommand::List => ""; "list_without_profiles_prints_nothing")]
+#[test_case(None, &[], ProfileCommand::List => ""; "list_reports_nothing_without_data_file")]
+#[test_case(Some("[variable]\n"), &[], ProfileCommand::List => ""; "list_reports_nothing_without_profiles")]
 #[test_case(
     Some("[profile.home]\n[profile.work]\n[profile.editor]\n"),
     &["work"],
     ProfileCommand::List => "editor\nhome\nwork (active)\n";
-    "list_marks_active_profiles_in_sorted_order"
+    "list_annotates_active_profile_in_sorted_output"
 )]
 #[test_case(
     Some("[profile.a]\n[profile.b]\n"),
     &["a", "b"],
     ProfileCommand::List => "a (active)\nb (active)\n";
-    "list_marks_all_active_profiles"
+    "list_annotates_every_active_profile"
 )]
 #[test_case(
     Some("[profile.editor]\n"),
     &["gone"],
     ProfileCommand::List => "editor\n";
-    "list_hides_stale_active_profiles"
+    "list_omits_active_profile_without_definition"
 )]
-#[test_case(None, &[], ProfileCommand::Show => ""; "show_empty_context_prints_nothing")]
+#[test_case(None, &[], ProfileCommand::Show => ""; "show_reports_nothing_without_data_file")]
 #[test_case(
     Some("[variable]\nv = \"base\"\n[profile.work]\nv = \"over\"\n"),
     &["work"],
     ProfileCommand::Show => "v   over\n";
-    "show_active_profile_overrides_base"
+    "show_resolves_active_profile_override"
 )]
 #[test_case(
     Some("[variable]\nv = \"base\"\n"),
     &["gone"],
     ProfileCommand::Show => "v   base\n";
-    "show_ignores_stale_active_profile"
+    "show_ignores_active_profile_without_definition"
 )]
-fn output_matrix(data: Option<&str>, active: &[&str], command: ProfileCommand) -> String {
+fn list_and_show_output(data: Option<&str>, active: &[&str], command: ProfileCommand) -> String {
     let env = TestEnv::new();
     let source = env.source_dir();
     if let Some(contents) = data {
@@ -64,7 +64,7 @@ fn output_matrix(data: Option<&str>, active: &[&str], command: ProfileCommand) -
 }
 
 #[test]
-fn list_nonexistent_source_directory_errors() {
+fn list_with_nonexistent_source_directory_errors() {
     let env = TestEnv::new();
     run_expects_error(
         Some(&env.path("missing_source")),
@@ -74,7 +74,7 @@ fn list_nonexistent_source_directory_errors() {
 }
 
 #[test]
-fn activate_defined_profile_succeeds() {
+fn activating_defined_profile_confirms_and_activates() {
     let env = TestEnv::new();
     let source = env.source_dir();
     env.write_data_file("[profile.work]\n");
@@ -93,7 +93,7 @@ fn activate_defined_profile_succeeds() {
 }
 
 #[test]
-fn activate_undefined_profile_errors() {
+fn activating_undefined_profile_errors_and_activates_none() {
     let env = TestEnv::new();
     let source = env.source_dir();
     env.write_data_file("[profile.other]\n");
@@ -108,7 +108,7 @@ fn activate_undefined_profile_errors() {
 }
 
 #[test]
-fn activate_reactivation_moves_to_precedence_end() {
+fn reactivating_profile_moves_it_to_precedence_end() {
     let env = TestEnv::new();
     let source = env.source_dir();
     env.write_data_file("[profile.a]\n[profile.b]\n");
@@ -128,16 +128,16 @@ fn activate_reactivation_moves_to_precedence_end() {
     assert_eq!(names, vec!["b", "a"]);
 }
 
-#[test_case(ProfileCommand::List; "list")]
-#[test_case(ProfileCommand::Activate { name: "work".into() }; "activate")]
-#[test_case(ProfileCommand::Show; "show")]
-fn command_requires_source_directory(command: ProfileCommand) {
+#[test_case(ProfileCommand::List; "list_errors_without_source_directory")]
+#[test_case(ProfileCommand::Activate { name: "work".into() }; "activate_errors_without_source_directory")]
+#[test_case(ProfileCommand::Show; "show_errors_without_source_directory")]
+fn profile_subcommands_without_source_directory(command: ProfileCommand) {
     let _env = TestEnv::new();
     run_expects_error(None, command, "source directory is required");
 }
 
 #[test]
-fn deactivate_active_profile_succeeds() {
+fn deactivating_active_profile_confirms_and_clears() {
     let env = TestEnv::new();
     env.database().activate_profile("work").unwrap();
     assert_eq!(
@@ -153,7 +153,7 @@ fn deactivate_active_profile_succeeds() {
 }
 
 #[test]
-fn deactivate_inactive_profile_errors() {
+fn deactivating_inactive_profile_errors() {
     let env = TestEnv::new();
     let _database = env.database();
     run_expects_error(
@@ -166,7 +166,7 @@ fn deactivate_inactive_profile_errors() {
 }
 
 #[test]
-fn deactivate_stale_profile_without_definition_succeeds() {
+fn deactivating_stale_profile_clears_it_without_definition() {
     let env = TestEnv::new();
     env.database().activate_profile("gone").unwrap();
     run_and_take(
@@ -179,7 +179,7 @@ fn deactivate_stale_profile_without_definition_succeeds() {
 }
 
 #[test]
-fn show_renders_base_variables() {
+fn show_formats_all_base_variable_types() {
     let env = TestEnv::new();
     let source = env.source_dir();
     env.write_data_file(
@@ -189,7 +189,7 @@ fn show_renders_base_variables() {
 }
 
 #[test]
-fn show_most_recently_activated_profile_wins() {
+fn show_prioritizes_most_recently_activated_profile() {
     let env = TestEnv::new();
     let source = env.source_dir();
     env.write_data_file(
@@ -210,7 +210,7 @@ fn show_most_recently_activated_profile_wins() {
 }
 
 #[test]
-fn show_unions_keys_across_multiple_active_profiles() {
+fn show_unions_variables_across_active_profiles() {
     let env = TestEnv::new();
     let source = env.source_dir();
     env.write_data_file(
@@ -227,7 +227,7 @@ fn show_unions_keys_across_multiple_active_profiles() {
 }
 
 #[test]
-fn all_state_transitions_round_trip() {
+fn activate_then_deactivate_round_trips_output() {
     let env = TestEnv::new();
     let source = env.source_dir();
     env.write_data_file("[variable]\nv = \"base\"\n[profile.work]\nv = \"over\"\n");

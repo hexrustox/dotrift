@@ -500,7 +500,7 @@ proptest! {
     // lexer sees a single plain-text token and the engine renders the input
     // verbatim — bytes in, bytes out.
     #[test]
-    fn brace_free_bytes_render_identity(bytes in brace_free_bytes()) {
+    fn brace_free_bytes_render_unchanged(bytes in brace_free_bytes()) {
         let mut out = Vec::new();
         Template::from_bytes(bytes.clone())
             .render(&mut out, &HashMap::new(), &MockRegistry)
@@ -532,7 +532,7 @@ proptest! {
     // original payload: escape processing inverts the escaping applied by
     // `literal_safe_bytes`, and top-level strings are emitted verbatim.
     #[test]
-    fn string_literal_renders_identity(bytes in proptest::collection::vec(any::<u8>(), 0..MAX_BUFFER_BYTES)) {
+    fn escaped_string_literal_roundtrips_to_original(bytes in proptest::collection::vec(any::<u8>(), 0..MAX_BUFFER_BYTES)) {
         let escaped = string_literal_safe_bytes(&bytes);
 
         let mut src = Vec::new();
@@ -550,7 +550,7 @@ proptest! {
 
     // Any i64 integer literal renders as its canonical decimal form.
     #[test]
-    fn int_literal_renders_identity(n in any::<i64>()) {
+    fn int_literal_roundtrips_to_canonical_form(n in any::<i64>()) {
         let lit = value_literal_bytes(&Value::Int(n));
         let src = wrap_interp(&lit);
 
@@ -563,7 +563,7 @@ proptest! {
     }
 
     #[test]
-    fn bool_literal_renders_identity(b in any::<bool>()) {
+    fn bool_literal_roundtrips_to_canonical_form(b in any::<bool>()) {
         let lit = value_literal_bytes(&Value::Bool(b));
         let src = wrap_interp(&lit);
 
@@ -580,7 +580,7 @@ proptest! {
     // followed by `, `-joined elements followed by `]`, where strings are
     // quoted, ints are decimal, and bools are `true`/`false`.
     #[test]
-    fn list_literal_renders_identity(list in list_literal(MAX_NESTING_DEPTH)) {
+    fn list_literal_roundtrips_to_canonical_form(list in list_literal(MAX_NESTING_DEPTH)) {
         let src = wrap_interp(&list);
 
         let mut out = Vec::new();
@@ -597,7 +597,7 @@ proptest! {
     // lowercase bool. Exercises variable lookup, dot (Map key) access, and
     // dot-index (List) access in mixed chains such as `foo.bar.0.baz.0.qux`.
     #[test]
-    fn variable_access_renders_identity(
+    fn variable_access_roundtrips_nested_value(
         (scope, path, expected) in access_path(MAX_NESTING_DEPTH)
     ) {
         let src = wrap_interp(&path);
@@ -619,7 +619,7 @@ proptest! {
     // (including the 0-arg edge case), and the `FnCall → write_top` render
     // path for all three primitive value types.
     #[test]
-    fn function_call_renders_identity(
+    fn function_call_renders_space_joined_args(
         (name, args, expected) in join_call(MAX_CALL_ARGS)
     ) {
         let mut body = Vec::new();
@@ -739,7 +739,7 @@ proptest! {
     // which path executed, so the rendered output must equal the oracle's
     // byte-for-byte.
     #[test]
-    fn nested_blocks_random_conditions_render_match_interpreter(
+    fn nested_blocks_match_interpreted_output(
         tree in block_tree(MAX_NEST_BLOCK_DEPTH as u32)
     ) {
         let mut tree = tree;

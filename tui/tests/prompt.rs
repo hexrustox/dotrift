@@ -130,16 +130,16 @@ impl PromptSession {
     }
 }
 
-#[test_case(PromptFixture::Basic, b"\x1b" ; "baseline_esc_cancels")]
-#[test_case(PromptFixture::Basic, b"\x1b[B\r" ; "down_confirms_second")]
-#[test_case(PromptFixture::Basic, b"\t\r" ; "tab_confirms_next")]
-#[test_case(PromptFixture::Basic, b"\x1b[Z\r" ; "shift_tab_wraps_to_last")]
+#[test_case(PromptFixture::Basic, b"\x1b" ; "esc_cancels_without_selection")]
+#[test_case(PromptFixture::Basic, b"\x1b[B\r" ; "down_then_enter_confirms_second_option")]
+#[test_case(PromptFixture::Basic, b"\t\r" ; "tab_then_enter_confirms_next_option")]
+#[test_case(PromptFixture::Basic, b"\x1b[Z\r" ; "shift_tab_wraps_to_last_option")]
 #[test_case(PromptFixture::Basic, b"m\r" ; "hotkey_m_selects_metro")]
 #[test_case(PromptFixture::Basic, b"\x03" ; "ctrl_c_cancels")]
-#[test_case(PromptFixture::Basic, b"!\r" ; "ignores_non_hotkey_then_confirms")]
-#[test_case(PromptFixture::Default, b"\x1b" ; "default_selects_metro")]
+#[test_case(PromptFixture::Basic, b"!\r" ; "non_hotkey_ignored_then_enter_confirms")]
+#[test_case(PromptFixture::Default, b"\x1b" ; "esc_accepts_default_selection")]
 #[test_case(PromptFixture::Custom, b"z\r" ; "custom_hotkey_selects_carpool")]
-fn interact_under_pty(fixture: PromptFixture, keys: &[u8]) {
+fn keyboard_input_selects_or_cancels(fixture: PromptFixture, keys: &[u8]) {
     let mut session = PromptSession::spawn_standard(fixture);
     session.wait_for_first_chunk();
     session.send(keys);
@@ -147,7 +147,7 @@ fn interact_under_pty(fixture: PromptFixture, keys: &[u8]) {
 }
 
 #[test]
-fn unicode_off_ascii_markers() {
+fn unicode_disabled_renders_ascii_markers() {
     let mut session = PromptSession::spawn(
         PromptFixture::Basic,
         24,
@@ -160,7 +160,7 @@ fn unicode_off_ascii_markers() {
 }
 
 #[test]
-fn small_terminal_windows_options() {
+fn small_terminal_scrolls_options_to_stay_reachable() {
     let mut session = PromptSession::spawn(PromptFixture::Many, 4, 120, UTF8_ENV);
     session.wait_for_first_chunk();
     session.send(b"\x1b[B");
