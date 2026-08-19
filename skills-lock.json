@@ -7,6 +7,12 @@
       "skillPath": "skills/engineering/ask-matt/SKILL.md",
       "computedHash": "0cd14026efa0330083cbc7adf590976c162b60e02f696a8dcce96f0b4dab8a72"
     },
+    "choosing-test-type": {
+      "source": "hexrustox/skills",
+      "sourceType": "github",
+      "skillPath": "skills/choosing-test-type/SKILL.md",
+      "computedHash": "bf95a4401ed4fb52944debda69241b063e8f8b06947e424e600ee9eb8cb200bd"
+    },
     "code-review": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -91,6 +97,36 @@
       "skillPath": "skills/rust-best-practices/SKILL.md",
       "computedHash": "0ac6606adb27e64a31bdc8c1ed34e446ae0c14bff1c7648867c46e106adc048f"
     },
+    "rust-code-style": {
+      "source": "hexrustox/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rust-code-style/SKILL.md",
+      "computedHash": "fc27ef4528d6abff075066e33717a65f5d071904a88427d78593417a29e15a9e"
+    },
+    "rust-insta-crate": {
+      "source": "hexrustox/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rust-insta-crate/SKILL.md",
+      "computedHash": "b65726f61cf2902cdf211724e7aa9ebd566da05541d22a7813b1961a70ca1ffc"
+    },
+    "rust-miette-crate": {
+      "source": "hexrustox/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rust-miette-crate/SKILL.md",
+      "computedHash": "44dfe4d6ce808988b6b70af25e918515e534e44401cb57875f3cd39d3baa4a6c"
+    },
+    "rust-proptest-crate": {
+      "source": "hexrustox/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rust-proptest-crate/SKILL.md",
+      "computedHash": "eeebd183c7b43a240f9e26213205b5abbe1cd3f4c8f505a2d3e25660d471c0bc"
+    },
+    "rust-test-case-crate": {
+      "source": "hexrustox/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rust-test-case-crate/SKILL.md",
+      "computedHash": "1d429b83cc2d4c6d15e27d610c4cd992646cc46fb7e659e3204efb1b336a79e8"
+    },
     "setup-matt-pocock-skills": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -150,6 +186,12 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/wizard/SKILL.md",
       "computedHash": "dee7f1a523994a1e063c69fe09c2f5b4da97a41ad68107722664e6e472cb2423"
+    },
+    "writing-error-messages": {
+      "source": "hexrustox/skills",
+      "sourceType": "github",
+      "skillPath": "skills/writing-error-messages/SKILL.md",
+      "computedHash": "fefed6b73c8da0988dbe7ef3dac42675562492e5d113235e15f563aaccdb913d"
     },
     "writing-for-agents": {
       "source": "mattpocock/skills",
