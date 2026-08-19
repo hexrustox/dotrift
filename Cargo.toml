@@ -6,7 +6,7 @@ license = "GPL-3.0-or-later"
 
 [workspace]
 resolver = "3"
-members = ["tui", "templater"]
+members = ["tui", "templater", "demo"]
 
 [features]
 testing = []

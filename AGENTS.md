@@ -17,6 +17,7 @@ Cargo workspace (Cargo.toml):
 - `dotrift` (root, bin): `src/main.rs` entrypoint.
 - `tui` (member): interactive prompt library.
 - `templater` (member): the standalone template engine.
+- `demo` (member): `prompt` bin exercising the interactive apply prompt.
 
 ### Legacy code
 
