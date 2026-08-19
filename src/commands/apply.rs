@@ -561,19 +561,25 @@ fn prompt_for_obstruction(
 
     #[cfg(not(any(test, feature = "testing")))]
     {
-        println!(
-            "Cannot deploy {} {}: {} {} is already present.",
+        use crossterm::style::Color;
+
+        let question = format!(
+            "Cannot deploy {} {} because {} {} is already present.\nHow would you like to proceed?",
             path_kind(&entry.source_path)?,
             entry.source_path.display(),
             path_kind(obstruction)?,
             obstruction.display()
         );
-        let question = "How would you like to proceed?";
+        let style = tui::prompt::PromptStyle {
+            done_question: Color::Grey,
+            ..Default::default()
+        };
         let should_show_diff = fs::metadata(&entry.source_path)
             .is_ok_and(|metadata| metadata.is_file())
             && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
         tui::prompt::SelectPrompt::new()
             .question(question)
+            .style(style)
             .filter(move |choice| should_show_diff || *choice != ObstructionChoice::ViewDiff)
             .interact()
     }

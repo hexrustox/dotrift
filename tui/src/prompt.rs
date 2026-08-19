@@ -41,8 +41,12 @@ pub trait PromptOption {
 pub struct PromptStyle {
     /// Color of the question title line.
     pub question: Color,
+    /// Color of the question title text repeated in the confirmation line.
+    pub done_question: Color,
     /// Color of the currently selected option row.
     pub selected: Color,
+    /// Color of the unselected option rows.
+    pub unselected: Color,
     /// Color of the selected option's marker.
     pub marker_selected: Color,
     /// Color of the unselected options' markers.
@@ -57,7 +61,9 @@ impl Default for PromptStyle {
     fn default() -> Self {
         Self {
             question: Color::Reset,
+            done_question: Color::Reset,
             selected: Color::Green,
+            unselected: Color::Reset,
             marker_selected: Color::Green,
             marker_unselected: Color::Reset,
             done: Color::Green,
@@ -110,7 +116,7 @@ impl<E> SelectPrompt<E> {
 
     /// Sets the question shown above the options.
     pub fn question(mut self, question: impl Into<String>) -> Self {
-        self.question = question.into();
+        self.question = question.into().replace('\n', "\r\n");
         self
     }
 
@@ -211,9 +217,12 @@ where
                         let marker = if unicode_support { "✓" } else { "done" };
                         writeln!(
                             stdout,
-                            "{} ({}) {}",
-                            self.question,
-                            option.label,
+                            "{} {}",
+                            apply_color(
+                                format!("{} ({})", self.question, option.label.clone()),
+                                self.style.done_question,
+                                color_support
+                            ),
                             apply_color(marker, self.style.done, color_support)
                         )?;
                         stdout.flush()?;
@@ -334,17 +343,17 @@ fn render<E>(
     clear_prompt(stdout, previous_lines)?;
     let (_, rows) = terminal::size()?;
     let visible_count = usize::from(rows).saturating_sub(3).max(1);
+    let question_lines = question.lines().count();
     let start = state
         .selected
         .saturating_sub(visible_count.saturating_sub(1))
         .min(state.options.len().saturating_sub(visible_count));
     let end = (start + visible_count).min(state.options.len());
-    writeln!(
+    write!(
         stdout,
-        "{}",
+        "{}\r\n",
         apply_color(question, style.question, color_support)
     )?;
-    queue!(stdout, cursor::MoveToColumn(0))?;
     let (selected, unselected) = if unicode_support {
         ('●', '○')
     } else {
@@ -364,9 +373,9 @@ fn render<E>(
         } else {
             Color::Reset
         };
-        writeln!(
+        write!(
             stdout,
-            "  {}{}",
+            "  {}{}\r\n",
             apply_color(marker, marker_color, color_support),
             apply_color(
                 format!(" [{}] {}", option.hotkey, option.label),
@@ -374,18 +383,17 @@ fn render<E>(
                 color_support
             )
         )?;
-        queue!(stdout, cursor::MoveToColumn(0))?;
     }
     writeln!(
         stdout,
-        "{}",
+        "\n  {}",
         apply_color(
-            "\n  ↑/↓ navigate  Enter select  A-Z jump  Esc cancel",
+            "↑/↓ navigate  Enter select  A-Z jump  Esc cancel",
             style.help,
             color_support
         )
     )?;
-    Ok(end - start + 3)
+    Ok(question_lines + (end - start) + 2)
 }
 
 fn apply_color<T>(content: T, color: Color, enabled: bool) -> String

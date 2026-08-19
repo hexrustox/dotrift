@@ -468,6 +468,7 @@ fn apply_rules(
     })
 }
 
+// TODO normalize
 fn validate_relative(value: &str, what: &str) -> Result<()> {
     if value.is_empty() || Path::new(value).is_absolute() {
         return Err(miette!("invalid {what} path `{value}`"));

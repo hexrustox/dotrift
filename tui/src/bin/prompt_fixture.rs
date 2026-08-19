@@ -82,6 +82,11 @@ fn main() {
                 .question("Pick an option")
                 .interact(),
         ),
+        "multiline" => summarize(
+            SelectPrompt::<BasicChoice>::new()
+                .question("Pick an option\n(you can change it)")
+                .interact(),
+        ),
         other => {
             eprintln!("error: unknown fixture {other}");
             std::process::exit(2);

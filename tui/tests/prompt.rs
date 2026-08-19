@@ -16,6 +16,7 @@ enum PromptFixture {
     Many,
     Default,
     Custom,
+    Multiline,
 }
 
 impl PromptFixture {
@@ -29,6 +30,7 @@ impl PromptFixture {
             PromptFixture::Many => "many",
             PromptFixture::Default => "default",
             PromptFixture::Custom => "custom",
+            PromptFixture::Multiline => "multiline",
         }
     }
 }
@@ -48,6 +50,7 @@ struct PromptSession {
     child: Box<dyn Child + Send + Sync>,
     rx: Receiver<Vec<u8>>,
     output: Vec<u8>,
+    screen: vt100::Parser,
 }
 
 impl PromptSession {
@@ -84,12 +87,18 @@ impl PromptSession {
             child,
             rx,
             output: Vec::new(),
+            screen: vt100::Parser::new(rows, cols, 0),
         }
     }
 
     /// Spawns the fixture in a default 24×120 UTF-8 terminal.
     fn spawn_standard(fixture: PromptFixture) -> Self {
         Self::spawn(fixture, 24, 120, UTF8_ENV)
+    }
+
+    fn absorb(&mut self, chunk: Vec<u8>) {
+        self.screen.process(&chunk);
+        self.output.extend_from_slice(&chunk);
     }
 
     /// Blocks until the prompt's first output chunk arrives. The prompt only
@@ -100,7 +109,7 @@ impl PromptSession {
             .rx
             .recv_timeout(READY_TIMEOUT)
             .expect("prompt never rendered anything (timeout)");
-        self.output.extend_from_slice(&chunk);
+        self.absorb(chunk);
     }
 
     fn send(&mut self, keys: &[u8]) {
@@ -112,9 +121,37 @@ impl PromptSession {
         self.master.resize(pty_size(rows, cols)).expect("resize");
     }
 
+    /// Drains whatever the child has emitted so far into the rendered screen,
+    /// returning once output settles (a short quiet period follows a re-render).
+    fn drain_pending(&mut self) {
+        let deadline = std::time::Instant::now() + READY_TIMEOUT;
+        loop {
+            match self.rx.try_recv() {
+                Ok(chunk) => {
+                    self.absorb(chunk);
+                    continue;
+                }
+                Err(_) => {
+                    if std::time::Instant::now() >= deadline {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                    if self.rx.try_recv().is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    fn screen(&mut self) -> &vt100::Screen {
+        self.drain_pending();
+        self.screen.screen()
+    }
+
     fn finish(mut self) -> Vec<u8> {
         while let Ok(chunk) = self.rx.recv() {
-            self.output.extend_from_slice(&chunk);
+            self.absorb(chunk);
         }
         self.child.wait().expect("child status");
         self.output
@@ -144,6 +181,20 @@ fn keyboard_input_selects_or_cancels(fixture: PromptFixture, keys: &[u8]) {
     session.wait_for_first_chunk();
     session.send(keys);
     session.finish_and_snapshot();
+}
+
+#[test]
+fn multiline_question_redisplays_from_column_zero_on_navigation() {
+    let mut session = PromptSession::spawn_standard(PromptFixture::Multiline);
+    session.wait_for_first_chunk();
+    session.send(b"\x1b[B");
+    session.send(b"\x1b[B");
+
+    let screen = session.screen().contents();
+    assert_snapshot!(screen);
+
+    session.send(b"\r");
+    session.finish();
 }
 
 #[test]
