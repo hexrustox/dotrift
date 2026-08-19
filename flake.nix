@@ -87,8 +87,7 @@
 
                   less
 
-                  nodejs-slim
-                  pnpm
+                  skills
                   git
                 ];
               };
