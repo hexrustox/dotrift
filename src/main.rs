@@ -1,8 +1,10 @@
 use clap::Parser;
-use miette::Error;
+use miette::{Error, miette};
 
-use dotrift::ExitStatus;
-use dotrift::cli::{Cli, Command};
+use dotrift::{
+    ExitStatus,
+    cli::{Cli, Command},
+};
 
 fn main() -> Result<(), Error> {
     let cli = Cli::parse();
@@ -17,8 +19,11 @@ fn main() -> Result<(), Error> {
             quiet,
             verbose,
         } => {
+            let Some(source) = source else {
+                return Err(miette!("apply requires a source directory"));
+            };
             status = dotrift::commands::apply::run_with_options(
-                &source.expect("apply source is unavailable"),
+                &source,
                 target,
                 dotrift::commands::apply::ApplyOptions {
                     clean_up,

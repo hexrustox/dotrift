@@ -19,7 +19,7 @@ pub enum ExitStatus {
     Skipped = 2,
 }
 
-pub fn ensure_absolute(path: &Path) -> Result<std::path::PathBuf> {
+pub(crate) fn ensure_absolute(path: &Path) -> Result<std::path::PathBuf> {
     if path.is_absolute() {
         Ok(path.to_path_buf())
     } else {

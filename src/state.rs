@@ -1,7 +1,9 @@
-use std::fs::{self, File, OpenOptions};
-use std::os::fd::AsRawFd;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    fs::{self, File, OpenOptions},
+    os::fd::AsRawFd,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use miette::{Result, WrapErr, miette};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
@@ -13,7 +15,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::File => "file",
             Self::Symlink => "symlink",
@@ -286,12 +288,12 @@ impl StateDatabase {
     }
 }
 
-pub struct StateLock {
+pub(crate) struct StateLock {
     file: File,
 }
 
 impl StateLock {
-    pub fn acquire() -> Result<Self> {
+    pub(crate) fn acquire() -> Result<Self> {
         Self::acquire_at(&state_root()?)
     }
 
@@ -368,12 +370,12 @@ mod tests {
     #[test_case(
         crate::record!(f, "/home/user/.gitconfig", "abc123"),
         crate::record!(s, "/home/user/.gitconfig", "dotfiles/git/global");
-        "file replaced by symlink"
+        "file_replaced_by_symlink"
     )]
     #[test_case(
         crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"),
         crate::record!(f, "/home/user/.bashrc", "deadbeef");
-        "symlink replaced by file"
+        "symlink_replaced_by_file"
     )]
     fn put_replaces_existing_record(original: StateRecord, replacement: StateRecord) {
         let (_dir, database) = database();
@@ -396,7 +398,7 @@ mod tests {
             kind: Kind::File,
             content_hash: None,
         };
-        "file without content_hash"
+        "file_without_content_hash"
     )]
     #[test_case(
         StateRecord {
@@ -405,7 +407,7 @@ mod tests {
             kind: Kind::Symlink,
             content_hash: Some("abc".into()),
         };
-        "symlink with content_hash"
+        "symlink_with_content_hash"
     )]
     fn put_rejects_records_violating_schema(record: StateRecord) {
         let (_dir, database) = database();

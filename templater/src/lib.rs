@@ -13,8 +13,7 @@ use std::{collections::HashMap, fs::File, io, path::Path, sync::Arc};
 use memmap2::Mmap;
 use miette::{Report, SourceCode};
 
-use error::{Error, RegistryError};
-
+use crate::error::{Error, RegistryError};
 use crate::{function::FunctionRegistry, value::Value};
 
 /// A parsed template: the AST plus the source bytes it references.

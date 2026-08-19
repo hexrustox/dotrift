@@ -2,9 +2,10 @@ mod common;
 
 use std::path::Path;
 
-use common::TestEnv;
 use dotrift::cli::ProfileCommand;
 use test_case::test_case;
+
+use common::TestEnv;
 
 fn run_and_take(source: Option<&Path>, command: ProfileCommand) -> String {
     dotrift::capture::clear();

@@ -16,7 +16,7 @@ use crate::data::DataFile;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum DeployType {
+pub(crate) enum DeployType {
     Symlink,
     Copy,
     Template,
@@ -24,7 +24,7 @@ pub enum DeployType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "DeployModeRepr")]
-pub struct DeployMode(u32);
+pub(crate) struct DeployMode(u32);
 
 impl From<DeployMode> for u32 {
     fn from(value: DeployMode) -> Self {
@@ -57,7 +57,10 @@ impl TryFrom<String> for DeployMode {
         if value.len() != 3 || !value.bytes().all(|byte| (b'0'..=b'7').contains(&byte)) {
             return Err(miette!("invalid mode `{value}`"));
         }
-        Ok(Self(u32::from_str_radix(&value, 8).unwrap()))
+        let mode = value
+            .bytes()
+            .fold(0u32, |mode, byte| (mode << 3) | u32::from(byte - b'0'));
+        Ok(Self(mode))
     }
 }
 
@@ -73,7 +76,7 @@ impl TryFrom<u32> for DeployMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeploymentEntry {
+pub(crate) struct DeploymentEntry {
     pub source_path: PathBuf,
     pub target_path: PathBuf,
     pub deploy_type: DeployType,
@@ -81,7 +84,7 @@ pub struct DeploymentEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DesiredDeployment {
+pub(crate) struct DesiredDeployment {
     pub target_directory: PathBuf,
     pub entries: Vec<DeploymentEntry>,
     pub variable_context: HashMap<String, Value>,
@@ -98,7 +101,7 @@ struct FileConfig {
     rule: indexmap::IndexMap<String, RuleConfig>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct RuleConfig {
     deploy_type: Option<DeployType>,
     mode: Option<DeployMode>,
@@ -134,7 +137,7 @@ struct ResolvedPortal {
     target: PathBuf,
 }
 
-pub fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDeployment> {
+pub(crate) fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDeployment> {
     if !source.is_dir() {
         return Err(miette!(
             "source directory `{}` does not exist",
@@ -255,27 +258,39 @@ fn resolve_portals(
             if !path.exists() && fs::symlink_metadata(&path).is_err() {
                 return Err(miette!("literal portal source `{key}` does not exist"));
             }
-            if push_deployable(&mut result, &path, Path::new(value)).is_ok() {
-                continue;
-            } else if is_directory(&path) {
-                for item in WalkDir::new(&path).follow_links(false) {
-                    let item = item.map_err(|error| miette!(error))?;
-                    if item.path() == path || is_directory(item.path()) {
-                        continue;
+            match push_deployable(&mut result, &path, Path::new(value)) {
+                Ok(()) => {}
+                Err(_) if is_directory(&path) => {
+                    for item in WalkDir::new(&path).follow_links(false) {
+                        let item = item.map_err(|error| miette!(error))?;
+                        if item.path() == path || is_directory(item.path()) {
+                            continue;
+                        }
+                        let Ok(relative) = item.path().strip_prefix(&path) else {
+                            return Err(miette!(
+                                "walkdir entry `{}` is outside the portal source `{}`",
+                                item.path().display(),
+                                path.display()
+                            ));
+                        };
+                        push_deployable(
+                            &mut result,
+                            item.path(),
+                            &Path::new(value).join(relative),
+                        )?;
                     }
-                    let relative = item.path().strip_prefix(&path).expect("descendant");
-                    push_deployable(&mut result, item.path(), &Path::new(value).join(relative))?;
                 }
-            } else {
-                return Err(miette!(
-                    "portal source `{}` is not a regular file, symlink to a regular file or directory",
-                    path.display()
-                ));
+                Err(_) => {
+                    return Err(miette!(
+                        "portal source `{}` is not a regular file, symlink to a regular file or directory",
+                        path.display()
+                    ));
+                }
             }
             continue;
         }
 
-        let strip = stripping_prefix(key);
+        let strip = wildcard_prefix(key);
         let pattern = Pattern::new(key)
             .map_err(|error| miette!("invalid portal pattern `{key}` because {error}"))?;
         for item in WalkDir::new(source).follow_links(false) {
@@ -284,9 +299,13 @@ fn resolve_portals(
             if path == source || is_directory(path) {
                 continue;
             }
-            let relative = path
-                .strip_prefix(source)
-                .expect("walkdir path below source");
+            let Ok(relative) = path.strip_prefix(source) else {
+                return Err(miette!(
+                    "walkdir entry `{}` is outside the source directory `{}`",
+                    path.display(),
+                    source.display()
+                ));
+            };
             if pattern.matches_path(relative) {
                 let remainder = relative.strip_prefix(&strip).unwrap_or(relative);
                 push_deployable(&mut result, path, &PathBuf::from(value).join(remainder))?;
@@ -316,7 +335,7 @@ fn contains_wildcard(value: &str) -> bool {
         .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b']'))
 }
 
-fn stripping_prefix(pattern: &str) -> PathBuf {
+fn wildcard_prefix(pattern: &str) -> PathBuf {
     let mut prefix = PathBuf::new();
     for component in Path::new(pattern).components() {
         let value = component.as_os_str().to_string_lossy();
@@ -396,7 +415,9 @@ impl Node {
         match self {
             Node::File(_) => PathBuf::new(),
             Node::Dir(children) => {
-                let (name, child) = children.iter().next().expect("dir node has children");
+                let (name, child) = children.iter().next().unwrap_or_else(|| {
+                    unreachable!("caller guarantees the directory has children")
+                });
                 PathBuf::from(name).join(child.first_file_path())
             }
         }
@@ -411,7 +432,7 @@ fn compile_rules(
         validate_relative(pattern, "rule")?;
         let pattern = Pattern::new(pattern.strip_prefix("./").unwrap_or(pattern))
             .map_err(|error| miette!("invalid rule pattern `{pattern}` because {error}"))?;
-        compiled.insert(pattern, rule.clone());
+        compiled.insert(pattern, *rule);
     }
     Ok(compiled)
 }

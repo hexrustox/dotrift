@@ -1,11 +1,15 @@
+use std::path::Path;
+
 use miette::{Result, miette};
 
-use crate::cli::ProfileCommand;
-use crate::data::DataFile;
-use crate::println_capture;
-use crate::state::{StateDatabase, StateLock};
+use crate::{
+    cli::ProfileCommand,
+    data::DataFile,
+    println_capture,
+    state::{StateDatabase, StateLock},
+};
 
-pub fn run(source: Option<&std::path::Path>, command: ProfileCommand) -> Result<()> {
+pub fn run(source: Option<&Path>, command: ProfileCommand) -> Result<()> {
     match command {
         ProfileCommand::List => {
             list(source.ok_or_else(|| miette!("source directory is required"))?)
@@ -21,7 +25,7 @@ pub fn run(source: Option<&std::path::Path>, command: ProfileCommand) -> Result<
     }
 }
 
-fn list(source: &std::path::Path) -> Result<()> {
+fn list(source: &Path) -> Result<()> {
     let data = DataFile::read(source)?;
     let active = StateDatabase::open_read_only()?
         .map_or_else(|| Ok(Vec::new()), |db| db.active_profiles())?;
@@ -35,7 +39,7 @@ fn list(source: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-fn activate(source: &std::path::Path, name: &str) -> Result<()> {
+fn activate(source: &Path, name: &str) -> Result<()> {
     let data = DataFile::read(source)?;
     if !data.profile.contains_key(name) {
         return Err(miette!("profile `{name}` is not defined"));
@@ -59,7 +63,7 @@ fn deactivate(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn show(source: &std::path::Path) -> Result<()> {
+fn show(source: &Path) -> Result<()> {
     let data = DataFile::read(source)?;
     let active = StateDatabase::open_read_only()?
         .map_or_else(|| Ok(Vec::new()), |db| db.active_profiles())?;

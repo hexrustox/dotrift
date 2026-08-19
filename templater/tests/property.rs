@@ -3,13 +3,14 @@ mod common;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 
-use common::MockRegistry;
 use proptest::prelude::*;
 use templater::Template;
 use templater::error::RegistryError;
 use templater::function::FunctionRegistry;
 use templater::util::RESERVED_KEYWORDS;
 use templater::value::Value;
+
+use common::MockRegistry;
 
 const MAX_NESTING_DEPTH: usize = 2;
 const MAX_LIST_LEN: usize = 8;

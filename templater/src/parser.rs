@@ -548,7 +548,7 @@ impl<'s> ParserState<'s> {
                 break Ok(left);
             }
             let dot_pos = self.pos;
-            self.pos += 1; // consume '.'
+            self.pos += 1;
 
             let bytes = self.bytes();
             if self.pos >= bytes.len() {
@@ -689,7 +689,7 @@ impl<'s> ParserState<'s> {
         let bytes = self.bytes();
         let lparen = self.pos;
         debug_assert_eq!(bytes[self.pos], b'(');
-        self.pos += 1; // consume '('
+        self.pos += 1;
 
         let mut args = Vec::new();
         loop {
@@ -756,7 +756,7 @@ impl<'s> ParserState<'s> {
         let lbracket = self.pos;
         debug_assert_eq!(bytes[self.pos], b'[');
         let start = self.pos;
-        self.pos += 1; // consume '['
+        self.pos += 1;
 
         let mut elements = Vec::new();
         loop {

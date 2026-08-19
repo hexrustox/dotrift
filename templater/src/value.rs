@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
-
-use std::io;
+use std::{collections::BTreeMap, io};
 
 use serde::Deserialize;
 

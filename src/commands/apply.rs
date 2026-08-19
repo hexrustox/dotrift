@@ -1,7 +1,6 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
-    hash::Hasher,
     io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink},
     path::{Path, PathBuf},
@@ -10,15 +9,16 @@ use std::{
 
 use miette::{Result, WrapErr, miette};
 use strum::EnumIter;
+use templater::value::Value;
 use tui::prompt::{PromptError, PromptOption};
-use twox_hash::XxHash64;
 
-use crate::config::{self, DeployType};
-use crate::hash;
-use crate::managed;
-use crate::state::{Kind, StateDatabase, StateLock, StateRecord};
-use crate::template;
-use crate::{ExitStatus, println_capture};
+use crate::{
+    ExitStatus,
+    config::{self, DeployType},
+    hash, managed, println_capture,
+    state::{Kind, StateDatabase, StateLock, StateRecord},
+    template,
+};
 
 /// Reconciles the desired deployment with the target directory.
 #[derive(Debug, Clone, Copy, Default)]
@@ -30,13 +30,13 @@ pub struct ApplyOptions {
     pub verbose: bool,
 }
 
-pub fn run(source: &Path, target_override: Option<std::path::PathBuf>) -> Result<ExitStatus> {
+pub fn run(source: &Path, target_override: Option<PathBuf>) -> Result<ExitStatus> {
     run_with_options(source, target_override, ApplyOptions::default())
 }
 
 pub fn run_with_options(
     source: &Path,
-    target_override: Option<std::path::PathBuf>,
+    target_override: Option<PathBuf>,
     options: ApplyOptions,
 ) -> Result<ExitStatus> {
     let _lock = StateLock::acquire()?;
@@ -145,7 +145,7 @@ fn deploy_entry(
     database: &StateDatabase,
     target_root: &Path,
     entry: &config::DeploymentEntry,
-    context: &std::collections::HashMap<String, templater::value::Value>,
+    context: &HashMap<String, Value>,
     replace_all: &mut bool,
 ) -> Result<EntryResult> {
     if !fs::metadata(&entry.source_path)
@@ -322,7 +322,7 @@ fn is_target_managed(database: &StateDatabase, path: &Path) -> Result<bool> {
 fn cleanup(
     database: &StateDatabase,
     target_root: &Path,
-    desired: &HashSet<std::path::PathBuf>,
+    desired: &HashSet<PathBuf>,
     options: ApplyOptions,
 ) -> Result<(usize, usize)> {
     let dry_run = options.dry_run;
@@ -382,10 +382,7 @@ fn cleanup(
     Ok((removed, pruned))
 }
 
-fn report_dry_run_pruning(
-    target_root: &Path,
-    removals: &HashSet<std::path::PathBuf>,
-) -> Result<()> {
+fn report_dry_run_pruning(target_root: &Path, removals: &HashSet<PathBuf>) -> Result<()> {
     let mut planned = removals.clone();
     let mut parents = removals
         .iter()
@@ -594,7 +591,7 @@ fn path_kind(path: &Path) -> std::io::Result<&'static str> {
 fn view_diff(
     entry: &config::DeploymentEntry,
     target: &Path,
-    context: &std::collections::HashMap<String, templater::value::Value>,
+    context: &HashMap<String, Value>,
 ) -> Result<()> {
     let rendered = if entry.deploy_type == DeployType::Template {
         let rendered = template::render_template(&entry.source_path, context)?;
@@ -627,7 +624,10 @@ fn view_diff(
         PagerResolution::DotriftPager(command) => {
             let mut child = spawn_pager(command)
                 .map_err(|error| miette!(error).wrap_err("cannot run DOTRIFT_PAGER"))?;
-            let mut stdin = child.stdin.take().expect("piped stdin");
+            let mut stdin = child
+                .stdin
+                .take()
+                .ok_or_else(|| miette!("pager stdin is unavailable"))?;
             run_diff_into(target, &entry.source_path, source, &mut stdin)?;
             drop(stdin);
             child.wait().map_err(|error| miette!(error))?;
@@ -635,7 +635,10 @@ fn view_diff(
         }
         PagerResolution::Pager(command) => match spawn_pager(command) {
             Ok(mut child) => {
-                let mut stdin = child.stdin.take().expect("piped stdin");
+                let mut stdin = child
+                    .stdin
+                    .take()
+                    .ok_or_else(|| miette!("pager stdin is unavailable"))?;
                 run_diff_into(target, &entry.source_path, source, &mut stdin)?;
                 drop(stdin);
                 child.wait().map_err(|error| miette!(error))?;
@@ -689,9 +692,7 @@ fn random_hash() -> Result<String> {
     if written != bytes.len() as isize {
         return Err(miette!("cannot read random bytes for diff temp file"));
     }
-    let mut hasher = XxHash64::with_seed(0);
-    hasher.write(&bytes);
-    Ok(format!("{:016x}", hasher.finish()))
+    Ok(hash::hash_bytes(&bytes))
 }
 
 fn run_diff_into<W: Write>(
@@ -711,7 +712,10 @@ fn run_diff_into<W: Write>(
         .stdout(Stdio::piped())
         .spawn()
         .map_err(|error| miette!(error).wrap_err("cannot run diff"))?;
-    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| miette!("diff stdout is unavailable"))?;
     std::io::copy(&mut stdout, dest).map_err(|error| miette!(error))?;
     if child.wait().map_err(|error| miette!(error))?.code() == Some(2) {
         return Err(miette!("diff exited with an error"));
@@ -731,7 +735,12 @@ fn diff_output() -> crate::capture::CaptureWriter {
 
 fn spawn_pager(command: &str) -> std::io::Result<std::process::Child> {
     let mut parts = command.split_whitespace();
-    let program = parts.next().expect("non-empty pager command");
+    let Some(program) = parts.next() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "pager command is empty",
+        ));
+    };
     Command::new(program)
         .args(parts)
         .stdin(Stdio::piped())
@@ -761,10 +770,7 @@ fn remove_path(database: &StateDatabase, path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn parent_obstruction(
-    target_root: &Path,
-    target_path: &Path,
-) -> Result<Option<std::path::PathBuf>> {
+fn parent_obstruction(target_root: &Path, target_path: &Path) -> Result<Option<PathBuf>> {
     let parent = target_path
         .parent()
         .ok_or_else(|| miette!("target path has no parent"))?;

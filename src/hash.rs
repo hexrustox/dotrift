@@ -1,7 +1,9 @@
-use std::fs::File;
-use std::hash::Hasher;
-use std::io::{BufReader, Read};
-use std::path::Path;
+use std::{
+    fs::File,
+    hash::Hasher,
+    io::{BufReader, Read},
+    path::Path,
+};
 
 use miette::{Result, WrapErr, miette};
 use twox_hash::XxHash64;
@@ -15,7 +17,7 @@ pub fn hash_bytes(bytes: &[u8]) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-pub fn hash_file(path: &Path) -> Result<String> {
+pub(crate) fn hash_file(path: &Path) -> Result<String> {
     let file = File::open(path)
         .map_err(|error| miette!(error))
         .wrap_err_with(|| format!("cannot read `{}` for hashing", path.display()))?;

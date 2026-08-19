@@ -1,12 +1,15 @@
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::Write;
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Write,
+};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-use templater::Template;
-use templater::util::TestRegistry;
-use templater::value::{Value, ValueType};
+use rand::{Rng, SeedableRng, rngs::StdRng};
+use templater::{
+    Template,
+    util::TestRegistry,
+    value::{Value, ValueType},
+};
 
 const TOP_LEVEL_VARIABLES: usize = 50;
 const TEMPLATE_SECTIONS: usize = 6_000;

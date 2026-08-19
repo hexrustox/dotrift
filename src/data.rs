@@ -6,13 +6,13 @@ use templater::value::Value;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct DataFile {
-    pub variable: BTreeMap<String, Value>,
+pub(crate) struct DataFile {
+    variable: BTreeMap<String, Value>,
     pub profile: BTreeMap<String, BTreeMap<String, Value>>,
 }
 
 impl DataFile {
-    pub fn read(source: &Path) -> Result<Self> {
+    pub(crate) fn read(source: &Path) -> Result<Self> {
         if !source.is_dir() {
             return Err(miette!(
                 "source directory `{}` does not exist",
@@ -35,7 +35,7 @@ impl DataFile {
             .wrap_err_with(|| format!("cannot parse `{}`", path.display()))
     }
 
-    pub fn context(&self, active: &[(String, i64)]) -> BTreeMap<String, Value> {
+    pub(crate) fn context(&self, active: &[(String, i64)]) -> BTreeMap<String, Value> {
         let mut context = self.variable.clone();
         let mut active = active.to_vec();
         active.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));

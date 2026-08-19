@@ -15,7 +15,7 @@ impl FunctionRegistry for NoFunctions {
     }
 }
 
-pub fn render_template(path: &Path, context: &HashMap<String, Value>) -> Result<Vec<u8>> {
+pub(crate) fn render_template(path: &Path, context: &HashMap<String, Value>) -> Result<Vec<u8>> {
     let template = Template::from_file(path)
         .map_err(|error| miette!(error))
         .wrap_err_with(|| format!("cannot read `{}`", path.display()))?;

@@ -2,10 +2,12 @@ use std::fs;
 
 use miette::Result;
 
-use crate::hash;
-use crate::state::{Kind, StateRecord};
+use crate::{
+    hash,
+    state::{Kind, StateRecord},
+};
 
-pub fn is_managed(record: &StateRecord) -> Result<bool> {
+pub(crate) fn is_managed(record: &StateRecord) -> Result<bool> {
     let metadata = match fs::symlink_metadata(&record.target_path) {
         Ok(metadata) => metadata,
         Err(_) => return Ok(false),

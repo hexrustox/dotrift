@@ -2,9 +2,10 @@ mod common;
 
 use std::{collections::HashMap, io};
 
-use common::{MockRegistry, var_scope};
 use templater::{Template, util::TestRegistry};
 use test_case::test_case;
+
+use common::{MockRegistry, var_scope};
 
 #[test_case(b"" => ""; "empty")]
 #[test_case(b"hello" => "hello"; "plain_text")]

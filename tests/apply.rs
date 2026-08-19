@@ -4,11 +4,12 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 
-use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name};
 use dotrift::commands::apply::{ApplyOptions, ObstructionChoice, set_prompt_choice};
 use dotrift::hash::hash_bytes;
 use dotrift::state::{Kind, StateDatabase};
 use test_case::test_case;
+
+use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name};
 
 #[test_case(
     |source: &Path, _target: &Path| {

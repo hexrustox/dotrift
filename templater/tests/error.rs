@@ -2,9 +2,10 @@ mod common;
 
 use std::collections::HashMap;
 
-use common::{MockRegistry, var_scope};
 use templater::{Template, error::Error, util::TestRegistry};
 use test_case::test_case;
+
+use common::{MockRegistry, var_scope};
 
 // scanner parse errors
 #[test_case(b"{{ x"; "unclosed_interpolation")]

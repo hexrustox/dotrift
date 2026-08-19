@@ -3,9 +3,10 @@ mod common;
 use std::fs;
 use std::os::unix::fs::symlink;
 
-use common::{TestEnv, snapshot_settings};
 use dotrift::hash::hash_bytes;
 use dotrift::state::{Kind, StateRecord};
+
+use common::{TestEnv, snapshot_settings};
 
 fn run_status_and_take() -> String {
     dotrift::capture::clear();

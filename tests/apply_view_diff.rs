@@ -2,8 +2,7 @@ mod common;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use common::{ApplyScenario, EnvVarGuard, TestEnv, snapshot_settings, test_name};
 use dotrift::commands::apply::{ObstructionChoice, set_prompt_choices};

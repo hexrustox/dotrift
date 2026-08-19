@@ -1,7 +1,6 @@
 use miette::Result;
 
-use crate::state::StateDatabase;
-use crate::{managed, println_capture};
+use crate::{managed, println_capture, state::StateDatabase};
 
 pub fn run() -> Result<()> {
     let Some(database) = StateDatabase::open_read_only()? else {
