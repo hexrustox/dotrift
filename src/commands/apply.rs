@@ -814,29 +814,31 @@ mod tests {
         PROMPT_COUNT.with(|count| *count.borrow())
     }
 
-    #[test_case(|t| t.join("file") => None; "direct_child_has_no_obstruction")]
+    #[test_case(|t| t.join("file") => None; "finds_no_obstruction_for_direct_child_target")]
     #[test_case(|t| {
         fs::create_dir_all(t.join("a/b/c")).unwrap();
         t.join("a/b/c/file")
-    } => None; "all_parent_dirs_are_clear")]
+    } => None; "finds_no_obstruction_when_parent_dirs_are_all_dirs")]
     #[test_case(|t| {
         fs::create_dir(t.join("a")).unwrap();
         fs::write(t.join("a/b"), b"").unwrap();
         t.join("a/b/c/file")
-    } => Some(PathBuf::from("a/b")); "intermediate_parent_is_a_file")]
+    } => Some(PathBuf::from("a/b")); "finds_file_obstruction_at_intermediate_parent")]
     #[test_case(|t| {
         fs::create_dir(t.join("x")).unwrap();
         symlink(t.join("x"), t.join("a")).unwrap();
         t.join("a/b/file")
-    } => Some(PathBuf::from("a")); "symlink_to_dir_is_an_obstruction")]
+    } => Some(PathBuf::from("a")); "finds_symlinked_dir_as_parent_obstruction")]
     #[test_case(|t| {
         fs::create_dir(t.join("a")).unwrap();
         t.join("a/b/c/file")
-    } => None; "missing_parent_subtree_short_circuits")]
-    #[test_case(|t| t.join("a/b/file") => None; "empty_root_target_has_missing_parent")]
-    #[test_case(|_| PathBuf::from("/outside/target/file") => panics ""; "target_outside_root")]
-    #[test_case(|_| PathBuf::from("/") => panics ""; "target_has_no_parent")]
-    fn parent_obstruction_test(setup: impl Fn(&Path) -> PathBuf) -> Option<PathBuf> {
+    } => None; "finds_no_obstruction_after_missing_subtree")]
+    #[test_case(|t| t.join("a/b/file") => None; "finds_no_obstruction_for_root_child_with_missing_parents")]
+    #[test_case(|_| PathBuf::from("/outside/target/file") => panics ""; "panics_for_target_outside_target_root")]
+    #[test_case(|_| PathBuf::from("/") => panics ""; "panics_for_target_without_parent")]
+    fn finds_first_obstructing_parent_of_target(
+        setup: impl Fn(&Path) -> PathBuf,
+    ) -> Option<PathBuf> {
         let tmp = tempdir().unwrap();
         parent_obstruction(tmp.path(), &setup(tmp.path()))
             .unwrap()
@@ -853,7 +855,7 @@ mod tests {
             assert!(fs::symlink_metadata(t.join("file")).is_err());
             assert_eq!(db.record(&t.join("file")).unwrap(), None);
         };
-        "removes_regular_file"
+        "removes_regular_file_and_its_record"
     )]
     #[test_case(
         |db, t| {
@@ -942,9 +944,9 @@ mod tests {
         |_db, t| t.join("missing"),
         |_db, _t| {}
         => panics ""
-        ; "missing_path_is_an_error"
+        ; "panics_when_path_to_remove_does_not_exist"
     )]
-    fn remove_path_test(
+    fn removes_path_and_its_database_record(
         setup: impl Fn(&mut StateDatabase, &Path) -> PathBuf,
         assert: impl Fn(&StateDatabase, &Path),
     ) {
@@ -990,7 +992,7 @@ mod tests {
             assert_eq!(record.content_hash, None);
         }
         => EntryResult::Deployed
-        ; "deploys_symlink"
+        ; "deploys_source_as_symlink"
     )]
     #[test_case(
         |_db, t| {
@@ -1007,7 +1009,7 @@ mod tests {
             assert_eq!(record.content_hash, Some(hash::hash_bytes(b"copy")));
         }
         => EntryResult::Deployed
-        ; "deploys_copy"
+        ; "deploys_source_as_copy"
     )]
     #[test_case(
         |_db, t| {
@@ -1024,7 +1026,7 @@ mod tests {
             assert_eq!(record.content_hash, Some(hash::hash_bytes(b"rendered")));
         }
         => EntryResult::Deployed
-        ; "deploys_template"
+        ; "deploys_rendered_template"
     )]
     #[test_case(
         |_db, t| {
@@ -1039,7 +1041,7 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600);
         }
         => EntryResult::Deployed
-        ; "deploys_copy_with_mode"
+        ; "deploys_copy_and_applies_mode"
     )]
     #[test_case(
         |_db, t| {
@@ -1053,7 +1055,7 @@ mod tests {
             assert_eq!(db.managed_paths().iter().len(), 1);
         }
         => EntryResult::Deployed
-        ; "deploys_into_nested_missing_dirs"
+        ; "deploys_into_parent_dirs_that_do_not_exist"
     )]
     #[test_case(
         |db, t| {
@@ -1070,7 +1072,7 @@ mod tests {
             assert_eq!(record.content_hash, Some(hash::hash_bytes(b"new")));
         }
         => EntryResult::Replaced
-        ; "replaces_managed_file_target"
+        ; "replaces_managed_file_target_in_place"
     )]
     #[test_case(
         |db, t| {
@@ -1090,7 +1092,7 @@ mod tests {
             assert_eq!(record.source_path, t.join("src"));
         }
         => EntryResult::Replaced
-        ; "replaces_managed_symlink_target"
+        ; "replaces_managed_symlink_target_in_place"
     )]
     #[test_case(
         |_db, t| {
@@ -1106,7 +1108,7 @@ mod tests {
             assert!(db.record(&t.join("target")).unwrap().is_some());
         }
         => EntryResult::Replaced
-        ; "replaces_unmanaged_target_via_prompt"
+        ; "replaces_unmanaged_target_when_prompted_replace"
     )]
     #[test_case(
         |_db, t| {
@@ -1122,7 +1124,7 @@ mod tests {
             assert_eq!(db.record(&t.join("target")).unwrap(), None);
         }
         => EntryResult::Skipped
-        ; "skips_unmanaged_target_via_prompt"
+        ; "skips_unmanaged_target_when_prompted_skip"
     )]
     #[test_case(
         |_db, t| {
@@ -1139,7 +1141,7 @@ mod tests {
             assert_eq!(db.record(&t.join("a/b/file")).unwrap(), None);
         }
         => EntryResult::Skipped
-        ; "skips_parent_obstruction_via_prompt"
+        ; "skips_parent_obstruction_when_prompted_skip"
     )]
     #[test_case(
         |_db, t| {
@@ -1156,7 +1158,7 @@ mod tests {
             assert!(db.record(&t.join("a/b/file")).unwrap().is_some());
         }
         => EntryResult::Replaced
-        ; "removes_parent_obstruction_via_prompt"
+        ; "replaces_parent_file_obstruction_when_prompted_replace"
     )]
     #[test_case(
         |_db, t| {
@@ -1174,7 +1176,7 @@ mod tests {
             assert!(db.record(&t.join("a/b/file")).unwrap().is_some());
         }
         => EntryResult::Replaced
-        ; "removes_symlink_parent_obstruction_via_prompt"
+        ; "replaces_symlinked_parent_obstruction_when_prompted_replace"
     )]
     #[test_case(
         |_db, t| {
@@ -1194,7 +1196,7 @@ mod tests {
             assert!(db.record(&t.join("a/b/file")).unwrap().is_some());
         }
         => EntryResult::Replaced
-        ; "symlink_parent_with_existing_leaf_is_replaced_as_obstruction"
+        ; "replaces_symlinked_parent_when_leaf_inside_it_is_targeted"
     )]
     #[test_case(
         |_db, t| {
@@ -1207,7 +1209,7 @@ mod tests {
             assert_eq!(db.record(&t.join("target")).unwrap(), None);
         }
         => panics ""
-        ; "source_is_a_dangling_symlink"
+        ; "panics_when_source_is_a_dangling_symlink"
     )]
     #[test_case(
         |_db, t| {
@@ -1220,7 +1222,7 @@ mod tests {
             assert_eq!(db.record(&t.join("target")).unwrap(), None);
         }
         => panics ""
-        ; "source_is_not_a_regular_file"
+        ; "panics_when_source_is_a_directory"
     )]
     #[test_case(
         |_db, t| {
@@ -1233,9 +1235,9 @@ mod tests {
             assert_eq!(db.record(&t.join("target")).unwrap(), None);
         }
         => panics ""
-        ; "template_with_undefined_variable_errors"
+        ; "panics_when_template_has_undefined_variable"
     )]
-    fn deploy_entry_test(
+    fn deploys_or_replaces_entry_according_to_target_state(
         setup: impl Fn(&mut StateDatabase, &Path) -> config::DeploymentEntry,
         assert: impl Fn(&StateDatabase, &Path),
     ) -> EntryResult {
@@ -1275,7 +1277,7 @@ mod tests {
             assert!(db.record(&t.join("target_b")).unwrap().is_some());
         }
         => vec![EntryResult::Replaced, EntryResult::Replaced]
-        ; "replace_all_latches_across_entries"
+        ; "replace_all_on_target_prompt_applies_to_later_entries"
     )]
     #[test_case(
         |_db, t| {
@@ -1300,7 +1302,7 @@ mod tests {
             assert!(db.record(&t.join("target_b")).unwrap().is_some());
         }
         => vec![EntryResult::Replaced, EntryResult::Replaced]
-        ; "replace_all_latches_from_parent_obstruction"
+        ; "replace_all_on_parent_obstruction_prompt_applies_to_later_entries"
     )]
     #[test_case(
         |_db, t| {
@@ -1325,9 +1327,9 @@ mod tests {
             assert!(db.record(&t.join("a/b/file")).unwrap().is_some());
         }
         => vec![EntryResult::Replaced, EntryResult::Replaced]
-        ; "replace_all_latches_via_target_prompt_then_removes_parent_obstruction_without_prompt"
+        ; "replace_all_on_target_prompt_skips_later_parent_prompts"
     )]
-    fn deploy_entry_replace_all_test(
+    fn replace_all_choice_latches_across_entries(
         setup: impl Fn(&mut StateDatabase, &Path) -> Vec<config::DeploymentEntry>,
         assert: impl Fn(&StateDatabase, &Path),
     ) -> Vec<EntryResult> {
@@ -1354,7 +1356,7 @@ mod tests {
     #[test_case(
         |t| t.join("missing"),
         |_t| HashSet::new() => true;
-        "missing_path_is_empty"
+        "counts_as_empty_when_missing_and_not_scheduled_for_removal"
     )]
     #[test_case(
         |t| {
@@ -1362,7 +1364,7 @@ mod tests {
             t.join("a")
         },
         |_t| HashSet::new() => true;
-        "existing_empty_dir_is_empty"
+        "counts_as_empty_when_directory_has_no_children"
     )]
     #[test_case(
         |t| {
@@ -1371,7 +1373,7 @@ mod tests {
             t.join("a")
         },
         |_t| HashSet::new() => false;
-        "dir_with_unremoved_child_is_not_empty"
+        "does_not_count_as_empty_while_child_is_kept"
     )]
     #[test_case(
         |t| {
@@ -1380,7 +1382,7 @@ mod tests {
             t.join("a")
         },
         |t| HashSet::from([t.join("a/child")]) => true;
-        "dir_with_removed_child_is_empty"
+        "counts_as_empty_when_child_is_scheduled_for_removal"
     )]
     #[test_case(
         |t| {
@@ -1389,7 +1391,7 @@ mod tests {
             t.join("a")
         },
         |t| HashSet::from([t.join("a/sub")]) => true;
-        "dir_with_removed_subdir_is_empty"
+        "counts_as_empty_when_subdir_is_scheduled_for_removal"
     )]
     #[test_case(
         |t| {
@@ -1398,9 +1400,9 @@ mod tests {
             t.join("parent/a")
         },
         |_t| HashSet::new() => false;
-        "path_is_a_regular_file"
+        "does_not_count_as_empty_when_path_is_a_regular_file"
     )]
-    fn would_be_empty_test(
+    fn accounts_for_scheduled_removals_when_checking_emptiness(
         setup: impl Fn(&Path) -> PathBuf,
         removals: impl Fn(&Path) -> HashSet<PathBuf>,
     ) -> bool {
@@ -1410,7 +1412,7 @@ mod tests {
 
     #[test_case(
         |t| t.to_path_buf() => false;
-        "target_root_itself"
+        "returns_false_for_target_root_itself"
     )]
     #[test_case(
         |t| {
@@ -1418,7 +1420,7 @@ mod tests {
             fs::write(t.join("a/b/file"), b"").unwrap();
             t.join("a/b/file")
         } => false;
-        "no_symlinks_anywhere"
+        "returns_false_when_ancestors_are_all_directories"
     )]
     #[test_case(
         |t| {
@@ -1426,7 +1428,7 @@ mod tests {
             symlink(t.join("real"), t.join("link")).unwrap();
             t.join("link/deep/file")
         } => true;
-        "symlink_as_first_component"
+        "returns_true_when_first_ancestor_is_a_symlink"
     )]
     #[test_case(
         |t| {
@@ -1435,7 +1437,7 @@ mod tests {
             symlink(t.join("real"), t.join("a/link")).unwrap();
             t.join("a/link/deep/file")
         } => true;
-        "symlink_as_deeper_component"
+        "returns_true_when_a_deeper_ancestor_is_a_symlink"
     )]
     #[test_case(
         |t| {
@@ -1443,17 +1445,17 @@ mod tests {
             fs::write(t.join("a/b"), b"").unwrap();
             t.join("a/b/c/file")
         } => false;
-        "intermediate_file_is_not_a_symlink"
+        "returns_false_when_intermediate_ancestor_is_a_file"
     )]
     #[test_case(
         |_t| PathBuf::from("/outside/target/file") => panics "";
-        "path_outside_target_root"
+        "panics_for_path_outside_target_root"
     )]
     #[test_case(
         |_t| PathBuf::from("/") => panics "";
-        "absolute_path_with_no_strip_prefix"
+        "panics_for_absolute_path_without_strip_prefix"
     )]
-    fn has_symlink_component_test(setup: impl Fn(&Path) -> PathBuf) -> bool {
+    fn detects_symlink_in_ancestor_chain(setup: impl Fn(&Path) -> PathBuf) -> bool {
         let tmp = tempdir().unwrap();
         has_symlink_component(tmp.path(), &setup(tmp.path())).unwrap()
     }
@@ -1463,21 +1465,21 @@ mod tests {
             fs::write(t.join("file"), b"").unwrap();
             t.join("file")
         } => 0;
-        "parent_is_target_root"
+        "returns_zero_when_parent_is_target_root"
     )]
     #[test_case(
         |t| {
             fs::create_dir_all(t.join("a/b")).unwrap();
             t.join("a/b/file")
         } => 2;
-        "removes_empty_parent_chain"
+        "prunes_both_empty_parent_directories"
     )]
     #[test_case(
         |t| {
             fs::create_dir_all(t.join("a/b/c")).unwrap();
             t.join("a/b/c/file")
         } => 3;
-        "removes_deep_empty_chain"
+        "prunes_all_three_empty_parent_directories"
     )]
     #[test_case(
         |t| {
@@ -1485,7 +1487,7 @@ mod tests {
             fs::write(t.join("a/b/sibling"), b"").unwrap();
             t.join("a/b/file")
         } => 0;
-        "parent_with_sibling_is_not_pruned"
+        "returns_zero_when_an_ancestor_dir_still_has_content"
     )]
     #[test_case(
         |t| {
@@ -1493,7 +1495,7 @@ mod tests {
             fs::write(t.join("a/b"), b"").unwrap();
             t.join("a/b/file")
         } => 0;
-        "parent_is_a_regular_file"
+        "returns_zero_when_an_ancestor_is_a_regular_file"
     )]
     #[test_case(
         |t| {
@@ -1502,13 +1504,13 @@ mod tests {
             symlink(t.join("real"), t.join("a/link")).unwrap();
             t.join("a/link/deep/file")
         } => 0;
-        "symlink_parent_chain_is_not_pruned"
+        "returns_zero_when_the_prune_chain_crosses_a_symlink"
     )]
     #[test_case(
         |t| t.join("a/b/file") => 0;
-        "missing_parent_is_not_pruned"
+        "returns_zero_when_the_prune_chain_is_missing"
     )]
-    fn prune_parents_test(setup: impl Fn(&Path) -> PathBuf) -> usize {
+    fn prunes_empty_parent_dirs_until_a_barrier(setup: impl Fn(&Path) -> PathBuf) -> usize {
         let tmp = tempdir().unwrap();
         prune_parents(tmp.path(), &setup(tmp.path()), false).unwrap()
     }
@@ -1526,7 +1528,7 @@ mod tests {
             assert!(fs::symlink_metadata(t.join("stale")).is_err());
             assert_eq!(db.record(&t.join("stale")).unwrap(), None);
         };
-        "removes_stale_managed_file"
+        "removes_stale_file_matching_its_record"
     )]
     #[test_case(
         |db, t| {
@@ -1541,7 +1543,7 @@ mod tests {
             assert_eq!(fs::read(t.join("stale")).unwrap(), b"other");
             assert_eq!(db.record(&t.join("stale")).unwrap(), None);
         };
-        "relinquishes_unmanaged_stale_file"
+        "relinquishes_record_when_stale_file_was_modified"
     )]
     #[test_case(
         |db, t| {
@@ -1554,7 +1556,7 @@ mod tests {
             assert_eq!((removed, pruned), (0, 0));
             assert_eq!(db.record(&t.join("missing")).unwrap(), None);
         };
-        "relinquishes_missing_stale_path"
+        "relinquishes_record_when_stale_path_is_missing"
     )]
     #[test_case(
         |db, t| {
@@ -1571,7 +1573,7 @@ mod tests {
             assert_eq!(fs::read(t.join("real/child")).unwrap(), b"x");
             assert_eq!(db.record(&t.join("link/child")).unwrap(), None);
         };
-        "relinquishes_path_under_symlink_parent"
+        "relinquishes_record_reached_through_a_symlinked_parent"
     )]
     #[test_case(
         |db, _t| {
@@ -1583,7 +1585,7 @@ mod tests {
             assert_eq!((removed, pruned), (0, 0));
             assert!(db.record(Path::new("/outside/file")).unwrap().is_some());
         };
-        "skips_path_outside_target_root"
+        "leaves_records_outside_target_root_alone"
     )]
     #[test_case(
         |db, t| {
@@ -1595,7 +1597,7 @@ mod tests {
             assert_eq!((removed, pruned), (0, 0));
             assert!(db.record(t).unwrap().is_some());
         };
-        "skips_path_that_is_target_root"
+        "leaves_the_target_root_record_alone"
     )]
     #[test_case(
         |db, t| {
@@ -1610,7 +1612,7 @@ mod tests {
             assert!(fs::symlink_metadata(t.join("stale")).is_ok());
             assert!(db.record(&t.join("stale")).unwrap().is_some());
         };
-        "skips_path_in_desired"
+        "leaves_paths_listed_as_desired_alone"
     )]
     #[test_case(
         |db, t| {
@@ -1628,7 +1630,7 @@ mod tests {
             assert!(fs::symlink_metadata(t.join("stale")).is_ok());
             assert!(db.record(&t.join("stale")).unwrap().is_some());
         };
-        "dry_run_removes_nothing"
+        "dry_run_removes_neither_file_nor_record"
     )]
     #[test_case(
         |db, t| {
@@ -1649,7 +1651,7 @@ mod tests {
             assert!(fs::symlink_metadata(t.join("a/b")).is_err());
             assert_eq!(db.record(&t.join("a/b/file")).unwrap(), None);
         };
-        "prunes_empty_parent_dirs"
+        "prunes_ancestor_dirs_once_they_are_empty"
     )]
     fn cleanup_test(
         setup: impl Fn(&mut StateDatabase, &Path),

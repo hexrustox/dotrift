@@ -83,12 +83,13 @@ fn default_source() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
-    #[test]
-    fn assert_apply_flags() {
-        assert!(Cli::try_parse_from(["dotrift", "apply", "--prune-empty-dirs"]).is_err());
-        assert!(Cli::try_parse_from(["dotrift", "apply", "--dry-run", "--verbose"]).is_err());
-        assert!(Cli::try_parse_from(["dotrift", "apply", "--dry-run", "--quiet"]).is_err());
-        assert!(Cli::try_parse_from(["dotrift", "apply", "--verbose", "--quiet"]).is_err());
+    #[test_case(&["--prune-empty-dirs"]; "prune_empty_dirs_requires_clean_up")]
+    #[test_case(&["--dry-run", "--verbose"]; "dry_run_conflicts_with_verbose")]
+    #[test_case(&["--dry-run", "--quiet"]; "dry_run_conflicts_with_quiet")]
+    #[test_case(&["--verbose", "--quiet"]; "verbose_conflicts_with_quiet")]
+    fn apply_rejects_invalid_flag_combinations(flags: &[&str]) {
+        assert!(Cli::try_parse_from([&["dotrift", "apply"], flags].concat()).is_err());
     }
 }

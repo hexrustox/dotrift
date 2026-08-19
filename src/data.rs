@@ -61,7 +61,7 @@ mod tests {
     }
 
     #[test]
-    fn read_missing_data_file_returns_default() {
+    fn missing_data_file_reads_as_empty() {
         let dir = tempdir().expect("cannot create temp dir");
         let data = DataFile::read(dir.path()).expect("cannot read data file");
         assert!(data.variable.is_empty());
@@ -69,7 +69,7 @@ mod tests {
     }
 
     #[test]
-    fn read_parses_variables_and_profiles() {
+    fn read_loads_variables_and_profiles() {
         let dir = tempdir().expect("cannot create temp dir");
         write_data_file(
             dir.path(),
@@ -90,13 +90,13 @@ mod tests {
     }
 
     #[test]
-    fn read_rejects_nonexistent_source_directory() {
+    fn rejects_missing_source_directory() {
         let dir = tempdir().expect("cannot create temp dir");
         assert!(DataFile::read(&dir.path().join("missing")).is_err());
     }
 
     #[test]
-    fn read_rejects_unreadable_data_file() {
+    fn rejects_unreadable_data_file() {
         let dir = tempdir().expect("cannot create temp dir");
         fs::create_dir(dir.path().join("dotrift_data.toml")).expect("cannot create directory");
         let error =
@@ -110,7 +110,7 @@ mod tests {
     }
 
     #[test]
-    fn read_rejects_invalid_toml() {
+    fn rejects_malformed_toml() {
         let dir = tempdir().expect("cannot create temp dir");
         write_data_file(dir.path(), "[variable\n");
         let error = DataFile::read(dir.path()).expect_err("malformed data file must fail to parse");
@@ -123,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn context_starts_from_variables_without_active_profiles() {
+    fn context_without_active_profiles_contains_only_variables() {
         let mut data = DataFile::default();
         data.variable
             .insert("name".into(), Value::Str("dotrift".into()));
@@ -134,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn context_applies_profiles_in_priority_then_name_order() {
+    fn context_prefers_higher_priority_profile() {
         let mut data = DataFile::default();
         data.variable.insert("a".into(), Value::Int(1));
         data.profile.insert(
@@ -157,7 +157,7 @@ mod tests {
     }
 
     #[test]
-    fn context_tie_breaks_equal_priority_by_name() {
+    fn context_tie_breaks_equal_priority_profiles_by_name() {
         let mut data = DataFile::default();
         data.profile.insert(
             "work".into(),
@@ -172,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn context_ignores_active_profiles_without_definition() {
+    fn context_ignores_undefined_active_profiles() {
         let mut data = DataFile::default();
         data.variable.insert("a".into(), Value::Int(1));
         let context = data.context(&[("gone".to_string(), 1)]);

@@ -493,25 +493,25 @@ mod tests {
 
     use super::*;
 
-    #[test_case(r#""600""# => 0o600; "string_octal")]
-    #[test_case(r#"0o600"# => 0o600; "octal_literal_prefix")]
-    #[test_case(r#""000""# => 0; "string_zero")]
-    #[test_case(r#""755""# => 0o755; "string_common_mode")]
-    #[test_case(r#""644""# => 0o644; "string_rw_r__r")]
-    #[test_case(r#""777""# => 0o777; "string_max_mode")]
-    #[test_case("0" => 0; "integer_zero")]
-    #[test_case("511" => 0o777; "integer_max_mode")]
-    #[test_case("0o777" => 0o777; "octal_literal_max")]
-    #[test_case(r#""""# => panics ""; "empty_string")]
-    #[test_case(r#""75""# => panics ""; "string_too_short")]
-    #[test_case(r#""7555""# => panics ""; "string_too_long")]
-    #[test_case(r#""800""# => panics ""; "digit_out_of_octal_range")]
-    #[test_case(r#""7a5""# => panics ""; "non_octal_character")]
-    #[test_case("512" => panics ""; "decimal_above_max")]
-    #[test_case("0o1000" => panics ""; "octal_literal_above_max")]
-    #[test_case("-1" => panics ""; "negative_integer_rejected")]
-    #[test_case("1.5" => panics ""; "float_rejected")]
-    fn parse_deploy_mode(value: &str) -> u32 {
+    #[test_case(r#""600""# => 0o600; "quoted_600_parses_to_600")]
+    #[test_case(r#"0o600"# => 0o600; "toml_octal_literal_parses_to_600")]
+    #[test_case(r#""000""# => 0; "quoted_000_parses_to_zero")]
+    #[test_case(r#""755""# => 0o755; "quoted_755_parses_to_755")]
+    #[test_case(r#""644""# => 0o644; "quoted_644_parses_to_644")]
+    #[test_case(r#""777""# => 0o777; "quoted_777_parses_to_max_mode")]
+    #[test_case("0" => 0; "integer_zero_parses_to_zero")]
+    #[test_case("511" => 0o777; "integer_511_parses_to_max_mode")]
+    #[test_case("0o777" => 0o777; "octal_literal_777_parses_to_max_mode")]
+    #[test_case(r#""""# => panics ""; "empty_string_is_rejected")]
+    #[test_case(r#""75""# => panics ""; "string_75_too_short_is_rejected")]
+    #[test_case(r#""7555""# => panics ""; "string_7555_too_long_is_rejected")]
+    #[test_case(r#""800""# => panics ""; "digit_8_outside_octal_range_is_rejected")]
+    #[test_case(r#""7a5""# => panics ""; "non_octal_character_is_rejected")]
+    #[test_case("512" => panics ""; "decimal_512_above_max_is_rejected")]
+    #[test_case("0o1000" => panics ""; "octal_literal_1000_above_max_is_rejected")]
+    #[test_case("-1" => panics ""; "negative_integer_is_rejected")]
+    #[test_case("1.5" => panics ""; "float_is_rejected")]
+    fn deploy_mode_from_scalar(value: &str) -> u32 {
         #[derive(Debug, Deserialize)]
         struct X {
             x: DeployMode,
@@ -520,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_rule_rejects_mode_with_symlink() {
+    fn rule_with_mode_and_symlink_is_rejected() {
         #[derive(Debug, Deserialize)]
         #[allow(dead_code)]
         struct X {
@@ -560,7 +560,7 @@ mod tests {
 
     #[test_case(
         |t: &Path| t.join("does_not_exist") => panics "source directory";
-        "nonexistent"
+        "missing_source_is_rejected"
     )]
     #[test_case(
         |t: &Path| {
@@ -568,15 +568,15 @@ mod tests {
             fs::write(&path, b"x").unwrap();
             path
         } => panics "source directory";
-        "regular_file"
+        "regular_file_source_is_rejected"
     )]
-    fn read_rejects_non_directory_source<F: Fn(&Path) -> PathBuf>(source: F) {
+    fn read_requires_existing_source_directory<F: Fn(&Path) -> PathBuf>(source: F) {
         let dir = tempdir().expect("cannot create temp dir");
         read(&source(dir.path()), None).unwrap_or_else(|e| panic!("{e}"));
     }
 
     #[test]
-    fn read_rejects_relative_target_override() {
+    fn read_requires_absolute_target_override() {
         let env = ReadEnv::new();
         env.write_config("");
         let error = read(&env.source(), Some(PathBuf::from("relative")))
@@ -589,7 +589,7 @@ mod tests {
     }
 
     #[test]
-    fn read_rejects_relative_target_directory() {
+    fn read_requires_absolute_target_directory() {
         let env = ReadEnv::new();
         env.write_config("target-directory = \"relative\"\n");
         let error =
@@ -602,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn read_rejects_overlap_with_equal_paths() {
+    fn read_rejects_target_identical_to_source() {
         let env = ReadEnv::new();
         env.write_config("");
         let error = read(&env.source(), Some(env.source().to_path_buf()))
@@ -611,7 +611,7 @@ mod tests {
     }
 
     #[test]
-    fn read_rejects_overlap_with_target_inside_source() {
+    fn read_rejects_target_nested_in_source() {
         let env = ReadEnv::new();
         env.write_config("");
         let error = read(&env.source(), Some(env.source().join("nested")))
@@ -620,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn read_builds_desired_deployment() {
+    fn read_builds_deployment_with_ignored_portals_excluded() {
         let env = ReadEnv::new();
         env.write_config("[portal]\n\"a.txt\" = \"out.txt\"\n\"ignored.txt\" = \"drop.txt\"\n");
         fs::write(env.source().join("a.txt"), b"a").expect("cannot write a.txt");
@@ -641,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn read_prefers_target_override_over_config() {
+    fn read_target_override_takes_precedence_over_config() {
         let env = ReadEnv::new();
         env.write_config(&format!(
             "target-directory = \"{}\"\n",
@@ -656,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn read_rejects_invalid_dotriftignore() {
+    fn read_tolerates_malformed_dotriftignore() {
         let env = ReadEnv::new();
         env.write_config("");
         fs::write(env.source().join(".dotriftignore"), "[\n").expect("cannot write .dotriftignore");
@@ -711,12 +711,12 @@ mod tests {
     #[test_case(
         |t| fs::write(t.join("file.txt"), "hello").unwrap(),
         portals! { "file.txt" => "out.txt" } => vec![resolve!("file.txt", "out.txt")];
-        "literal_file_portal"
+        "literal_file_maps_to_configured_target"
     )]
     #[test_case(
         |t| fs::write(t.join("file.txt"), "hello").unwrap(),
         portals! { "./file.txt" => "./out.txt" } => vec![resolve!("file.txt", "out.txt")];
-        "literal_file_dot_prefix"
+        "leading_dot_slash_is_normalized"
     )]
     #[test_case(
         |t| {
@@ -724,12 +724,12 @@ mod tests {
             std::os::unix::fs::symlink(t.join("file.txt"), t.join("link")).unwrap();
         },
         portals! { "link" => "out" } => vec![resolve!("link", "out")];
-        "literal_symlink_to_file"
+        "literal_symlink_to_regular_file_is_deployable"
     )]
     #[test_case(
         |t| fs::create_dir(t.join("empty")).unwrap(),
         portals! { "empty" => "dst" } => Vec::<ResolvedPortal>::new();
-        "literal_empty_directory"
+        "empty_directory_produces_no_entries"
     )]
     #[test_case(
         |t| {
@@ -741,7 +741,7 @@ mod tests {
             resolve!("dir/a.txt", "dst/a.txt"),
             resolve!("dir/sub/b.txt", "dst/sub/b.txt")
         ];
-        "literal_directory_recurses"
+        "directory_portal_enumerates_descendants"
     )]
     #[test_case(
         |t| {
@@ -749,7 +749,7 @@ mod tests {
             fs::write(t.join("a.txt"), "").unwrap();
         },
         portals! { "*" => "dst" } => vec![resolve!("a.txt", "dst/a.txt")];
-        "wildcard_skips_directories"
+        "top_level_wildcard_skips_directories"
     )]
     #[test_case(
         |t| {
@@ -761,7 +761,7 @@ mod tests {
             resolve!("a.txt", "dst/a.txt"),
             resolve!("b.txt", "dst/b.txt")
         ];
-        "wildcard_top_level_files"
+        "extension_wildcard_selects_matching_files"
     )]
     #[test_case(
         |t| {
@@ -773,49 +773,49 @@ mod tests {
             resolve!("configs/a.txt", "dst/a.txt"),
             resolve!("configs/sub/b.txt", "dst/sub/b.txt")
         ];
-        "wildcard_prefix_stripped"
+        "recursive_wildcard_strips_static_prefix"
     )]
     #[test_case(
         |_| {},
         portals! { "/abs" => "dst" } => panics "invalid portal source path `/abs`";
-        "absolute_source_rejected"
+        "absolute_source_is_rejected"
     )]
     #[test_case(
         |t| fs::write(t.join("file.txt"), "hello").unwrap(),
         portals! { "file.txt" => "/abs" } => panics "invalid portal target path `/abs`";
-        "absolute_target_rejected"
+        "absolute_target_is_rejected"
     )]
     #[test_case(
         |_| {},
         portals! { "../x" => "dst" } => panics "invalid portal source path `../x`";
-        "parent_component_in_source_rejected"
+        "parent_component_in_source_is_rejected"
     )]
     #[test_case(
         |t| fs::write(t.join("file.txt"), "hello").unwrap(),
         portals! { "file.txt" => "../dst" } => panics "invalid portal target path `../dst`";
-        "parent_component_in_target_rejected"
+        "parent_component_in_target_is_rejected"
     )]
     #[test_case(
         |_| {},
         portals! { "" => "dst" } => panics "invalid portal source path";
-        "empty_source_rejected"
+        "empty_source_is_rejected"
     )]
     #[test_case(
         |t| fs::write(t.join("file.txt"), "hello").unwrap(),
         portals! { "file.txt" => "" } => panics "invalid portal target path";
-        "empty_target_rejected"
+        "empty_target_is_rejected"
     )]
     #[test_case(
         |_| {},
         portals! { "missing" => "dst" } => panics "literal portal source `missing` does not exist";
-        "literal_source_missing"
+        "missing_literal_source_is_rejected"
     )]
     #[test_case(
         |t| {
             std::os::unix::fs::symlink(t.join("missing"), t.join("dangling")).unwrap();
         },
         portals! { "dangling" => "dst" } => panics "is not a regular file, symlink to a regular file or directory";
-        "broken_symlink_source_rejected"
+        "broken_symlink_literal_source_is_rejected"
     )]
     #[test_case(
         |t| {
@@ -823,17 +823,17 @@ mod tests {
             std::os::unix::fs::symlink(t.join("missing"), t.join("dir/dangling")).unwrap();
         },
         portals! { "dir" => "dst" } => panics "is not a regular file or symlink to a regular file";
-        "directory_containing_broken_symlink_rejected"
+        "directory_with_broken_symlink_is_rejected"
     )]
     #[test_case(
         |_| {},
         portals! { "[" => "dst" } => panics "invalid portal pattern `[`";
-        "invalid_portal_pattern"
+        "malformed_glob_source_is_rejected"
     )]
     #[test_case(
         |t| fs::write(t.join("file.txt"), "hello").unwrap(),
         portals! { "file.txt" => "*.txt" } => panics "portal target `*.txt` cannot contain glob syntax";
-        "target_with_glob_rejected"
+        "glob_syntax_in_target_is_rejected"
     )]
     #[test_case(
         |t| {
@@ -841,14 +841,14 @@ mod tests {
             std::os::unix::fs::symlink(t.join("real"), t.join("dirlink")).unwrap();
         },
         portals! { "*" => "dst" } => panics "is not a regular file or symlink to a regular file";
-        "wildcard_matching_symlink_to_dir_rejected"
+        "wildcard_matching_directory_symlink_is_rejected"
     )]
     #[test_case(
         |t| std::os::unix::fs::symlink(t.join("missing"), t.join("dangling")).unwrap(),
         portals! { "*" => "dst" } => panics "is not a regular file or symlink to a regular file";
-        "wildcard_matching_broken_symlink_rejected"
+        "wildcard_matching_broken_symlink_is_rejected"
     )]
-    fn resolve_portals_test(
+    fn resolves_portals(
         setup: impl Fn(&Path),
         portals: BTreeMap<String, String>,
     ) -> Vec<ResolvedPortal> {
@@ -866,81 +866,81 @@ mod tests {
         result
     }
 
-    #[test_case(vec![] => (); "empty")]
+    #[test_case(vec![] => (); "empty_tree_is_valid")]
     #[test_case(
         vec![resolve!("s1.txt", "dst.txt")] => ();
-        "single_file"
+        "single_entry_is_valid"
     )]
     #[test_case(
         vec![resolve!("s1", "a"), resolve!("s2", "b"), resolve!("s3", "c")] => ();
-        "distinct_files"
+        "distinct_targets_are_valid"
     )]
     #[test_case(
         vec![resolve!("s1", "a/b"), resolve!("s2", "a/c"), resolve!("s3", "d/e/f")] => ();
-        "nested_distinct_paths"
+        "non_conflicting_nested_targets_are_valid"
     )]
     #[test_case(
         vec![resolve!("s1", "a"), resolve!("s2", "a")] => panics "collision at `a` between `s1` and `s2`";
-        "duplicate_target_collision"
+        "duplicate_target_is_rejected"
     )]
     #[test_case(
         vec![resolve!("s1", "a/x"), resolve!("s2", "a/x")] => panics "collision at `a/x` between `s1` and `s2`";
-        "duplicate_nested_target_collision"
+        "duplicate_nested_target_is_rejected"
     )]
     #[test_case(
         vec![resolve!("s1", "a"), resolve!("s2", "a/b")] => panics "structural conflict between `a` and `a/b`";
-        "file_then_descendant_conflict"
+        "descendant_after_file_target_is_rejected"
     )]
     #[test_case(
         vec![resolve!("s1", "a/b"), resolve!("s2", "a/b/c")] => panics "structural conflict between `a/b` and `a/b/c`";
-        "deep_file_then_descendant_conflict"
+        "descendant_after_deep_file_target_is_rejected"
     )]
     #[test_case(
         vec![resolve!("s1", "a/b"), resolve!("s2", "a")] => panics "structural conflict between `a` and `a/b/`";
-        "descendant_then_file_conflict"
+        "file_after_descendant_target_is_rejected"
     )]
     #[test_case(
         vec![resolve!("s1", "a/b/c"), resolve!("s2", "a/b")] => panics "structural conflict between `a/b` and `a/b/c/`";
-        "deep_descendant_then_file_conflict"
+        "file_after_deep_descendant_target_is_rejected"
     )]
-    fn validate_targets_test(entries: Vec<ResolvedPortal>) {
+    fn validates_target_tree(entries: Vec<ResolvedPortal>) {
         validate_targets(&entries).unwrap_or_else(|e| panic!("{e}"))
     }
 
     #[test_case(
         resolve!("a.txt", "a.txt"),
         rules! {} => deploy!("a.txt", "/a.txt", DeployType::Symlink, None);
-        "no_rules_default_symlink"
+        "no_rules_default_to_symlink"
     )]
     #[test_case(
         resolve!("a.txt", "a.txt"),
         rules! { "*.md" => rule!(Some(DeployType::Copy), None) } => deploy!("a.txt", "/a.txt", DeployType::Symlink, None);
-        "rule_does_not_match"
+        "non_matching_rule_keeps_default_symlink"
     )]
     #[test_case(
         resolve!("a.txt", "a.txt"),
         rules! { "*.txt" => rule!(Some(DeployType::Copy), None) } => deploy!("a.txt", "/a.txt", DeployType::Copy, None);
-        "copy_rule_applies"
+        "matching_copy_rule_is_applied"
     )]
     #[test_case(
         resolve!("a.toml", "a.toml"),
         rules! { "*.toml" => rule!(Some(DeployType::Template), None) } => deploy!("a.toml", "/a.toml", DeployType::Template, None);
-        "template_rule_applies"
+        "matching_template_rule_is_applied"
     )]
     #[test_case(
         resolve!("a.txt", "a.txt"),
         rules! { "./*.txt" => rule!(Some(DeployType::Copy), None) } => deploy!("a.txt", "/a.txt", DeployType::Copy, None);
-        "dot_prefix_rule_pattern"
+        "leading_dot_slash_in_rule_matches"
     )]
     #[test_case(
         resolve!("src", "configs/sub/file"),
         rules! { "configs/**" => rule!(Some(DeployType::Copy), None) } => deploy!("src", "/configs/sub/file", DeployType::Copy, None);
-        "nested_glob_matches"
+        "nested_glob_rule_matches"
     )]
     #[test_case(
         resolve!("a.sh", "a.sh"),
         rules! { "*.sh" => rule!(Some(DeployType::Copy), Some(mode("755"))) } => deploy!("a.sh", "/a.sh", DeployType::Copy, Some(mode("755")));
-        "mode_with_copy"
+        "mode_is_applied_with_copy_type"
     )]
     #[test_case(
         resolve!("a.txt", "a.txt"),
@@ -948,7 +948,7 @@ mod tests {
             "*.txt" => rule!(Some(DeployType::Copy), None),
             "a.*" => rule!(Some(DeployType::Template), None)
         } => deploy!("a.txt", "/a.txt", DeployType::Template, None);
-        "last_matching_rule_wins"
+        "last_matching_rule_overrides_deploy_type"
     )]
     #[test_case(
         resolve!("a.txt", "a.txt"),
@@ -956,39 +956,39 @@ mod tests {
             "*.txt" => rule!(Some(DeployType::Copy), None),
             "a.txt" => rule!(None, Some(mode("644")))
         } => deploy!("a.txt", "/a.txt", DeployType::Copy, Some(mode("644")));
-        "fields_merge_across_rules"
+        "type_and_mode_merge_across_rules"
     )]
     #[test_case(
         resolve!("a.txt", "a.txt"),
         rules! { "/abs" => rule!(None, None) } => panics "invalid rule path `/abs`";
-        "absolute_rule_pattern_rejected"
+        "absolute_rule_pattern_is_rejected"
     )]
     #[test_case(
         resolve!("a.txt", "a.txt"),
         rules! { ".." => rule!(None, None) } => panics "invalid rule path `..`";
-        "parent_rule_pattern_rejected"
+        "parent_rule_pattern_is_rejected"
     )]
     #[test_case(
         resolve!("a.txt", "a.txt"),
         rules! { "" => rule!(None, None) } => panics "invalid rule path";
-        "empty_rule_pattern_rejected"
+        "empty_rule_pattern_is_rejected"
     )]
     #[test_case(
         resolve!("a.txt", "a.txt"),
         rules! { "[" => rule!(None, None) } => panics "invalid rule pattern `[`";
-        "invalid_glob_pattern_rejected"
+        "malformed_glob_rule_is_rejected"
     )]
     #[test_case(
         resolve!("a.txt", "a.txt"),
         rules! { "*.txt" => rule!(None, Some(mode("755"))) } => panics "conflicting rules for `a.txt`: `mode` is set but the effective `type` is `symlink`";
-        "mode_conflicts_with_default_symlink"
+        "mode_with_default_symlink_is_rejected"
     )]
     #[test_case(
         resolve!("a.txt", "a.txt"),
         rules! { "*.txt" => rule!(Some(DeployType::Symlink), Some(mode("755"))) } => panics "conflicting rules for `a.txt`: `mode` is set but the effective `type` is `symlink`";
-        "mode_conflicts_with_explicit_symlink"
+        "mode_with_explicit_symlink_is_rejected"
     )]
-    fn apply_rules_test(
+    fn applies_rules_to_portal_entry(
         entry: ResolvedPortal,
         rules: indexmap::IndexMap<String, RuleConfig>,
     ) -> DeploymentEntry {

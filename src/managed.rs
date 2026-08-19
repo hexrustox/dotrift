@@ -49,54 +49,57 @@ mod tests {
     #[test_case(
         |t| fs::write(t.join("file"), "hello").unwrap(),
         |t| crate::record!(f, t.join("file"), hash_bytes(b"hello")) => true;
-        "file_matches_content"
+        "file_content_matches_record_is_managed"
     )]
     #[test_case(
         |t| fs::write(t.join("file"), "hello").unwrap(),
         |t| crate::record!(f, t.join("file"), hash_bytes(b"world")) => false;
-        "file_content_differs_from_record"
+        "file_content_diverged_from_record_not_managed"
     )]
     #[test_case(
         |_| {},
         |t| crate::record!(f, t.join("file"), hash_bytes(b"hello")) => false;
-        "file_record_but_target_missing"
+        "file_record_target_missing_not_managed"
     )]
     #[test_case(
         |t| std::os::unix::fs::symlink(t.join("elsewhere"), t.join("file")).unwrap(),
         |t| crate::record!(f, t.join("file"), hash_bytes(b"hello")) => false;
-        "file_record_but_target_is_a_symlink"
+        "file_record_target_is_symlink_not_managed"
     )]
     #[test_case(
         |t| fs::create_dir(t.join("dir")).unwrap(),
         |t| crate::record!(f, t.join("dir"), hash_bytes(b"hello")) => false;
-        "file_record_but_target_is_a_directory"
+        "file_record_target_is_directory_not_managed"
     )]
     #[test_case(
         |t| fs::write(t.join("file"), "").unwrap(),
         |t| crate::record!(f, t.join("file"), hash_bytes(b"")) => true;
-        "empty_file_matches_empty_content"
+        "empty_file_matches_empty_record_is_managed"
     )]
     #[test_case(
         |t| fs::write(t.join("file"), "hello").unwrap(),
         |t| crate::record!(s, t.join("file"), t.join("target")) => false;
-        "symlink_record_but_target_is_a_regular_file"
+        "symlink_record_target_is_regular_file_not_managed"
     )]
     #[test_case(
         |t| std::os::unix::fs::symlink(t.join("elsewhere"), t.join("link")).unwrap(),
         |t| crate::record!(s, t.join("link"), t.join("elsewhere")) => true;
-        "symlink_matches_recorded_source_path"
+        "symlink_to_recorded_source_path_is_managed"
     )]
     #[test_case(
         |t| std::os::unix::fs::symlink(t.join("elsewhere"), t.join("link")).unwrap(),
         |t| crate::record!(s, t.join("link"), t.join("other")) => false;
-        "symlink_differs_from_recorded_source_path"
+        "symlink_to_other_source_path_not_managed"
     )]
     #[test_case(
         |_| {},
         |t| crate::record!(s, t.join("link"), t.join("elsewhere")) => false;
-        "symlink_record_but_target_missing"
+        "symlink_record_target_missing_not_managed"
     )]
-    fn managed_verdict(setup: impl Fn(&Path), record: impl Fn(&Path) -> StateRecord) -> bool {
+    fn is_managed_when_target_matches_record(
+        setup: impl Fn(&Path),
+        record: impl Fn(&Path) -> StateRecord,
+    ) -> bool {
         let tmp = tempdir().unwrap();
         setup(tmp.path());
         is_managed(&record(tmp.path())).unwrap()

@@ -342,23 +342,23 @@ mod tests {
         (dir, database)
     }
 
-    #[test_case(Kind::File, "file"; "file")]
-    #[test_case(Kind::Symlink, "symlink"; "symlink")]
-    fn kind_as_str_and_display(kind: Kind, expected: &str) {
+    #[test_case(Kind::File, "file"; "file_kind_renders_as_file")]
+    #[test_case(Kind::Symlink, "symlink"; "symlink_kind_renders_as_symlink")]
+    fn kind_renders_to_string(kind: Kind, expected: &str) {
         assert_eq!(kind.as_str(), expected);
         assert_eq!(kind.to_string(), expected);
     }
 
-    #[test_case("file" => matches Ok(Kind::File); "parses_file")]
-    #[test_case("symlink" => matches Ok(Kind::Symlink); "parses_symlink")]
-    #[test_case("link" => matches Err(_); "rejects_unknown_kind")]
-    fn kind_parse(value: &str) -> miette::Result<Kind> {
+    #[test_case("file" => matches Ok(Kind::File); "file_string_parses_to_file_kind")]
+    #[test_case("symlink" => matches Ok(Kind::Symlink); "symlink_string_parses_to_symlink_kind")]
+    #[test_case("link" => matches Err(_); "unknown_string_is_rejected")]
+    fn kind_parses_from_string(value: &str) -> miette::Result<Kind> {
         Kind::parse(value)
     }
 
-    #[test_case(crate::record!(f, "/home/user/.gitconfig", "abc123"); "file")]
-    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"); "symlink")]
-    fn put_round_trips(record: StateRecord) {
+    #[test_case(crate::record!(f, "/home/user/.gitconfig", "abc123"); "file_record_round_trips")]
+    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"); "symlink_record_round_trips")]
+    fn put_round_trips_record(record: StateRecord) {
         let (_dir, database) = database();
         database.put(&record).expect("cannot store record");
         assert_eq!(
@@ -370,14 +370,14 @@ mod tests {
     #[test_case(
         crate::record!(f, "/home/user/.gitconfig", "abc123"),
         crate::record!(s, "/home/user/.gitconfig", "dotfiles/git/global");
-        "file_replaced_by_symlink"
+        "file_record_overwritten_by_symlink"
     )]
     #[test_case(
         crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"),
         crate::record!(f, "/home/user/.bashrc", "deadbeef");
-        "symlink_replaced_by_file"
+        "symlink_record_overwritten_by_file"
     )]
-    fn put_replaces_existing_record(original: StateRecord, replacement: StateRecord) {
+    fn put_overwrites_record_at_same_target_path(original: StateRecord, replacement: StateRecord) {
         let (_dir, database) = database();
         database
             .put(&original)
@@ -398,7 +398,7 @@ mod tests {
             kind: Kind::File,
             content_hash: None,
         };
-        "file_without_content_hash"
+        "file_record_without_content_hash_rejected"
     )]
     #[test_case(
         StateRecord {
@@ -407,15 +407,15 @@ mod tests {
             kind: Kind::Symlink,
             content_hash: Some("abc".into()),
         };
-        "symlink_with_content_hash"
+        "symlink_record_with_content_hash_rejected"
     )]
-    fn put_rejects_records_violating_schema(record: StateRecord) {
+    fn put_rejects_schema_violating_record(record: StateRecord) {
         let (_dir, database) = database();
         assert!(database.put(&record).is_err());
     }
 
     #[test]
-    fn managed_paths_returns_all_records() {
+    fn managed_paths_returns_every_stored_record() {
         let (_dir, database) = database();
         let first = crate::record!(f, "/home/user/.gitconfig", "abc123");
         let second = crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc");
@@ -428,9 +428,9 @@ mod tests {
         assert_eq!(records, expected);
     }
 
-    #[test_case(crate::record!(f, "/home/user/.gitconfig", "abc123"); "file")]
-    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"); "symlink")]
-    fn record_returns_stored_record(record: StateRecord) {
+    #[test_case(crate::record!(f, "/home/user/.gitconfig", "abc123"); "file_record_found_by_target_path")]
+    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"); "symlink_record_found_by_target_path")]
+    fn record_lookup_returns_stored_record(record: StateRecord) {
         let (_dir, database) = database();
         database.put(&record).expect("cannot store record");
         assert_eq!(
@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn record_returns_none_for_unknown_path() {
+    fn record_lookup_returns_none_for_unknown_target_path() {
         let (_dir, database) = database();
         assert_eq!(
             database
@@ -453,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn record_rejects_unknown_kind_in_database() {
+    fn record_lookup_errors_on_unknown_kind_in_database() {
         let (_dir, database) = database();
         database
             .connection
@@ -472,9 +472,9 @@ mod tests {
         assert!(database.record(Path::new("/home/user/.gitconfig")).is_err());
     }
 
-    #[test_case(crate::record!(f, "/home/user/.gitconfig", "abc123"); "file")]
-    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"); "symlink")]
-    fn remove_deletes_record(record: StateRecord) {
+    #[test_case(crate::record!(f, "/home/user/.gitconfig", "abc123"); "file_record_deleted")]
+    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"); "symlink_record_deleted")]
+    fn remove_deletes_stored_record(record: StateRecord) {
         let (_dir, database) = database();
         database.put(&record).expect("cannot store record");
         database
@@ -487,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_is_idempotent_for_unknown_path() {
+    fn remove_succeeds_for_unknown_target_path() {
         let (_dir, database) = database();
         database
             .remove(Path::new("/home/user/.nonexistent"))
@@ -495,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn active_profiles_starts_empty() {
+    fn active_profiles_returns_empty_before_any_activation() {
         let (_dir, database) = database();
         assert_eq!(
             database.active_profiles().expect("cannot read profiles"),
@@ -504,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn active_profiles_reports_activation_order() {
+    fn active_profiles_orders_by_activation_then_name() {
         let (_dir, database) = database();
         database
             .activate_profile("editor")
@@ -526,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn activate_profile_replaces_existing_row() {
+    fn activate_profile_updates_timestamp_without_duplicate_row() {
         let (_dir, database) = database();
         database
             .activate_profile("editor")
@@ -540,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn deactivate_profile_returns_true_when_active() {
+    fn deactivate_profile_returns_true_for_active_profile() {
         let (_dir, database) = database();
         database
             .activate_profile("editor")
@@ -553,7 +553,7 @@ mod tests {
     }
 
     #[test]
-    fn deactivate_profile_returns_false_when_absent() {
+    fn deactivate_profile_returns_false_for_absent_profile() {
         let (_dir, database) = database();
         assert!(
             !database
@@ -563,7 +563,7 @@ mod tests {
     }
 
     #[test]
-    fn state_lock_acquire_is_exclusive() {
+    fn state_lock_blocks_second_acquire_until_dropped() {
         let dir = tempfile::tempdir().expect("cannot create temp dir");
         let first = StateLock::acquire_at(dir.path()).expect("cannot acquire first lock");
         assert!(StateLock::acquire_at(dir.path()).is_err());

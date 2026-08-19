@@ -46,17 +46,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hash_bytes_empty() {
+    fn hash_bytes_empty_matches_known_digest() {
         assert_eq!(hash_bytes(&[]), "ef46db3751d8e999");
     }
 
     #[test]
-    fn hash_bytes_sample() {
+    fn hash_bytes_text_matches_known_digest() {
         assert_eq!(hash_bytes(b"hello"), "26c7827d889f6da3");
     }
 
     #[test]
-    fn hash_file_matches_hash_bytes() {
+    fn hash_file_digests_same_as_its_bytes() {
         let dir = tempdir().expect("cannot create temp dir");
         let path = dir.path().join("sample");
         fs::write(&path, b"hello").expect("cannot write sample file");
@@ -67,7 +67,7 @@ mod tests {
     }
 
     #[test]
-    fn hash_file_reports_missing_file() {
+    fn hash_file_errs_on_missing_path() {
         let dir = tempdir().expect("cannot create temp dir");
         assert!(hash_file(&dir.path().join("missing")).is_err());
     }

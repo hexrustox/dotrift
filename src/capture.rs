@@ -1,3 +1,4 @@
+// TODO refactor
 use std::cell::RefCell;
 
 #[cfg(feature = "testing")]
@@ -55,7 +56,7 @@ pub fn clear() {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn macro_captures_formatted_lines() {
+    fn captures_formatted_args_with_trailing_newline() {
         crate::capture::clear();
         crate::println_capture!("hello {}", "world");
         crate::println_capture!();
