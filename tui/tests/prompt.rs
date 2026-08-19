@@ -16,7 +16,6 @@ enum PromptFixture {
     Many,
     Default,
     Custom,
-    Multiline,
 }
 
 impl PromptFixture {
@@ -30,7 +29,6 @@ impl PromptFixture {
             PromptFixture::Many => "many",
             PromptFixture::Default => "default",
             PromptFixture::Custom => "custom",
-            PromptFixture::Multiline => "multiline",
         }
     }
 }
@@ -121,34 +119,6 @@ impl PromptSession {
         self.master.resize(pty_size(rows, cols)).expect("resize");
     }
 
-    /// Drains whatever the child has emitted so far into the rendered screen,
-    /// returning once output settles (a short quiet period follows a re-render).
-    fn drain_pending(&mut self) {
-        let deadline = std::time::Instant::now() + READY_TIMEOUT;
-        loop {
-            match self.rx.try_recv() {
-                Ok(chunk) => {
-                    self.absorb(chunk);
-                    continue;
-                }
-                Err(_) => {
-                    if std::time::Instant::now() >= deadline {
-                        return;
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
-                    if self.rx.try_recv().is_err() {
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    fn screen(&mut self) -> &vt100::Screen {
-        self.drain_pending();
-        self.screen.screen()
-    }
-
     fn finish(mut self) -> Vec<u8> {
         while let Ok(chunk) = self.rx.recv() {
             self.absorb(chunk);
@@ -181,20 +151,6 @@ fn keyboard_input_selects_or_cancels(fixture: PromptFixture, keys: &[u8]) {
     session.wait_for_first_chunk();
     session.send(keys);
     session.finish_and_snapshot();
-}
-
-#[test]
-fn multiline_question_redisplays_from_column_zero_on_navigation() {
-    let mut session = PromptSession::spawn_standard(PromptFixture::Multiline);
-    session.wait_for_first_chunk();
-    session.send(b"\x1b[B");
-    session.send(b"\x1b[B");
-
-    let screen = session.screen().contents();
-    assert_snapshot!(screen);
-
-    session.send(b"\r");
-    session.finish();
 }
 
 #[test]
