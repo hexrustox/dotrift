@@ -131,14 +131,14 @@ mod tests {
     use super::*;
     use test_case::test_case;
 
-    #[test_case(Value::Str("str".to_string()) => "str" ; "string_value")]
-    #[test_case(Value::Int(42) => "42" ; "integer_42")]
-    #[test_case(Value::Bool(true) => "true" ; "bool_true")]
-    #[test_case(Value::List(vec![]) => "[]" ; "empty_list")]
-    #[test_case(Value::List(vec![Value::Int(1), Value::Bool(false)]) => "[1, false]" ; "list_with_elements")]
-    #[test_case(Value::Map(BTreeMap::from_iter([("key".to_string(), Value::Str("value".to_string()))])) => r#"{"key": "value"}"# ; "map_with_entry")]
-    #[test_case(Value::List(vec![Value::Str(r#"""#.to_string()), Value::Str(r#"\"#.to_string())]) => r#"["\"", "\\"]"# ; "escape_quotes_and_backslashes")]
-    fn write(value: Value) -> String {
+    #[test_case(Value::Str("str".to_string()) => "str" ; "string_renders_verbatim")]
+    #[test_case(Value::Int(42) => "42" ; "integer_renders_decimal")]
+    #[test_case(Value::Bool(true) => "true" ; "boolean_renders_true")]
+    #[test_case(Value::List(vec![]) => "[]" ; "empty_list_renders_brackets")]
+    #[test_case(Value::List(vec![Value::Int(1), Value::Bool(false)]) => "[1, false]" ; "list_renders_inner_elements")]
+    #[test_case(Value::Map(BTreeMap::from_iter([("key".to_string(), Value::Str("value".to_string()))])) => r#"{"key": "value"}"# ; "map_renders_quoted_entry")]
+    #[test_case(Value::List(vec![Value::Str(r#"""#.to_string()), Value::Str(r#"\"#.to_string())]) => r#"["\"", "\\"]"# ; "list_escapes_quotes_and_backslashes")]
+    fn renders_value_at_top_level(value: Value) -> String {
         let mut out = Vec::new();
         value.write_top(&mut out).unwrap();
         String::from_utf8(out).unwrap()

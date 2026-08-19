@@ -431,72 +431,72 @@ mod tests {
         Ok(String::from_utf8(out).unwrap())
     }
 
-    #[test_case(br#"a\"b"# => "a\"b"; "escaped_double_quote")]
-    #[test_case(br#"a\\b"# => "a\\b"; "escaped_backslash")]
-    #[test_case(br#"a\nb"# => "a\\nb"; "other_backslash_verbatim")]
-    #[test_case(br#"\t"# => "\\t"; "backslash_t_verbatim")]
-    #[test_case(b"hello" => "hello"; "plain_text_round_trips")]
-    #[test_case(b"a\nb" => "a\nb"; "raw_newline_preserved")]
-    #[test_case(br#"{{ }} {# #}"# => r#"{{ }} {# #}"#; "delimiters_are_literal")]
-    #[test_case(b"a}b" => "a}b"; "closing_brace_literal")]
-    #[test_case(b"abc\\" => "abc\\"; "trailing_lone_backslash")]
-    #[test_case(b"" => ""; "empty_interior")]
-    #[test_case(b"caf\xc3\xa9" => String::from_utf8_lossy(b"caf\xc3\xa9"); "non_ascii_bytes_survive")]
-    #[test_case(br#"\\\""# => "\\\""; "escaped_backslash_then_quote")]
-    fn write_string_literal_round_trips(src: &[u8]) -> String {
+    #[test_case(br#"a\"b"# => "a\"b"; "collapses_escaped_double_quote")]
+    #[test_case(br#"a\\b"# => "a\\b"; "collapses_escaped_backslash")]
+    #[test_case(br#"a\nb"# => "a\\nb"; "preserves_unknown_escape_verbatim")]
+    #[test_case(br#"\t"# => "\\t"; "preserves_backslash_t_verbatim")]
+    #[test_case(b"hello" => "hello"; "passes_plain_text_unchanged")]
+    #[test_case(b"a\nb" => "a\nb"; "preserves_raw_newline")]
+    #[test_case(br#"{{ }} {# #}"# => r#"{{ }} {# #}"#; "preserves_template_delimiters")]
+    #[test_case(b"a}b" => "a}b"; "preserves_lone_closing_brace")]
+    #[test_case(b"abc\\" => "abc\\"; "preserves_trailing_lone_backslash")]
+    #[test_case(b"" => ""; "empty_interior_writes_nothing")]
+    #[test_case(b"caf\xc3\xa9" => String::from_utf8_lossy(b"caf\xc3\xa9"); "preserves_non_ascii_bytes")]
+    #[test_case(br#"\\\""# => "\\\""; "collapses_backslash_pair_before_quote")]
+    fn decodes_string_literal_contents(src: &[u8]) -> String {
         let mut out = Vec::new();
         write_string_literal(src, 0..src.len(), &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 
-    #[test_case(b"{{ 42 }}" => Value::Int(42) ; "int_pos")]
-    #[test_case(b"{{ -7 }}" => Value::Int(-7) ; "int_neg")]
-    #[test_case(b"{{ true }}" => Value::Bool(true) ; "bool_true")]
-    #[test_case(b"{{ false }}" => Value::Bool(false) ; "bool_false")]
-    #[test_case(b"{{ \"x\" }}" => Value::Str("x".to_string()) ; "str_basic")]
-    #[test_case(br#"{{ "a\"b\\c" }}"# => Value::Str("a\"b\\c".to_string()) ; "str_escapes")]
-    #[test_case(b"{{ \"a\nb\" }}" => Value::Str("a\nb".to_string()) ; "str_raw_newline")]
-    #[test_case(b"{{ [] }}" => Value::List(vec![]) ; "list_empty")]
-    #[test_case(b"{{ [1, \"x\", true] }}" => Value::List(vec![Value::Int(1), Value::Str("x".to_string()), Value::Bool(true)]) ; "list_heterogeneous")]
-    #[test_case(b"{{ [[1, 2], []] }}" => Value::List(vec![Value::List(vec![Value::Int(1), Value::Int(2)]), Value::List(vec![])]) ; "list_nested")]
-    #[test_case(b"{{ str }}" => Value::Str("foobar".to_string()) ; "var_str")]
-    #[test_case(b"{{ num }}" => Value::Int(42) ; "var_int")]
-    #[test_case(b"{{ yes }}" => Value::Bool(true) ; "var_bool")]
-    #[test_case(b"{{ list }}" => Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]) ; "var_list")]
-    #[test_case(b"{{ map.key }}" => Value::Str("value".to_string()) ; "dot_map_key")]
-    #[test_case(b"{{ map.nested.nested }}" => Value::Str("value".to_string()) ; "dot_nested")]
-    #[test_case(b"{{ list.0 }}" => Value::Int(1) ; "index_first")]
-    #[test_case(b"{{ list.2 }}" => Value::Int(3) ; "index_last")]
-    #[test_case(b"{{ same([10, 20]).1 }}" => Value::Int(20) ; "index_on_call")]
-    #[test_case(b"{{ same(\"z\") }}" => Value::Str("z".to_string()) ; "call_same")]
-    #[test_case(b"{{ foo(\"a\", \"b\") }}" => Value::Str("bar".to_string()) ; "call_foo")]
-    #[test_case(b"{{ foo() }}" => Value::Str("bar".to_string()) ; "call_zero_args")]
-    #[test_case(b"{{ same(same(\"deep\")) }}" => Value::Str("deep".to_string()) ; "call_nested")]
-    fn eval_success(src: &[u8]) -> Value {
+    #[test_case(b"{{ 42 }}" => Value::Int(42) ; "evaluates_positive_integer")]
+    #[test_case(b"{{ -7 }}" => Value::Int(-7) ; "evaluates_negative_integer")]
+    #[test_case(b"{{ true }}" => Value::Bool(true) ; "evaluates_true_boolean")]
+    #[test_case(b"{{ false }}" => Value::Bool(false) ; "evaluates_false_boolean")]
+    #[test_case(b"{{ \"x\" }}" => Value::Str("x".to_string()) ; "evaluates_plain_string")]
+    #[test_case(br#"{{ "a\"b\\c" }}"# => Value::Str("a\"b\\c".to_string()) ; "evaluates_escaped_string")]
+    #[test_case(b"{{ \"a\nb\" }}" => Value::Str("a\nb".to_string()) ; "evaluates_string_with_raw_newline")]
+    #[test_case(b"{{ [] }}" => Value::List(vec![]) ; "evaluates_empty_list")]
+    #[test_case(b"{{ [1, \"x\", true] }}" => Value::List(vec![Value::Int(1), Value::Str("x".to_string()), Value::Bool(true)]) ; "evaluates_heterogeneous_list")]
+    #[test_case(b"{{ [[1, 2], []] }}" => Value::List(vec![Value::List(vec![Value::Int(1), Value::Int(2)]), Value::List(vec![])]) ; "evaluates_nested_list")]
+    #[test_case(b"{{ str }}" => Value::Str("foobar".to_string()) ; "evaluates_string_variable")]
+    #[test_case(b"{{ num }}" => Value::Int(42) ; "evaluates_integer_variable")]
+    #[test_case(b"{{ yes }}" => Value::Bool(true) ; "evaluates_boolean_variable")]
+    #[test_case(b"{{ list }}" => Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]) ; "evaluates_list_variable")]
+    #[test_case(b"{{ map.key }}" => Value::Str("value".to_string()) ; "evaluates_map_field_access")]
+    #[test_case(b"{{ map.nested.nested }}" => Value::Str("value".to_string()) ; "evaluates_nested_field_access")]
+    #[test_case(b"{{ list.0 }}" => Value::Int(1) ; "evaluates_first_element_index")]
+    #[test_case(b"{{ list.2 }}" => Value::Int(3) ; "evaluates_last_element_index")]
+    #[test_case(b"{{ same([10, 20]).1 }}" => Value::Int(20) ; "evaluates_index_of_function_result")]
+    #[test_case(b"{{ same(\"z\") }}" => Value::Str("z".to_string()) ; "evaluates_identity_function_call")]
+    #[test_case(b"{{ foo(\"a\", \"b\") }}" => Value::Str("bar".to_string()) ; "evaluates_constant_function_call")]
+    #[test_case(b"{{ foo() }}" => Value::Str("bar".to_string()) ; "evaluates_zero_argument_function_call")]
+    #[test_case(b"{{ same(same(\"deep\")) }}" => Value::Str("deep".to_string()) ; "evaluates_nested_function_call")]
+    fn evaluates_expressions(src: &[u8]) -> Value {
         let vars = var_scope();
         let scope = Scope::new(&vars);
         eval(&interp_expr(src), src, &scope, &TestRegistry).unwrap()
     }
 
-    #[test_case(b"{{ missing }}" => RenderError::UndefinedVariable { name:"missing".to_string(), span: (3, 7).into() } ; "undefined_variable")]
-    #[test_case(b"{{ map.nope }}" => RenderError::MapKeyNotFound { key: "nope".into(), span: (7, 4).into() } ; "map_key_not_found")]
-    #[test_case(b"{{ num.field }}" => RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Int, span: (3, 3).into() } ; "map_access_on_int")]
-    #[test_case(b"{{ yes.field }}" => RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Bool, span: (3, 3).into() } ; "map_access_on_bool")]
-    #[test_case(b"{{ list.field }}" => RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::List, span: (3, 4).into() } ; "map_access_on_list")]
-    #[test_case(b"{{ [str].0.field }}" => RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Str, span: (3, 7).into() } ; "map_access_on_str_nested_in_literal_list")]
-    #[test_case(b"{{ \"s\".0 }}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str, span: (3, 3).into() } ; "list_access_on_str")]
-    #[test_case(b"{{ map.0 }}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Map, span: (3, 3).into() } ; "list_access_on_map")]
-    #[test_case(b"{{ map.key.0 }}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str, span: (3, 7).into() } ; "list_access_on_nested_map")]
-    #[test_case(b"{{ list.3 }}" => RenderError::ListIndexOutOfBounds { idx: 3, len: 3, span: (8, 1).into() } ; "index_out_of_bounds")]
-    #[test_case(b"{{ list.-1 }}" => RenderError::NegativeListIndex { idx: -1, span: (8, 2).into() } ; "negative_index")]
-    #[test_case(b"{{ nope() }}" => RenderError::FunctionUndefined { name: "nope".into(), span: (3, 4).into() } ; "undefined_function")]
-    #[test_case(b"{{ one_arg() }}" => RenderError::FunctionArgCount { expected: 1, got: 0, span: (10, 2).into() } ; "zero_in_one_arg")]
-    #[test_case(b"{{ one_arg(1, 2) }}" => RenderError::FunctionArgCount { expected: 1, got: 2, span: (12, 3).into() } ; "two_in_one_arg")]
-    #[test_case(b"{{ two_arg(1) }}" => RenderError::FunctionArgCount { expected: 2, got: 1, span: (12, 1).into() } ; "one_in_two_arg")]
-    #[test_case(b"{{ mismatch(12) }}" => RenderError::TypeMismatch { expected: ValueType::Str, got: ValueType::Int, span: (12, 2).into() } ; "type_mismatch_arg")]
-    #[test_case(b"{{ custom(1, 2) }}" => RenderError::Function { msg: "arguments must not match".into(), spans: vec![(10, 1).into(), (13, 1).into()] } ; "custom_error")]
-    #[test_case(b"{{ custom_empty() }}" => RenderError::Function { msg: "custom error with no flagged arguments".into(), spans: vec![(3, 14).into()] } ; "custom_error_no_arg_indexes")]
-    fn eval_render(src: &[u8]) -> RenderError {
+    #[test_case(b"{{ missing }}" => RenderError::UndefinedVariable { name:"missing".to_string(), span: (3, 7).into() } ; "errors_on_undefined_variable")]
+    #[test_case(b"{{ map.nope }}" => RenderError::MapKeyNotFound { key: "nope".into(), span: (7, 4).into() } ; "errors_on_missing_map_key")]
+    #[test_case(b"{{ num.field }}" => RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Int, span: (3, 3).into() } ; "rejects_field_access_on_int")]
+    #[test_case(b"{{ yes.field }}" => RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Bool, span: (3, 3).into() } ; "rejects_field_access_on_bool")]
+    #[test_case(b"{{ list.field }}" => RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::List, span: (3, 4).into() } ; "rejects_field_access_on_list")]
+    #[test_case(b"{{ [str].0.field }}" => RenderError::TypeMismatch { expected: ValueType::Map, got: ValueType::Str, span: (3, 7).into() } ; "rejects_field_access_on_str_list_element")]
+    #[test_case(b"{{ \"s\".0 }}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str, span: (3, 3).into() } ; "rejects_index_access_on_str")]
+    #[test_case(b"{{ map.0 }}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Map, span: (3, 3).into() } ; "rejects_index_access_on_map")]
+    #[test_case(b"{{ map.key.0 }}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str, span: (3, 7).into() } ; "rejects_index_access_on_field_value")]
+    #[test_case(b"{{ list.3 }}" => RenderError::ListIndexOutOfBounds { idx: 3, len: 3, span: (8, 1).into() } ; "rejects_out_of_bounds_index")]
+    #[test_case(b"{{ list.-1 }}" => RenderError::NegativeListIndex { idx: -1, span: (8, 2).into() } ; "rejects_negative_index")]
+    #[test_case(b"{{ nope() }}" => RenderError::FunctionUndefined { name: "nope".into(), span: (3, 4).into() } ; "errors_on_undefined_function")]
+    #[test_case(b"{{ one_arg() }}" => RenderError::FunctionArgCount { expected: 1, got: 0, span: (10, 2).into() } ; "rejects_missing_required_argument")]
+    #[test_case(b"{{ one_arg(1, 2) }}" => RenderError::FunctionArgCount { expected: 1, got: 2, span: (12, 3).into() } ; "rejects_extra_argument")]
+    #[test_case(b"{{ two_arg(1) }}" => RenderError::FunctionArgCount { expected: 2, got: 1, span: (12, 1).into() } ; "rejects_too_few_arguments")]
+    #[test_case(b"{{ mismatch(12) }}" => RenderError::TypeMismatch { expected: ValueType::Str, got: ValueType::Int, span: (12, 2).into() } ; "rejects_wrong_argument_type")]
+    #[test_case(b"{{ custom(1, 2) }}" => RenderError::Function { msg: "arguments must not match".into(), spans: vec![(10, 1).into(), (13, 1).into()] } ; "reports_custom_error_over_flagged_arguments")]
+    #[test_case(b"{{ custom_empty() }}" => RenderError::Function { msg: "custom error with no flagged arguments".into(), spans: vec![(3, 14).into()] } ; "reports_custom_error_over_call_span")]
+    fn errors_on_invalid_expressions(src: &[u8]) -> RenderError {
         let vars = var_scope();
         let scope = Scope::new(&vars);
         match eval(&interp_expr(src), src, &scope, &TestRegistry).unwrap_err() {
@@ -505,26 +505,26 @@ mod tests {
         }
     }
 
-    #[test_case(b"{% if yes %}Y{% end %}" => "Y"; "if_true")]
-    #[test_case(b"{% if no %}Y{% else %}N{% end %}" => "N"; "if_false")]
-    #[test_case(b"{% if no %}A{% elif yes %}B{% else %}C{% end %}" => "B"; "if_elif")]
-    #[test_case(b"{% if yes %}{% if yes %}ok{% end %}{% end %}" => "ok"; "nested_if")]
-    #[test_case(b"{% for x in list %}{{x}},{% end %}" => "1,2,3,"; "for_list_var")]
-    #[test_case(b"{% for x in [10, 20] %}{{x}};{% end %}" => "10;20;"; "for_list_literal")]
-    #[test_case(b"{% for x in same([\"a\", \"b\"]) %}{{x}}{% end %}" => "ab"; "for_fn_call")]
-    #[test_case(b"{% for x in list %}{{ str }}{% end %}" => "foobarfoobarfoobar"; "for_uses_outer_var")]
-    #[test_case(b"{% for str in list %}{{str}}{% end %}" => "123"; "for_shadows_outer_var")]
-    #[test_case(b"{% for str in list %}{{str}}{% end %}{{str}}" => "123foobar"; "for_restores_after_end")]
-    #[test_case(b"{% for x in empty_list %}{{x}}{% end %}after" => "after"; "for_empty_iterable_silent")]
-    #[test_case(b"{% if false %}{% for x in [1] %}{{ missing }}{% end %}{% end %}" => ""; "for_in_untaken_branch_silent")]
-    fn eval_body(src: &[u8]) -> String {
+    #[test_case(b"{% if yes %}Y{% end %}" => "Y"; "renders_true_branch")]
+    #[test_case(b"{% if no %}Y{% else %}N{% end %}" => "N"; "renders_else_branch_when_false")]
+    #[test_case(b"{% if no %}A{% elif yes %}B{% else %}C{% end %}" => "B"; "renders_taken_elif_branch")]
+    #[test_case(b"{% if yes %}{% if yes %}ok{% end %}{% end %}" => "ok"; "renders_nested_if_branches")]
+    #[test_case(b"{% for x in list %}{{x}},{% end %}" => "1,2,3,"; "iterates_list_variable")]
+    #[test_case(b"{% for x in [10, 20] %}{{x}};{% end %}" => "10;20;"; "iterates_list_literal")]
+    #[test_case(b"{% for x in same([\"a\", \"b\"]) %}{{x}}{% end %}" => "ab"; "iterates_list_from_function_call")]
+    #[test_case(b"{% for x in list %}{{ str }}{% end %}" => "foobarfoobarfoobar"; "loop_body_reads_outer_variable")]
+    #[test_case(b"{% for str in list %}{{str}}{% end %}" => "123"; "loop_variable_shadows_outer_binding")]
+    #[test_case(b"{% for str in list %}{{str}}{% end %}{{str}}" => "123foobar"; "outer_binding_restored_after_loop")]
+    #[test_case(b"{% for x in empty_list %}{{x}}{% end %}after" => "after"; "empty_iterable_renders_nothing")]
+    #[test_case(b"{% if false %}{% for x in [1] %}{{ missing }}{% end %}{% end %}" => ""; "skips_for_body_in_untaken_branch")]
+    fn renders_if_and_for_bodies(src: &[u8]) -> String {
         render(src, &var_scope()).unwrap()
     }
 
-    #[test_case(b"{% if str %}x{% end %}" => RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Str, span: (6, 3).into() } ; "if_cond_str")]
-    #[test_case(b"{% if no %}{% elif num %}x{% end %}" => RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Int, span: (19, 3).into() } ; "elif_cond_int")]
-    #[test_case(b"{% for x in str %}{{x}}{% end %}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str, span: (12, 3).into() } ; "for_iterable_str")]
-    fn eval_body_error(src: &[u8]) -> RenderError {
+    #[test_case(b"{% if str %}x{% end %}" => RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Str, span: (6, 3).into() } ; "rejects_string_if_condition")]
+    #[test_case(b"{% if no %}{% elif num %}x{% end %}" => RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Int, span: (19, 3).into() } ; "rejects_integer_elif_condition")]
+    #[test_case(b"{% for x in str %}{{x}}{% end %}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str, span: (12, 3).into() } ; "rejects_string_for_iterable")]
+    fn errors_on_invalid_control_flow_types(src: &[u8]) -> RenderError {
         match render(src, &var_scope()).unwrap_err() {
             Error::Render(err) => err,
             _ => panic!("expected Render error"),

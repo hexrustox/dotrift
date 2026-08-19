@@ -903,125 +903,125 @@ mod tests {
     }
 
     // -- string literals --
-    #[test_case(br#""""# => expr!(str 3..3, 2..4) ; "empty_string")]
-    #[test_case(b"\"hi\"" => expr!(str 3..5, 2..6) ; "string_literal")]
-    #[test_case(b"\"a\\\"b\"" => expr!(str 3..7, 2..8) ; "string_with_double_quote_escape")]
-    #[test_case(b"\"a\\\\b\"" => expr!(str 3..7, 2..8) ; "string_with_backslash_escape")]
-    #[test_case(b"\"\\n\"" => expr!(str 3..5, 2..6) ; "string_unknown_escape_preserved")]
-    #[test_case(b"\"line1\nline2\"" => expr!(str 3..14, 2..15) ; "string_multiline")]
-    #[test_case(b"\"{{x}}\"" => expr!(str 3..8, 2..9) ; "string_shields_delimiters")]
+    #[test_case(br#""""# => expr!(str 3..3, 2..4) ; "empty_string_literal")]
+    #[test_case(b"\"hi\"" => expr!(str 3..5, 2..6) ; "plain_string_literal")]
+    #[test_case(b"\"a\\\"b\"" => expr!(str 3..7, 2..8) ; "string_with_escaped_quote")]
+    #[test_case(b"\"a\\\\b\"" => expr!(str 3..7, 2..8) ; "string_with_escaped_backslash")]
+    #[test_case(b"\"\\n\"" => expr!(str 3..5, 2..6) ; "unknown_escape_sequence_preserved")]
+    #[test_case(b"\"line1\nline2\"" => expr!(str 3..14, 2..15) ; "multiline_string_literal")]
+    #[test_case(b"\"{{x}}\"" => expr!(str 3..8, 2..9) ; "delimiters_inside_string_ignored")]
     // -- integer literals --
-    #[test_case(b"0" => expr!(int 0, 2..3) ; "integer_zero")]
-    #[test_case(b"42" => expr!(int 42, 2..4) ; "integer")]
+    #[test_case(b"0" => expr!(int 0, 2..3) ; "zero")]
+    #[test_case(b"42" => expr!(int 42, 2..4) ; "positive_integer")]
     #[test_case(b" -0" => expr!(int 0, 3..5) ; "negative_zero")]
     #[test_case(b" -7" => expr!(int -7, 3..5) ; "negative_integer")]
-    #[test_case(b"007" => expr!(int 7, 2..5) ; "leading_zeros_decimal")]
-    #[test_case(b"9223372036854775807" => expr!(int 9223372036854775807, 2..21) ; "max_i64")]
-    #[test_case(b" -9223372036854775808" => expr!(int -9223372036854775808, 3..23) ; "min_i64")]
+    #[test_case(b"007" => expr!(int 7, 2..5) ; "leading_zeroes_as_decimal")]
+    #[test_case(b"9223372036854775807" => expr!(int 9223372036854775807, 2..21) ; "i64_max_value")]
+    #[test_case(b" -9223372036854775808" => expr!(int -9223372036854775808, 3..23) ; "i64_min_value")]
     // -- boolean literals --
-    #[test_case(b"true" => expr!(bool true, 2..6) ; "bool_true")]
-    #[test_case(b"false" => expr!(bool false, 2..7) ; "bool_false")]
+    #[test_case(b"true" => expr!(bool true, 2..6) ; "true_literal")]
+    #[test_case(b"false" => expr!(bool false, 2..7) ; "false_literal")]
     // -- variables / identifiers --
-    #[test_case(b"x" => expr!(var 2..3) ; "variable")]
-    #[test_case(b"_foo" => expr!(var 2..6) ; "variable_underscore_start")]
-    #[test_case(b"var123" => expr!(var 2..8) ; "identifier_with_digits")]
-    #[test_case(b"_foo_bar" => expr!(var 2..10) ; "identifier_multi_underscore")]
+    #[test_case(b"x" => expr!(var 2..3) ; "single_letter_identifier")]
+    #[test_case(b"_foo" => expr!(var 2..6) ; "underscore_prefixed_identifier")]
+    #[test_case(b"var123" => expr!(var 2..8) ; "identifier_with_embedded_digits")]
+    #[test_case(b"_foo_bar" => expr!(var 2..10) ; "identifier_with_inner_underscores")]
     #[test_case(b"_foo123" => expr!(var 2..9) ; "identifier_with_trailing_digits")]
-    #[test_case(b"true0" => expr!(var 2..7) ; "identifier_that_is_keyword_prefix")]
+    #[test_case(b"true0" => expr!(var 2..7) ; "identifier_sharing_keyword_prefix")]
     // -- dot access --
-    #[test_case(b"obj.field" => expr!(dot expr!(var 2..5), 6..11) ; "dot_access")]
-    #[test_case(b"a.b.c" => expr!(dot expr!(dot expr!(var 2..3), 4..5), 6..7) ; "chained_dot")]
+    #[test_case(b"obj.field" => expr!(dot expr!(var 2..5), 6..11) ; "dot_field_access")]
+    #[test_case(b"a.b.c" => expr!(dot expr!(dot expr!(var 2..3), 4..5), 6..7) ; "chained_dot_access")]
     #[test_case(b"\"s\".length" => expr!(dot expr!(str 3..4, 2..5), 6..12) ; "dot_access_on_string_literal")]
     // -- indexing --
-    #[test_case(b"list.0" => expr!(idx expr!(var 2..6), 0, 7..8) ; "integer_index")]
-    #[test_case(b"list.-1" => expr!(idx expr!(var 2..6), -1, 7..9) ; "negative_index")]
-    #[test_case(b"a.0.b" => expr!(dot expr!(idx expr!(var 2..3), 0, 4..5), 6..7) ; "index_then_dot")]
-    #[test_case(b"obj.a.b.0" => expr!(idx expr!(dot expr!(dot expr!(var 2..5), 6..7), 8..9), 0, 10..11) ; "deep_chain_ending_index")]
+    #[test_case(b"list.0" => expr!(idx expr!(var 2..6), 0, 7..8) ; "integer_index_access")]
+    #[test_case(b"list.-1" => expr!(idx expr!(var 2..6), -1, 7..9) ; "negative_index_access")]
+    #[test_case(b"a.0.b" => expr!(dot expr!(idx expr!(var 2..3), 0, 4..5), 6..7) ; "index_then_dot_access")]
+    #[test_case(b"obj.a.b.0" => expr!(idx expr!(dot expr!(dot expr!(var 2..5), 6..7), 8..9), 0, 10..11) ; "deep_chain_ending_in_index")]
     // -- function calls: basic --
-    #[test_case(b"fn()" => expr!(call 2..4, 4..6) ; "zero_arg_call")]
-    #[test_case(b"f(a,b)" => expr!(call 2..3, 3..8, expr!(var 4..5), expr!(var 6..7)) ; "call_no_whitespace")]
-    #[test_case(b"f(a, b)" => expr!(call 2..3, 3..9, expr!(var 4..5), expr!(var 7..8)) ; "two_arg_call")]
-    #[test_case(b"f( a , b )" => expr!(call 2..3, 3..12, expr!(var 5..6), expr!(var 9..10)) ; "call_whitespace_inside_parens")]
-    #[test_case(b"f\n()" => expr!(call 2..3, 4..6) ; "call_newline_before_paren")]
-    #[test_case(b"fn ( )" => expr!(call 2..4, 5..8) ; "call_whitespace_between_name_and_parens")]
-    #[test_case(b"f(-1)" => expr!(call 2..3, 3..7, expr!(int -1, 4..6)) ; "call_negative_argument")]
-    #[test_case(b"join(\":\", a, b)" => expr!(call 2..6, 6..17, expr!(str 8..9, 7..10), expr!(var 12..13), expr!(var 15..16)) ; "call_mixed_literal_var")]
+    #[test_case(b"fn()" => expr!(call 2..4, 4..6) ; "zero_argument_call")]
+    #[test_case(b"f(a,b)" => expr!(call 2..3, 3..8, expr!(var 4..5), expr!(var 6..7)) ; "call_without_whitespace")]
+    #[test_case(b"f(a, b)" => expr!(call 2..3, 3..9, expr!(var 4..5), expr!(var 7..8)) ; "two_argument_call")]
+    #[test_case(b"f( a , b )" => expr!(call 2..3, 3..12, expr!(var 5..6), expr!(var 9..10)) ; "call_with_whitespace_inside_parens")]
+    #[test_case(b"f\n()" => expr!(call 2..3, 4..6) ; "newline_before_paren")]
+    #[test_case(b"fn ( )" => expr!(call 2..4, 5..8) ; "space_between_name_and_paren")]
+    #[test_case(b"f(-1)" => expr!(call 2..3, 3..7, expr!(int -1, 4..6)) ; "call_with_negative_argument")]
+    #[test_case(b"join(\":\", a, b)" => expr!(call 2..6, 6..17, expr!(str 8..9, 7..10), expr!(var 12..13), expr!(var 15..16)) ; "call_with_mixed_argument_types")]
     // -- function calls: nesting --
-    #[test_case(b"eq(gt(x, 3), y)" => expr!(call 2..4, 4..17, expr!(call 5..7, 7..13, expr!(var 8..9), expr!(int 3, 11..12)), expr!(var 15..16)) ; "nested_call")]
+    #[test_case(b"eq(gt(x, 3), y)" => expr!(call 2..4, 4..17, expr!(call 5..7, 7..13, expr!(var 8..9), expr!(int 3, 11..12)), expr!(var 15..16)) ; "nested_call_as_argument")]
     #[test_case(b"f(g(h(x)))" => expr!(call 2..3, 3..12, expr!(call 4..5, 5..11, expr!(call 6..7, 7..10, expr!(var 8..9)))) ; "deeply_nested_calls")]
     // -- function calls: postfix --
-    #[test_case(b"fn().field" => expr!(dot expr!(call 2..4, 4..6), 7..12) ; "call_then_dot")]
-    #[test_case(b"fn().0" => expr!(idx expr!(call 2..4, 4..6), 0, 7..8) ; "call_then_index")]
+    #[test_case(b"fn().field" => expr!(dot expr!(call 2..4, 4..6), 7..12) ; "dot_access_on_call_result")]
+    #[test_case(b"fn().0" => expr!(idx expr!(call 2..4, 4..6), 0, 7..8) ; "index_access_on_call_result")]
     // -- lists: basic --
     #[test_case(b"[]" => expr!(list 2..4;) ; "empty_list")]
-    #[test_case(b"[x]" => expr!(list 2..5; expr!(var 3..4)) ; "list_single_element")]
-    #[test_case(b"[a, b]" => expr!(list 2..8; expr!(var 3..4), expr!(var 6..7)) ; "list_two_elements")]
-    #[test_case(b"[\"x\", 42]" => expr!(list 2..11; expr!(str 4..5, 3..6), expr!(int 42, 8..10)) ; "list_mixed")]
-    #[test_case(b"[true, false]" => expr!(list 2..15; expr!(bool true, 3..7), expr!(bool false, 9..14)) ; "list_boolean_literals")]
-    #[test_case(b"[-1, 2]" => expr!(list 2..9; expr!(int -1, 3..5), expr!(int 2, 7..8)) ; "list_negative_integers")]
+    #[test_case(b"[x]" => expr!(list 2..5; expr!(var 3..4)) ; "single_element_list")]
+    #[test_case(b"[a, b]" => expr!(list 2..8; expr!(var 3..4), expr!(var 6..7)) ; "two_element_list")]
+    #[test_case(b"[\"x\", 42]" => expr!(list 2..11; expr!(str 4..5, 3..6), expr!(int 42, 8..10)) ; "list_with_mixed_literal_types")]
+    #[test_case(b"[true, false]" => expr!(list 2..15; expr!(bool true, 3..7), expr!(bool false, 9..14)) ; "list_of_boolean_literals")]
+    #[test_case(b"[-1, 2]" => expr!(list 2..9; expr!(int -1, 3..5), expr!(int 2, 7..8)) ; "list_containing_negative_integer")]
     // -- lists: whitespace --
-    #[test_case(b"[  ]" => expr!(list 2..6;) ; "empty_list_with_spaces")]
-    #[test_case(b"[\"a\" , \"b\"]" => expr!(list 2..13; expr!(str 4..5, 3..6), expr!(str 10..11, 9..12)) ; "list_whitespace_inside")]
-    #[test_case(b"[\n a,\n b\n]" => expr!(list 2..12; expr!(var 5..6), expr!(var 9..10)) ; "list_multiline")]
+    #[test_case(b"[  ]" => expr!(list 2..6;) ; "empty_list_with_inner_whitespace")]
+    #[test_case(b"[\"a\" , \"b\"]" => expr!(list 2..13; expr!(str 4..5, 3..6), expr!(str 10..11, 9..12)) ; "list_with_whitespace_around_comma")]
+    #[test_case(b"[\n a,\n b\n]" => expr!(list 2..12; expr!(var 5..6), expr!(var 9..10)) ; "multiline_list_literal")]
     // -- lists: nesting --
-    #[test_case(b"[[]]" => expr!(list 2..6; expr!(list 3..5;)) ; "nested_list")]
-    #[test_case(b"[a, [b, c], d]" => expr!(list 2..16; expr!(var 3..4), expr!(list 6..12; expr!(var 7..8), expr!(var 10..11)), expr!(var 14..15)) ; "list_nested_nonempty")]
-    #[test_case(b"[[a], [b]]" => expr!(list 2..12; expr!(list 3..6; expr!(var 4..5)), expr!(list 8..11; expr!(var 9..10))) ; "list_of_lists")]
+    #[test_case(b"[[]]" => expr!(list 2..6; expr!(list 3..5;)) ; "nested_empty_list")]
+    #[test_case(b"[a, [b, c], d]" => expr!(list 2..16; expr!(var 3..4), expr!(list 6..12; expr!(var 7..8), expr!(var 10..11)), expr!(var 14..15)) ; "list_containing_nested_list")]
+    #[test_case(b"[[a], [b]]" => expr!(list 2..12; expr!(list 3..6; expr!(var 4..5)), expr!(list 8..11; expr!(var 9..10))) ; "list_of_element_lists")]
     #[test_case(b"[[],[]]" => expr!(list 2..9; expr!(list 3..5;), expr!(list 6..8;)) ; "list_of_two_empty_lists")]
     // -- body trimming --
-    #[test_case(b"  x  " => expr!(var 4..5) ; "trimmed_whitespace_body")]
-    #[test_case(b"\n x \n" => expr!(var 4..5) ; "trimmed_multiline_body")]
-    fn parse_interp(src: &[u8]) -> Expr {
+    #[test_case(b"  x  " => expr!(var 4..5) ; "whitespace_padded_body")]
+    #[test_case(b"\n x \n" => expr!(var 4..5) ; "newline_padded_body")]
+    fn parses_interp_expressions(src: &[u8]) -> Expr {
         interp_expr(src)
     }
 
     #[test_case(b"{% if yes %}Y{% end %}" => Node::If {
         branches: vec![Branch { cond: expr!(var 6..9), body: vec![Node::Text(12..13)] }],
         else_body: None,
-    } ; "if_simple")]
+    } ; "if_block_with_text_body")]
     #[test_case(b"{% if yes %}Y{% else %}N{% end %}" => Node::If {
         branches: vec![Branch { cond: expr!(var 6..9), body: vec![Node::Text(12..13)] }],
         else_body: Some(vec![Node::Text(23..24)]),
-    } ; "if_with_else")]
+    } ; "if_block_with_else_body")]
     #[test_case(b"{% if true %}{% else %}{% end %}" => Node::If {
         branches: vec![Branch { cond: expr!(bool true, 6..10), body: vec![] }],
         else_body: Some(vec![]),
-    } ; "if_empty_else")]
+    } ; "if_block_with_empty_else_body")]
     #[test_case(b"{% for x in list %}{% end %}" => Node::For {
         var: 7..8,
         iter: expr!(var 12..16),
         body: vec![],
-    } ; "for_empty_body")]
+    } ; "for_block_with_empty_body")]
     #[test_case(b"{% for x in list %}hello{% end %}" => Node::For {
         var: 7..8,
         iter: expr!(var 12..16),
         body: vec![Node::Text(19..24)],
-    } ; "for_text_body")]
+    } ; "for_block_with_text_body")]
     #[test_case(b"{% for x in f() %}{% end %}" => Node::For {
         var: 7..8,
         iter: expr!(call 12..13, 13..15),
         body: vec![],
-    } ; "for_funcall_iterable")]
+    } ; "for_block_with_fn_call_iterable")]
     #[test_case(b"{% for x in [1, 2] %}{{x}}{% end %}" => Node::For {
         var: 7..8,
         iter: expr!(list 12..18; expr!(int 1, 13..14), expr!(int 2, 16..17)),
         body: vec![Node::Interpolate(expr!(var 23..24))],
-    } ; "for_list_literal_iterable")]
+    } ; "for_block_with_list_literal_iterable")]
     #[test_case(b"{% if true %}{% end %}" => Node::If {
         branches: vec![Branch { cond: expr!(bool true, 6..10), body: vec![] }],
         else_body: None,
-    } ; "if_only_bool_true")]
+    } ; "if_block_with_bool_condition")]
     #[test_case(b"{% if true %}{{x}}{% end %}" => Node::If {
         branches: vec![Branch { cond: expr!(bool true, 6..10), body: vec![Node::Interpolate(expr!(var 15..16))] }],
         else_body: None,
-    } ; "if_only_with_interpolation")]
+    } ; "if_block_with_interp_body")]
     #[test_case(b"{% if no %}A{% elif yes %}B{% end %}" => Node::If {
         branches: vec![
             Branch { cond: expr!(var 6..8), body: vec![Node::Text(11..12)] },
             Branch { cond: expr!(var 20..23), body: vec![Node::Text(26..27)] },
         ],
         else_body: None,
-    } ; "if_elif")]
+    } ; "if_block_with_elif_clause")]
     #[test_case(b"{% if a %}{% elif b %}{% elif c %}{% end %}" => Node::If {
         branches: vec![
             Branch { cond: expr!(var 6..7), body: vec![] },
@@ -1029,7 +1029,7 @@ mod tests {
             Branch { cond: expr!(var 30..31), body: vec![] },
         ],
         else_body: None,
-    } ; "if_multiple_elif_empty_bodies")]
+    } ; "if_block_with_multiple_elif_clauses")]
     #[test_case(b"{% if a %}A{% elif b %}B{% elif c %}C{% else %}D{% end %}" => Node::If {
         branches: vec![
             Branch { cond: expr!(var 6..7), body: vec![Node::Text(10..11)] },
@@ -1037,7 +1037,7 @@ mod tests {
             Branch { cond: expr!(var 32..33), body: vec![Node::Text(36..37)] }
         ],
         else_body: Some(vec![Node::Text(47..48)]),
-    } ; "if_multi_elif_with_else")]
+    } ; "if_block_with_multiple_elif_and_else")]
     #[test_case(b"{% if a %}{% if b %}{% end %}{% end %}" => Node::If {
         branches: vec![Branch { cond: expr!(var 6..7), body: vec![
             Node::If {
@@ -1046,7 +1046,7 @@ mod tests {
             }
         ] }],
         else_body: None,
-    } ; "if_nested_if")]
+    } ; "if_block_nested_inside_if_body")]
     #[test_case(b"{% for x in list %}{% if true %}{{ x }}{% end %}{% end %}" => Node::For {
         var: 7..8,
         iter: expr!(var 12..16),
@@ -1057,120 +1057,120 @@ mod tests {
             }],
             else_body: None,
         }],
-    } ; "for_with_nested_if")]
-    fn parse_stmt_node(src: &[u8]) -> Node {
+    } ; "for_block_containing_nested_if")]
+    fn parses_stmt_blocks(src: &[u8]) -> Node {
         first_node(src)
     }
 
     // -- empty / whitespace --
-    #[test_case(b"" => ParseError::EmptyInterpolation { span: (0, 4).into() } ; "empty_interp")]
-    #[test_case(b" " => ParseError::EmptyInterpolation { span: (0, 5).into() } ; "empty_interp_spaces")]
-    #[test_case(b" \n " => ParseError::EmptyInterpolation { span: (0, 7).into() } ; "empty_interp_newlines")]
+    #[test_case(b"" => ParseError::EmptyInterpolation { span: (0, 4).into() } ; "empty_interp_body")]
+    #[test_case(b" " => ParseError::EmptyInterpolation { span: (0, 5).into() } ; "whitespace_only_interp_body")]
+    #[test_case(b" \n " => ParseError::EmptyInterpolation { span: (0, 7).into() } ; "newline_only_interp_body")]
     // -- integer errors --
-    #[test_case(b"9223372036854775808" => ParseError::IntegerOutOfRange { span: (2, 19).into() } ; "int_overflow_pos")]
-    #[test_case(b" -9223372036854775809" => ParseError::IntegerOutOfRange { span: (3, 20).into() } ; "int_overflow_neg")]
+    #[test_case(b"9223372036854775808" => ParseError::IntegerOutOfRange { span: (2, 19).into() } ; "positive_integer_overflow")]
+    #[test_case(b" -9223372036854775809" => ParseError::IntegerOutOfRange { span: (3, 20).into() } ; "negative_integer_overflow")]
     #[test_case(b"+7" => ParseError::UnexpectedToken { span: (2, 1).into() } ; "plus_prefixed_integer")]
-    #[test_case(b" - 7" => ParseError::UnexpectedTokenAfterExpr { span: (5, 1).into() } ; "minus_sign_separated_from_digits")]
-    #[test_case(b"42x" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "int_immediately_followed_by_ident")]
+    #[test_case(b" - 7" => ParseError::UnexpectedTokenAfterExpr { span: (5, 1).into() } ; "minus_separated_from_digits")]
+    #[test_case(b"42x" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "integer_followed_by_identifier")]
     // -- string errors --
-    #[test_case(b"\"unterminated" => ParseError::UnclosedString { span: (2, 1).into() } ; "unclosed_string")]
+    #[test_case(b"\"unterminated" => ParseError::UnclosedString { span: (2, 1).into() } ; "unclosed_string_literal")]
     // -- reserved keywords --
-    #[test_case(b"if" => ParseError::ReservedKeyword { keyword: "if".into(), span: (2, 2).into() } ; "keyword_if")]
-    #[test_case(b"end" => ParseError::ReservedKeyword { keyword: "end".into(), span: (2, 3).into() } ; "keyword_end")]
-    #[test_case(b"in" => ParseError::ReservedKeyword { keyword: "in".into(), span: (2, 2).into() } ; "keyword_in_expr")]
-    #[test_case(b"elif" => ParseError::ReservedKeyword { keyword: "elif".into(), span: (2, 4).into() } ; "keyword_elif_expr")]
-    #[test_case(b"else" => ParseError::ReservedKeyword { keyword: "else".into(), span: (2, 4).into() } ; "keyword_else_expr")]
-    #[test_case(b"for" => ParseError::ReservedKeyword { keyword: "for".into(), span: (2, 3).into() } ; "keyword_for_expr")]
-    #[test_case(b"if()" => ParseError::ReservedKeyword { keyword: "if".into(), span: (2, 2).into() } ; "keyword_in_call_position")]
-    #[test_case(b"if(x)" => ParseError::ReservedKeyword { keyword: "if".into(), span: (2, 2).into() } ; "keyword_function_name")]
-    #[test_case(b"f(in)" => ParseError::ReservedKeyword { keyword: "in".into(), span: (4, 2).into() } ; "keyword_as_call_arg")]
+    #[test_case(b"if" => ParseError::ReservedKeyword { keyword: "if".into(), span: (2, 2).into() } ; "if_alone_rejected")]
+    #[test_case(b"end" => ParseError::ReservedKeyword { keyword: "end".into(), span: (2, 3).into() } ; "end_alone_rejected")]
+    #[test_case(b"in" => ParseError::ReservedKeyword { keyword: "in".into(), span: (2, 2).into() } ; "in_alone_rejected")]
+    #[test_case(b"elif" => ParseError::ReservedKeyword { keyword: "elif".into(), span: (2, 4).into() } ; "elif_alone_rejected")]
+    #[test_case(b"else" => ParseError::ReservedKeyword { keyword: "else".into(), span: (2, 4).into() } ; "else_alone_rejected")]
+    #[test_case(b"for" => ParseError::ReservedKeyword { keyword: "for".into(), span: (2, 3).into() } ; "for_alone_rejected")]
+    #[test_case(b"if()" => ParseError::ReservedKeyword { keyword: "if".into(), span: (2, 2).into() } ; "keyword_as_callable")]
+    #[test_case(b"if(x)" => ParseError::ReservedKeyword { keyword: "if".into(), span: (2, 2).into() } ; "keyword_as_function_name")]
+    #[test_case(b"f(in)" => ParseError::ReservedKeyword { keyword: "in".into(), span: (4, 2).into() } ; "keyword_as_call_argument")]
     #[test_case(b"[if]" => ParseError::ReservedKeyword { keyword: "if".into(), span: (3, 2).into() } ; "keyword_as_list_element")]
     // -- dot / index errors --
-    #[test_case(b"a." => ParseError::EmptyField { span: (3, 1).into() } ; "trailing_dot")]
+    #[test_case(b"a." => ParseError::EmptyField { span: (3, 1).into() } ; "trailing_dot_after_identifier")]
     #[test_case(b"a.- " => ParseError::UnexpectedToken { span: (4, 1).into() } ; "dash_space_after_dot")]
-    #[test_case(b"a.@" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "invalid_at_after_dot")]
+    #[test_case(b"a.@" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "invalid_char_after_dot")]
     // -- unexpected tokens after expression --
-    #[test_case(b"a b" => ParseError::UnexpectedTokenAfterExpr { span: (4, 1).into() } ; "unexpected_after_expr_var")]
-    #[test_case(b"42 7" => ParseError::UnexpectedTokenAfterExpr { span: (5, 1).into() } ; "unexpected_after_expr_int")]
-    #[test_case(b"@" => ParseError::UnexpectedToken { span: (2, 1).into() } ; "unexpected_token")]
-    #[test_case(b"var@" => ParseError::UnexpectedToken { span: (5, 1).into() } ; "unexpected_token_var_at")]
+    #[test_case(b"a b" => ParseError::UnexpectedTokenAfterExpr { span: (4, 1).into() } ; "whitespace_then_var_after_var")]
+    #[test_case(b"42 7" => ParseError::UnexpectedTokenAfterExpr { span: (5, 1).into() } ; "extra_integer_after_integer")]
+    #[test_case(b"@" => ParseError::UnexpectedToken { span: (2, 1).into() } ; "unsupported_leading_char")]
+    #[test_case(b"var@" => ParseError::UnexpectedToken { span: (5, 1).into() } ; "trailing_at_after_var")]
     // -- unclosed function calls --
-    #[test_case(b"f(" => ParseError::UnclosedFunction { span: (3, 1).into() } ; "unclosed_call_empty")]
-    #[test_case(b"f(a" => ParseError::UnclosedFunction { span: (3, 1).into() } ; "unclosed_call_paren")]
-    #[test_case(b"f(a, b" => ParseError::UnclosedFunction { span: (3, 1).into() } ; "unclosed_call_with_args")]
-    #[test_case(b"f(a@" => ParseError::UnexpectedToken { span: (5, 1).into() } ; "unexpected_token_in_call")]
-    #[test_case(b"f(,)" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "call_comma_with_no_arg")]
-    #[test_case(b"f(a b" => ParseError::UnexpectedTokenAfterExpr { span: (6, 1).into() } ; "call_missing_paren_with_extra_token")]
-    #[test_case(b"f(a,)" => ParseError::TrailingComma { span: (5, 1).into() } ; "trailing_comma_call")]
+    #[test_case(b"f(" => ParseError::UnclosedFunction { span: (3, 1).into() } ; "unclosed_call_with_no_args")]
+    #[test_case(b"f(a" => ParseError::UnclosedFunction { span: (3, 1).into() } ; "unclosed_call_with_arg")]
+    #[test_case(b"f(a, b" => ParseError::UnclosedFunction { span: (3, 1).into() } ; "unclosed_call_with_multiple_args")]
+    #[test_case(b"f(a@" => ParseError::UnexpectedToken { span: (5, 1).into() } ; "invalid_token_inside_call")]
+    #[test_case(b"f(,)" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "leading_comma_in_call")]
+    #[test_case(b"f(a b" => ParseError::UnexpectedTokenAfterExpr { span: (6, 1).into() } ; "missing_paren_with_extra_token")]
+    #[test_case(b"f(a,)" => ParseError::TrailingComma { span: (5, 1).into() } ; "trailing_comma_in_call")]
     // -- unclosed lists --
-    #[test_case(b"[" => ParseError::UnclosedList { span: (2, 1).into() } ; "unclosed_list_empty")]
+    #[test_case(b"[" => ParseError::UnclosedList { span: (2, 1).into() } ; "unclosed_list_with_no_elements")]
     #[test_case(b"[a" => ParseError::UnclosedList { span: (2, 1).into() } ; "unclosed_list_with_element")]
     #[test_case(b"[a, b" => ParseError::UnclosedList { span: (2, 1).into() } ; "unclosed_list_with_multiple_elements")]
-    #[test_case(b"[a@" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "unexpected_token_in_list")]
-    #[test_case(b"[a,]" => ParseError::TrailingComma { span: (4, 1).into() } ; "trailing_comma_list")]
-    #[test_case(b"[a b]" => ParseError::UnexpectedTokenAfterExpr { span: (5, 1).into() } ; "list_missing_comma")]
-    fn parse_interp_error(src: &[u8]) -> ParseError {
+    #[test_case(b"[a@" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "invalid_token_inside_list")]
+    #[test_case(b"[a,]" => ParseError::TrailingComma { span: (4, 1).into() } ; "trailing_comma_in_list")]
+    #[test_case(b"[a b]" => ParseError::UnexpectedTokenAfterExpr { span: (5, 1).into() } ; "missing_comma_between_elements")]
+    fn errors_parsing_interp(src: &[u8]) -> ParseError {
         expect_parse_error(&[b"{{", src, b"}}"].concat())
     }
 
     // -- empty / invalid statements --
-    #[test_case(b"" => ParseError::EmptyStatement { span: (0, 4).into() } ; "empty_statement")]
-    #[test_case(b" " => ParseError::EmptyStatement { span: (0, 5).into() } ; "whitespace_statement")]
-    #[test_case(b"@" => ParseError::UnrecognizedStatement { stmt: "@".into(), span: (2, 1).into() } ; "unrecognized_statement_at")]
-    #[test_case(b"ifx" => ParseError::UnrecognizedStatement { stmt: "ifx".into(), span: (2, 3).into() } ; "unrecognized_statement_ifx")]
-    #[test_case(b"forx in y" => ParseError::UnrecognizedStatement { stmt: "forx in y".into(), span: (2, 9).into() } ; "unrecognized_statement_forx")]
-    #[test_case(b"123" => ParseError::UnrecognizedStatement { stmt: "123".into(), span: (2, 3).into() } ; "statement_starts_with_digit")]
-    #[test_case(b"IF x" => ParseError::UnrecognizedStatement { stmt: "IF x".into(), span: (2, 4).into() } ; "statement_uppercase_keyword")]
+    #[test_case(b"" => ParseError::EmptyStatement { span: (0, 4).into() } ; "empty_statement_body")]
+    #[test_case(b" " => ParseError::EmptyStatement { span: (0, 5).into() } ; "whitespace_only_statement_body")]
+    #[test_case(b"@" => ParseError::UnrecognizedStatement { stmt: "@".into(), span: (2, 1).into() } ; "symbol_as_statement_keyword")]
+    #[test_case(b"ifx" => ParseError::UnrecognizedStatement { stmt: "ifx".into(), span: (2, 3).into() } ; "keyword_lookalike_statement")]
+    #[test_case(b"forx in y" => ParseError::UnrecognizedStatement { stmt: "forx in y".into(), span: (2, 9).into() } ; "keyword_prefix_statement")]
+    #[test_case(b"123" => ParseError::UnrecognizedStatement { stmt: "123".into(), span: (2, 3).into() } ; "digit_leading_statement")]
+    #[test_case(b"IF x" => ParseError::UnrecognizedStatement { stmt: "IF x".into(), span: (2, 4).into() } ; "uppercase_keyword_statement")]
     // -- if errors --
-    #[test_case(b"if" => ParseError::MissingCondition { stmt: "if".to_string(), span: (4, 1).into() } ; "if_missing_condition")]
-    #[test_case(b"if!" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "if_unexpected_token_bang")]
-    #[test_case(b"if x y" => ParseError::UnexpectedTokenAfterExpr { span: (7, 1).into() } ; "if_unexpected_tokens_after_condition")]
-    #[test_case(b"if \"unclosed" => ParseError::UnclosedString { span: (5, 1).into() } ; "if_unclosed_string_condition")]
-    #[test_case(b"if 9223372036854775808" => ParseError::IntegerOutOfRange { span: (5, 19).into() } ; "if_int_overflow_condition")]
-    #[test_case(b"if in" => ParseError::ReservedKeyword { keyword: "in".into(), span: (5, 2).into() } ; "if_reserved_keyword_condition")]
-    #[test_case(b"if a." => ParseError::EmptyField { span: (6, 1).into() } ; "if_trailing_dot_in_condition")]
-    #[test_case(b"if a@" => ParseError::UnexpectedToken { span: (6, 1).into() } ; "if_unexpected_token_at")]
+    #[test_case(b"if" => ParseError::MissingCondition { stmt: "if".to_string(), span: (4, 1).into() } ; "if_without_condition")]
+    #[test_case(b"if!" => ParseError::UnexpectedToken { span: (4, 1).into() } ; "if_with_bang_condition")]
+    #[test_case(b"if x y" => ParseError::UnexpectedTokenAfterExpr { span: (7, 1).into() } ; "if_with_extra_tokens_after_condition")]
+    #[test_case(b"if \"unclosed" => ParseError::UnclosedString { span: (5, 1).into() } ; "if_with_unclosed_string_condition")]
+    #[test_case(b"if 9223372036854775808" => ParseError::IntegerOutOfRange { span: (5, 19).into() } ; "if_with_overflowing_int_condition")]
+    #[test_case(b"if in" => ParseError::ReservedKeyword { keyword: "in".into(), span: (5, 2).into() } ; "if_with_keyword_condition")]
+    #[test_case(b"if a." => ParseError::EmptyField { span: (6, 1).into() } ; "if_with_trailing_dot_condition")]
+    #[test_case(b"if a@" => ParseError::UnexpectedToken { span: (6, 1).into() } ; "if_with_trailing_at_in_condition")]
     // -- for errors --
-    #[test_case(b"for" => ParseError::EmptyFor { span: (2, 3).into() } ; "for_missing_binding")]
-    #[test_case(b"for $" => ParseError::InvalidVariable { span: (6, 1).into() } ; "for_invalid_variable_dollar")]
-    #[test_case(b"for x$" => ParseError::UnexpectedToken { span: (7, 1).into() } ; "for_invalid_variable_trailing")]
-    #[test_case(b"for x" => ParseError::MissingIn { span: (7, 1).into() } ; "for_missing_in")]
-    #[test_case(b"for x x" => ParseError::MissingIn { span: (8, 1).into() } ; "for_missing_in_second_word")]
-    #[test_case(b"for x on list" => ParseError::MissingIn { span: (8, 2).into() } ; "for_wrong_word_instead_of_in")]
-    #[test_case(b"for x in" => ParseError::MissingIterable { span: (10, 1).into() } ; "for_missing_iterable")]
-    #[test_case(b"for x in   " => ParseError::MissingIterable { span: (10, 1).into() } ; "for_missing_iterable_with_trailing_ws")]
-    #[test_case(b"for x in y x" => ParseError::UnexpectedTokenAfterExpr { span: (13, 1).into() } ; "for_unexpected_tokens_after_iterable")]
-    #[test_case(b"for x in y$" => ParseError::UnexpectedToken { span: (12, 1).into() } ; "for_unexpected_token_in_iterable")]
-    #[test_case(b"for if in list" => ParseError::ReservedKeyword { keyword: "if".into(), span: (6, 2).into() } ; "for_reserved_keyword_var")]
-    #[test_case(b"for true in list" => ParseError::ReservedKeyword { keyword: "true".into(), span: (6, 4).into() } ; "for_bool_literal_var")]
-    #[test_case(b"for 1 in list" => ParseError::InvalidVariable { span: (6, 1).into() } ; "for_digit_start_var")]
-    #[test_case(b"for x in in" => ParseError::ReservedKeyword { keyword: "in".into(), span: (11, 2).into() } ; "for_reserved_keyword_iterable")]
-    fn parse_stmt_error(src: &[u8]) -> ParseError {
+    #[test_case(b"for" => ParseError::EmptyFor { span: (2, 3).into() } ; "for_without_binding")]
+    #[test_case(b"for $" => ParseError::InvalidVariable { span: (6, 1).into() } ; "for_with_symbol_variable")]
+    #[test_case(b"for x$" => ParseError::UnexpectedToken { span: (7, 1).into() } ; "for_with_trailing_symbol_in_variable")]
+    #[test_case(b"for x" => ParseError::MissingIn { span: (7, 1).into() } ; "for_without_in")]
+    #[test_case(b"for x x" => ParseError::MissingIn { span: (8, 1).into() } ; "for_with_second_word_before_in")]
+    #[test_case(b"for x on list" => ParseError::MissingIn { span: (8, 2).into() } ; "for_with_wrong_in_keyword")]
+    #[test_case(b"for x in" => ParseError::MissingIterable { span: (10, 1).into() } ; "for_without_iterable")]
+    #[test_case(b"for x in   " => ParseError::MissingIterable { span: (10, 1).into() } ; "for_iterable_only_whitespace")]
+    #[test_case(b"for x in y x" => ParseError::UnexpectedTokenAfterExpr { span: (13, 1).into() } ; "for_with_extra_tokens_after_iterable")]
+    #[test_case(b"for x in y$" => ParseError::UnexpectedToken { span: (12, 1).into() } ; "for_with_trailing_symbol_in_iterable")]
+    #[test_case(b"for if in list" => ParseError::ReservedKeyword { keyword: "if".into(), span: (6, 2).into() } ; "for_with_keyword_variable")]
+    #[test_case(b"for true in list" => ParseError::ReservedKeyword { keyword: "true".into(), span: (6, 4).into() } ; "for_with_bool_literal_variable")]
+    #[test_case(b"for 1 in list" => ParseError::InvalidVariable { span: (6, 1).into() } ; "for_with_digit_variable")]
+    #[test_case(b"for x in in" => ParseError::ReservedKeyword { keyword: "in".into(), span: (11, 2).into() } ; "for_with_keyword_iterable")]
+    fn errors_parsing_stmt(src: &[u8]) -> ParseError {
         expect_parse_error(&[b"{%", src, b"%}"].concat())
     }
 
     // -- orphan terminators --
-    #[test_case(b"{%end%}" => ParseError::OrphanEnd { span: (0, 7).into() } ; "orphan_end")]
-    #[test_case(b"{%elif%}" => ParseError::ElifOutsideIf { span: (0, 8).into() } ; "orphan_elif")]
-    #[test_case(b"{%else%}" => ParseError::ElseOutsideIf { span: (0, 8).into() } ; "orphan_else")]
-    #[test_case(b"{% if a %}{% end %}{% elif b %}{% end %}" => ParseError::ElifOutsideIf { span: (19, 12).into() } ; "elif_after_closed_if")]
-    #[test_case(b"{% if a %}A{% else %}B{% end %}{% end %}" => ParseError::OrphanEnd { span: (31, 9).into() } ; "extra_end_after_closed_if")]
+    #[test_case(b"{%end%}" => ParseError::OrphanEnd { span: (0, 7).into() } ; "end_outside_block")]
+    #[test_case(b"{%elif%}" => ParseError::ElifOutsideIf { span: (0, 8).into() } ; "elif_outside_block")]
+    #[test_case(b"{%else%}" => ParseError::ElseOutsideIf { span: (0, 8).into() } ; "else_outside_block")]
+    #[test_case(b"{% if a %}{% end %}{% elif b %}{% end %}" => ParseError::ElifOutsideIf { span: (19, 12).into() } ; "elif_after_closed_if_block")]
+    #[test_case(b"{% if a %}A{% else %}B{% end %}{% end %}" => ParseError::OrphanEnd { span: (31, 9).into() } ; "extra_end_after_closed_if_block")]
     // -- elif / else in wrong blocks --
-    #[test_case(b"{% if a %}A{% else %}B{% elif c %}C{% end %}" => ParseError::ElifOutsideIf { span: (22, 12).into() } ; "elif_after_else")]
-    #[test_case(b"{% if a %}A{% else %}B{% else %}C{% end %}" => ParseError::ElseOutsideIf { span: (22, 10).into() } ; "else_after_else")]
-    #[test_case(b"{% for x in list %}{% elif y %}{% end %}" => ParseError::ElifOutsideIf { span: (19, 12).into() } ; "elif_in_for")]
-    #[test_case(b"{% for x in list %}{% else %}{% end %}" => ParseError::ElseOutsideIf { span: (19, 10).into() } ; "else_in_for")]
+    #[test_case(b"{% if a %}A{% else %}B{% elif c %}C{% end %}" => ParseError::ElifOutsideIf { span: (22, 12).into() } ; "elif_following_else")]
+    #[test_case(b"{% if a %}A{% else %}B{% else %}C{% end %}" => ParseError::ElseOutsideIf { span: (22, 10).into() } ; "second_else_in_block")]
+    #[test_case(b"{% for x in list %}{% elif y %}{% end %}" => ParseError::ElifOutsideIf { span: (19, 12).into() } ; "elif_inside_for_block")]
+    #[test_case(b"{% for x in list %}{% else %}{% end %}" => ParseError::ElseOutsideIf { span: (19, 10).into() } ; "else_inside_for_block")]
     // -- unexpected tokens on terminators --
-    #[test_case(b"{%if true%}{%end x%}" => ParseError::UnexpectedToken { span: (17, 1).into() } ; "end_with_operand")]
-    #[test_case(b"{% for x in list %}{% end x %}" => ParseError::UnexpectedToken { span: (26, 1).into() } ; "for_end_with_operand")]
-    #[test_case(b"{%if true%}{%else x%}" => ParseError::UnexpectedToken { span: (18, 1).into() } ; "else_with_operand")]
-    #[test_case(b"{%if true%}{%else a b c%}" => ParseError::UnexpectedToken { span: (18, 1).into() } ; "else_with_multiple_operands")]
+    #[test_case(b"{%if true%}{%end x%}" => ParseError::UnexpectedToken { span: (17, 1).into() } ; "operand_on_end")]
+    #[test_case(b"{% for x in list %}{% end x %}" => ParseError::UnexpectedToken { span: (26, 1).into() } ; "operand_on_for_end")]
+    #[test_case(b"{%if true%}{%else x%}" => ParseError::UnexpectedToken { span: (18, 1).into() } ; "operand_on_else")]
+    #[test_case(b"{%if true%}{%else a b c%}" => ParseError::UnexpectedToken { span: (18, 1).into() } ; "multiple_operands_on_else")]
     // -- unclosed blocks --
-    #[test_case(b"{% if true %}text" => ParseError::UnclosedBlock { span: (0, 13).into() } ; "unclosed_if")]
-    #[test_case(b"{% for x in list %}text" => ParseError::UnclosedBlock { span: (0, 19).into() } ; "unclosed_for")]
-    #[test_case(b"{% if true %}{% else %}" => ParseError::UnclosedBlock { span: (0, 13).into() } ; "if_else_missing_end")]
-    #[test_case(b"{% for x in list %}{% if true %}text{% end %}" => ParseError::UnclosedBlock { span: (0, 19).into() } ; "for_body_with_unclosed_inner_if")]
-    fn parse_stmt_nodes_error(src: &[u8]) -> ParseError {
+    #[test_case(b"{% if true %}text" => ParseError::UnclosedBlock { span: (0, 13).into() } ; "unclosed_if_block")]
+    #[test_case(b"{% for x in list %}text" => ParseError::UnclosedBlock { span: (0, 19).into() } ; "unclosed_for_block")]
+    #[test_case(b"{% if true %}{% else %}" => ParseError::UnclosedBlock { span: (0, 13).into() } ; "if_block_missing_end")]
+    #[test_case(b"{% for x in list %}{% if true %}text{% end %}" => ParseError::UnclosedBlock { span: (0, 19).into() } ; "for_with_unclosed_inner_if")]
+    fn errors_parsing_block_structure(src: &[u8]) -> ParseError {
         expect_parse_error(src)
     }
 }

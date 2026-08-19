@@ -102,17 +102,17 @@ mod tests {
 
     use super::*;
 
-    #[test_case(b"var" => 2..5 ; "simple_variable")]
-    #[test_case(br#""hi""# => 2..6 ; "string_literal")]
-    #[test_case(b"42" => 2..4 ; "positive_integer_literal")]
-    #[test_case(b" -7" => 3..5 ; "negative_integer_literal")]
-    #[test_case(b"[]" => 2..4 ; "empty_list")]
-    #[test_case(b"[ a , b ]" => 2..11 ; "list_with_elements")]
-    #[test_case(b"a.b.c" => 2..7 ; "chained_dot_access")]
-    #[test_case(b"a.0.1" => 2..7 ; "mixed_dot_and_index_access")]
-    #[test_case(b"f()" => 2..5 ; "function_call_no_args")]
-    #[test_case(b"f( g( ) , h())" => 2..16 ; "nested_function_calls")]
-    fn span(src: &[u8]) -> Range<usize> {
+    #[test_case(b"var" => 2..5 ; "identifier_covers_the_var_token")]
+    #[test_case(br#""hi""# => 2..6 ; "string_covers_quotes_and_contents")]
+    #[test_case(b"42" => 2..4 ; "positive_integer_covers_the_digits")]
+    #[test_case(b" -7" => 3..5 ; "negative_integer_covers_minus_and_digits")]
+    #[test_case(b"[]" => 2..4 ; "empty_list_covers_the_brackets")]
+    #[test_case(b"[ a , b ]" => 2..11 ; "list_covers_brackets_and_elements")]
+    #[test_case(b"a.b.c" => 2..7 ; "chained_dot_covers_the_whole_chain")]
+    #[test_case(b"a.0.1" => 2..7 ; "chained_index_covers_the_whole_chain")]
+    #[test_case(b"f()" => 2..5 ; "call_covers_name_and_parens")]
+    #[test_case(b"f( g( ) , h())" => 2..16 ; "nested_call_covers_the_outer_parens")]
+    fn expr_span_covers_whole_expression(src: &[u8]) -> Range<usize> {
         let src = [b"{{", src, b"}}"].concat();
         let Node::Interpolate(expr) = parse(scan(&src).unwrap(), &src).unwrap().pop().unwrap()
         else {

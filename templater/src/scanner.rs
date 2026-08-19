@@ -414,122 +414,122 @@ mod tests {
     use super::*;
 
     // Trivial / empty
-    #[test_case(b"" => Vec::<Token>::new(); "empty")]
-    #[test_case(b"hello" => vec![text!(0..5)]; "plain_text")]
-    #[test_case(b"{}" => vec![text!(0..2)]; "braces")]
+    #[test_case(b"" => Vec::<Token>::new(); "empty_source_yields_no_tokens")]
+    #[test_case(b"hello" => vec![text!(0..5)]; "plain_text_yields_text_run")]
+    #[test_case(b"{}" => vec![text!(0..2)]; "lone_braces_scan_as_plain_text")]
     // Basic interpolation
-    #[test_case(b"{{x}}" => vec![interp!(0..5, 2..3)]; "basic_interpolation")]
-    #[test_case(b"{{ x }}" => vec![interp!(0..7, 3..4)]; "interpolation_with_spaces")]
-    #[test_case(b"{{  x  }}" => vec![interp!(0..9, 4..5)]; "interpolation_with_multiple_spaces")]
-    #[test_case(b"{{x}}y{{z}}" => vec![interp!(0..5, 2..3), text!(5..6), interp!(6..11, 8..9)]; "adjacent_interpolations")]
-    #[test_case(b"{{\nx\n}}" => vec![interp!(0..7, 3..4)]; "interpolation_with_newlines")]
-    #[test_case(b"{{\tx\t}}" => vec![interp!(0..7, 3..4)]; "interpolation_with_tabs")]
-    #[test_case(b"{{ x\r }}" => vec![interp!(0..8, 3..5)]; "carriage_return_survives")]
-    #[test_case(b"{{\n x\n}}" => vec![interp!(0..8, 4..5)]; "multiline_interpolation")]
+    #[test_case(b"{{x}}" => vec![interp!(0..5, 2..3)]; "simple_interpolation_scans_correctly")]
+    #[test_case(b"{{ x }}" => vec![interp!(0..7, 3..4)]; "single_space_around_body_is_trimmed")]
+    #[test_case(b"{{  x  }}" => vec![interp!(0..9, 4..5)]; "spaces_around_body_are_trimmed")]
+    #[test_case(b"{{x}}y{{z}}" => vec![interp!(0..5, 2..3), text!(5..6), interp!(6..11, 8..9)]; "adjacent_interpolations_with_text_between")]
+    #[test_case(b"{{\nx\n}}" => vec![interp!(0..7, 3..4)]; "newlines_around_body_are_trimmed")]
+    #[test_case(b"{{\tx\t}}" => vec![interp!(0..7, 3..4)]; "tabs_around_body_are_trimmed")]
+    #[test_case(b"{{ x\r }}" => vec![interp!(0..8, 3..5)]; "carriage_return_in_body_survives_trim")]
+    #[test_case(b"{{\n x\n}}" => vec![interp!(0..8, 4..5)]; "multiline_body_trimmed_to_expression")]
     // Basic statements
-    #[test_case(b"{%if x%}" => vec![stmt!(0..8, 2..6)]; "basic_statement")]
-    #[test_case(b"{% %}" => vec![stmt!(0..5, 3..3)]; "empty_statement_with_spaces")]
+    #[test_case(b"{%if x%}" => vec![stmt!(0..8, 2..6)]; "simple_statement_scans_correctly")]
+    #[test_case(b"{% %}" => vec![stmt!(0..5, 3..3)]; "whitespace_only_statement_yields_empty_body")]
     // Basic comments
-    #[test_case(b"{# c #}" => vec![Token::Barrier]; "comment_with_content")]
-    #[test_case(b"a{#c#}b" => vec![text!(0..1), Token::Barrier, text!(6..7)]; "comment_between_text")]
-    #[test_case(b"{##}" => vec![Token::Barrier]; "minimal_comment")]
-    #[test_case(b"{# a\nb #}" => vec![Token::Barrier]; "multiline_comment")]
-    #[test_case(b"x{# c #}y" => vec![text!(0..1), Token::Barrier, text!(8..9)]; "comment_with_surrounding_text")]
+    #[test_case(b"{# c #}" => vec![Token::Barrier]; "comment_with_content_emits_barrier")]
+    #[test_case(b"a{#c#}b" => vec![text!(0..1), Token::Barrier, text!(6..7)]; "comment_amid_text_survives_runs")]
+    #[test_case(b"{##}" => vec![Token::Barrier]; "minimal_comment_emits_barrier")]
+    #[test_case(b"{# a\nb #}" => vec![Token::Barrier]; "multiline_comment_emits_barrier")]
+    #[test_case(b"x{# c #}y" => vec![text!(0..1), Token::Barrier, text!(8..9)]; "comment_keeps_surrounding_text_runs")]
     // Interpolation modifiers — single side
-    #[test_case(b"{{-x}}" => vec![interp!(0..6, 3..4, Dash, None)]; "left_dash_only")]
-    #[test_case(b"{{x-}}" => vec![interp!(0..6, 2..3, None, Dash)]; "right_dash_only")]
-    #[test_case(b"{{=x}}" => vec![interp!(0..6, 3..4, Equal, None)]; "left_equal_only")]
-    #[test_case(b"{{x=}}" => vec![interp!(0..6, 2..3, None, Equal)]; "right_equal_only")]
+    #[test_case(b"{{-x}}" => vec![interp!(0..6, 3..4, Dash, None)]; "left_dash_modifier_scans")]
+    #[test_case(b"{{x-}}" => vec![interp!(0..6, 2..3, None, Dash)]; "right_dash_modifier_scans")]
+    #[test_case(b"{{=x}}" => vec![interp!(0..6, 3..4, Equal, None)]; "left_equal_modifier_scans")]
+    #[test_case(b"{{x=}}" => vec![interp!(0..6, 2..3, None, Equal)]; "right_equal_modifier_scans")]
     // Interpolation modifiers — both sides
-    #[test_case(b"{{-x-}}" => vec![interp!(0..7, 3..4, Dash, Dash)]; "dash_modifiers_tight")]
-    #[test_case(b"{{- x -}}" => vec![interp!(0..9, 4..5, Dash, Dash)]; "dash_modifiers_with_spaces")]
-    #[test_case(b"{{=x=}}" => vec![interp!(0..7, 3..4, Equal, Equal)]; "equal_modifiers_tight")]
-    #[test_case(b"{{= x =}}" => vec![interp!(0..9, 4..5, Equal, Equal)]; "equal_modifiers_with_spaces")]
-    #[test_case(b"{{- x =}}" => vec![interp!(0..9, 4..5, Dash, Equal)]; "dash_left_equal_right")]
-    #[test_case(b"{{= x -}}" => vec![interp!(0..9, 4..5, Equal, Dash)]; "equal_left_dash_right")]
+    #[test_case(b"{{-x-}}" => vec![interp!(0..7, 3..4, Dash, Dash)]; "dash_modifiers_tight_scans")]
+    #[test_case(b"{{- x -}}" => vec![interp!(0..9, 4..5, Dash, Dash)]; "dash_modifiers_with_spaces_scans")]
+    #[test_case(b"{{=x=}}" => vec![interp!(0..7, 3..4, Equal, Equal)]; "equal_modifiers_tight_scans")]
+    #[test_case(b"{{= x =}}" => vec![interp!(0..9, 4..5, Equal, Equal)]; "equal_modifiers_with_spaces_scans")]
+    #[test_case(b"{{- x =}}" => vec![interp!(0..9, 4..5, Dash, Equal)]; "dash_left_equal_right_scans")]
+    #[test_case(b"{{= x -}}" => vec![interp!(0..9, 4..5, Equal, Dash)]; "equal_left_dash_right_scans")]
     // Statement modifiers
-    #[test_case(b"{%-if x-%}" => vec![stmt!(0..10, 3..7, Dash, Dash)]; "statement_dash_modifiers")]
-    #[test_case(b"{%=if x=%}" => vec![stmt!(0..10, 3..7, Equal, Equal)]; "statement_equal_modifiers")]
-    #[test_case(b"{%x-%}" => vec![stmt!(0..6, 2..3, None, Dash)]; "statement_dash_right_tight")]
-    #[test_case(b"{%=x=%}" => vec![stmt!(0..7, 3..4, Equal, Equal)]; "statement_equal_modifiers_tight")]
-    #[test_case(b"{%-x=%}" => vec![stmt!(0..7, 3..4, Dash, Equal)]; "statement_dash_left_equal_right")]
-    #[test_case(b"{%=x-%}" => vec![stmt!(0..7, 3..4, Equal, Dash)]; "statement_equal_left_dash_right")]
+    #[test_case(b"{%-if x-%}" => vec![stmt!(0..10, 3..7, Dash, Dash)]; "statement_dash_modifiers_scans")]
+    #[test_case(b"{%=if x=%}" => vec![stmt!(0..10, 3..7, Equal, Equal)]; "statement_equal_modifiers_scans")]
+    #[test_case(b"{%x-%}" => vec![stmt!(0..6, 2..3, None, Dash)]; "statement_right_dash_tight_scans")]
+    #[test_case(b"{%=x=%}" => vec![stmt!(0..7, 3..4, Equal, Equal)]; "statement_equal_modifiers_tight_scans")]
+    #[test_case(b"{%-x=%}" => vec![stmt!(0..7, 3..4, Dash, Equal)]; "statement_dash_left_equal_right_scans")]
+    #[test_case(b"{%=x-%}" => vec![stmt!(0..7, 3..4, Equal, Dash)]; "statement_equal_left_dash_right_scans")]
     // Empty interpolation bodies
-    #[test_case(b"{{}}" => vec![interp!(0..4, 2..2)]; "empty_interpolation_tight")]
-    #[test_case(b"{{ }}" => vec![interp!(0..5, 3..3)]; "empty_interpolation_with_spaces")]
+    #[test_case(b"{{}}" => vec![interp!(0..4, 2..2)]; "tight_empty_interpolation_scans")]
+    #[test_case(b"{{ }}" => vec![interp!(0..5, 3..3)]; "whitespace_empty_interpolation_scans")]
     // String literals inside tags — shielding
-    #[test_case(b"{{ \"}}\" }}" => vec![interp!(0..10, 3..7)]; "string_shields_closing_delimiter")]
-    #[test_case(b"{% \"}}\" %}" => vec![stmt!(0..10, 3..7)]; "string_shields_in_statement")]
-    #[test_case(b"{{ \"{{\" }}" => vec![interp!(0..10, 3..7)]; "string_contains_open_delimiter")]
-    #[test_case(b"{{ \"%}\" }}" => vec![interp!(0..10, 3..7)]; "string_contains_statement_close")]
-    #[test_case(b"{{ \"\" }}" => vec![interp!(0..8, 3..5)]; "empty_string_literal")]
-    #[test_case(b"{{ \"\\\\\" }}" => vec![interp!(0..10, 3..7)]; "string_with_escaped_backslash")]
-    #[test_case(b"{{ \"a\nb\" }}" => vec![interp!(0..11, 3..8)]; "multiline_string_in_tag")]
+    #[test_case(b"{{ \"}}\" }}" => vec![interp!(0..10, 3..7)]; "string_quote_shields_close_delimiter")]
+    #[test_case(b"{% \"}}\" %}" => vec![stmt!(0..10, 3..7)]; "string_quote_shields_close_in_statement")]
+    #[test_case(b"{{ \"{{\" }}" => vec![interp!(0..10, 3..7)]; "string_contains_open_delimiter_as_text")]
+    #[test_case(b"{{ \"%}\" }}" => vec![interp!(0..10, 3..7)]; "string_contains_statement_close_as_text")]
+    #[test_case(b"{{ \"\" }}" => vec![interp!(0..8, 3..5)]; "empty_string_literal_scans")]
+    #[test_case(b"{{ \"\\\\\" }}" => vec![interp!(0..10, 3..7)]; "escaped_backslash_in_string_scans")]
+    #[test_case(b"{{ \"a\nb\" }}" => vec![interp!(0..11, 3..8)]; "multiline_string_in_tag_scans")]
     // Delimiters inside tag body treated as ordinary text
-    #[test_case(b"{{ {{ }}" => vec![interp!(0..8, 3..5)]; "opening_delimiter_inside_body_is_text")]
+    #[test_case(b"{{ {{ }}" => vec![interp!(0..8, 3..5)]; "opening_delimiter_inside_body_emits_body_text")]
     // Escaping — odd backslashes (delimiter becomes literal)
-    #[test_case(b"\\{{" => vec![text!(1..3)]; "escaped_opening_interpolation")]
-    #[test_case(b"\\{{\\}}" => vec![text!(1..3), text!(4..6)]; "escaped_interpolation_pair")]
-    #[test_case(b"\\\\\\{{" => vec![text!(2..5)]; "three_backslashes_escaped")]
-    #[test_case(b"a\\{{b" => vec![text!(0..1), text!(2..5)]; "text_with_escaped_interpolation")]
-    #[test_case(b"a\\{{b\\}}c" => vec![text!(0..1), text!(2..5), text!(6..9)]; "escaped_pair_merge_into_trailing_text")]
+    #[test_case(b"\\{{" => vec![text!(1..3)]; "escaped_open_delimiter_yields_literal")]
+    #[test_case(b"\\{{\\}}" => vec![text!(1..3), text!(4..6)]; "escaped_pair_yields_literal_text_runs")]
+    #[test_case(b"\\\\\\{{" => vec![text!(2..5)]; "three_backslashes_escape_delimiter")]
+    #[test_case(b"a\\{{b" => vec![text!(0..1), text!(2..5)]; "escaped_after_leading_text_merges_with_it")]
+    #[test_case(b"a\\{{b\\}}c" => vec![text!(0..1), text!(2..5), text!(6..9)]; "escaped_pair_merges_into_trailing_text")]
     // Escaping — even backslashes (delimiter is active, literal backslashes emitted)
-    #[test_case(b"\\\\{{x}}" => vec![text!(0..1), interp!(2..7, 4..5)]; "two_backslashes_then_tag")]
-    #[test_case(b"\\\\\\\\{{x}}" => vec![text!(0..2), interp!(4..9, 6..7)]; "four_backslashes_then_tag")]
-    #[test_case(b"{{ \\\\}}" => vec![interp!(0..7, 3..5)]; "escaped_backslashes_before_close")]
+    #[test_case(b"\\\\{{x}}" => vec![text!(0..1), interp!(2..7, 4..5)]; "two_backslashes_yield_literal_then_active_tag")]
+    #[test_case(b"\\\\\\\\{{x}}" => vec![text!(0..2), interp!(4..9, 6..7)]; "four_backslashes_yield_two_literals_then_tag")]
+    #[test_case(b"{{ \\\\}}" => vec![interp!(0..7, 3..5)]; "even_backslashes_before_close_are_literal")]
     // Escaping — backslashes before modifiers
-    #[test_case(b"\\\\{{- x }}" => vec![text!(0..1), interp!(2..10, 6..7, Dash, None)]; "two_backslashes_then_dash_tag")]
-    #[test_case(b"\\\\{%x=%}" => vec![text!(0..1), stmt!(2..8, 4..5, None, Equal)]; "two_backslashes_then_equal_statement")]
-    #[test_case(b"\\{{-" => vec![text!(1..4)]; "escaped_opening_interpolation_with_dash_modifier")]
-    #[test_case(b"\\{{=" => vec![text!(1..4)]; "escaped_opening_interpolation_with_equal_modifier")]
-    #[test_case(b"\\-%}" => vec![text!(1..4)]; "escaped_backslash_before_close_dash_modifier")]
-    #[test_case(b"\\=%}" => vec![text!(1..4)]; "escaped_backslash_before_close_equal_modifier")]
+    #[test_case(b"\\\\{{- x }}" => vec![text!(0..1), interp!(2..10, 6..7, Dash, None)]; "two_backslashes_then_dash_tag_scans")]
+    #[test_case(b"\\\\{%x=%}" => vec![text!(0..1), stmt!(2..8, 4..5, None, Equal)]; "two_backslashes_then_equal_statement_scans")]
+    #[test_case(b"\\{{-" => vec![text!(1..4)]; "escaped_dash_modifier_yields_literal")]
+    #[test_case(b"\\{{=" => vec![text!(1..4)]; "escaped_equal_modifier_yields_literal")]
+    #[test_case(b"\\-%}" => vec![text!(1..4)]; "escaped_backslash_before_close_dash_yields_literal")]
+    #[test_case(b"\\=%}" => vec![text!(1..4)]; "escaped_backslash_before_close_equal_yields_literal")]
     // Escaping — inside tag body
-    #[test_case(b"{{ \\{{ }}" => vec![interp!(0..9, 3..6)]; "escaped_opening_inside_interpolation")]
-    #[test_case(b"{{ \\}} }}" => vec![interp!(0..9, 3..6)]; "escaped_closing_inside_interpolation")]
-    #[test_case(b"{% \\{% %}" => vec![stmt!(0..9, 3..6)]; "escaped_opening_inside_statement")]
-    #[test_case(b"{% \\%} %}" => vec![stmt!(0..9, 3..6)]; "escaped_closing_inside_statement")]
-    #[test_case(b"{# \\#{ #}" => vec![Token::Barrier]; "escaped_opening_inside_comment")]
-    #[test_case(b"{# \\#} #}" => vec![Token::Barrier]; "escaped_closing_inside_comment")]
+    #[test_case(b"{{ \\{{ }}" => vec![interp!(0..9, 3..6)]; "escaped_open_delim_inside_interp_stays_body")]
+    #[test_case(b"{{ \\}} }}" => vec![interp!(0..9, 3..6)]; "escaped_close_delim_inside_interp_stays_body")]
+    #[test_case(b"{% \\{% %}" => vec![stmt!(0..9, 3..6)]; "escaped_open_delim_inside_stmt_stays_body")]
+    #[test_case(b"{% \\%} %}" => vec![stmt!(0..9, 3..6)]; "escaped_close_delim_inside_stmt_stays_body")]
+    #[test_case(b"{# \\#{ #}" => vec![Token::Barrier]; "escaped_open_delim_inside_comment_stays_literal")]
+    #[test_case(b"{# \\#} #}" => vec![Token::Barrier]; "escaped_close_delim_inside_comment_stays_literal")]
     // Escaping — comment close backslash quantization
-    #[test_case(b"{# \\\\#}" => vec![Token::Barrier]; "comment_with_even_backslashes_before_close")]
-    #[test_case(b"{# \\\\\\#} #}" => vec![Token::Barrier]; "comment_with_odd_backslashes_then_real_close")]
+    #[test_case(b"{# \\\\#}" => vec![Token::Barrier]; "even_backslashes_before_comment_close_stay_literal")]
+    #[test_case(b"{# \\\\\\#} #}" => vec![Token::Barrier]; "odd_backslashes_escape_comment_close")]
     // Non-ASCII / UTF-8 byte indexing
-    #[test_case(b"\xCE\xB1{{x}}\xCE\xB2" => vec![text!(0..2), interp!(2..7, 4..5), text!(7..9)]; "utf8_bytes_around_tag")]
-    fn scan_token(input: &[u8]) -> Vec<Token> {
+    #[test_case(b"\xCE\xB1{{x}}\xCE\xB2" => vec![text!(0..2), interp!(2..7, 4..5), text!(7..9)]; "multibyte_bytes_around_tag_scan_correctly")]
+    fn scan_produces_tokens(input: &[u8]) -> Vec<Token> {
         scan(input).unwrap()
     }
 
     // Stray delimiters — basic
-    #[test_case(b"}}" => ParseError::StrayDelimiter { span: (0, 2).into() } ; "stray_closing_interpolation")]
-    #[test_case(b"%}" => ParseError::StrayDelimiter { span: (0, 2).into() } ; "stray_closing_statement")]
-    #[test_case(b"#}" => ParseError::StrayDelimiter { span: (0, 2).into() } ; "stray_closing_comment")]
-    #[test_case(b"a}}" => ParseError::StrayDelimiter { span: (1, 2).into() } ; "stray_delimiter_after_text")]
+    #[test_case(b"}}" => ParseError::StrayDelimiter { span: (0, 2).into() } ; "stray_close_interpolation_reported")]
+    #[test_case(b"%}" => ParseError::StrayDelimiter { span: (0, 2).into() } ; "stray_close_statement_reported")]
+    #[test_case(b"#}" => ParseError::StrayDelimiter { span: (0, 2).into() } ; "stray_close_comment_reported")]
+    #[test_case(b"a}}" => ParseError::StrayDelimiter { span: (1, 2).into() } ; "stray_delimiter_after_text_reported")]
     // Stray delimiters — after escaped opening
-    #[test_case(b"\\{{}}" => ParseError::StrayDelimiter { span: (3, 2).into() } ; "stray_close_after_escaped_open")]
-    #[test_case(b"\\{% %}" => ParseError::StrayDelimiter { span: (4, 2).into() } ; "stray_close_after_escaped_statement_open")]
-    #[test_case(b"\\{{-x}}" => ParseError::StrayDelimiter { span: (5, 2).into() } ; "stray_close_after_escaped_interpolation_open")]
+    #[test_case(b"\\{{}}" => ParseError::StrayDelimiter { span: (3, 2).into() } ; "stray_close_after_escaped_open_reported")]
+    #[test_case(b"\\{% %}" => ParseError::StrayDelimiter { span: (4, 2).into() } ; "stray_close_after_escaped_stmt_open_reported")]
+    #[test_case(b"\\{{-x}}" => ParseError::StrayDelimiter { span: (5, 2).into() } ; "stray_close_after_escaped_interp_open_reported")]
     // Stray delimiters — after valid tag
-    #[test_case(b"{{x}}%}" => ParseError::StrayDelimiter { span: (5, 2).into() } ; "stray_statement_close_after_interpolation")]
-    #[test_case(b"{{x}}#}" => ParseError::StrayDelimiter { span: (5, 2).into() } ; "stray_comment_close_after_interpolation")]
+    #[test_case(b"{{x}}%}" => ParseError::StrayDelimiter { span: (5, 2).into() } ; "stray_stmt_close_after_interp_reported")]
+    #[test_case(b"{{x}}#}" => ParseError::StrayDelimiter { span: (5, 2).into() } ; "stray_comment_close_after_interp_reported")]
     // Unclosed delimiters — basic
-    #[test_case(b"{{" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "unclosed_interpolation")]
-    #[test_case(b"{{ x" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "unclosed_interpolation_with_content")]
-    #[test_case(b"{%" => ParseError::UnclosedDelimiter { delimiter: "%}".to_string(), span: (0, 2).into() } ; "unclosed_statement")]
-    #[test_case(b"{#" => ParseError::UnclosedDelimiter { delimiter: "#}".to_string(), span: (0, 2).into() } ; "unclosed_comment")]
-    #[test_case(b"{#}" => ParseError::UnclosedDelimiter { delimiter: "#}".to_string(), span: (0, 2).into() } ; "comment_missing_second_hash")]
+    #[test_case(b"{{" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "unclosed_interp_reported")]
+    #[test_case(b"{{ x" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "unclosed_interp_with_content_reported")]
+    #[test_case(b"{%" => ParseError::UnclosedDelimiter { delimiter: "%}".to_string(), span: (0, 2).into() } ; "unclosed_stmt_reported")]
+    #[test_case(b"{#" => ParseError::UnclosedDelimiter { delimiter: "#}".to_string(), span: (0, 2).into() } ; "unclosed_comment_reported")]
+    #[test_case(b"{#}" => ParseError::UnclosedDelimiter { delimiter: "#}".to_string(), span: (0, 2).into() } ; "comment_missing_second_hash_reported")]
     // Unclosed delimiters — string / modifier edge cases
-    #[test_case(b"{{ \"unterminated" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "unclosed_string_in_interpolation")]
-    #[test_case(b"{% \"unterminated" => ParseError::UnclosedDelimiter { delimiter: "%}".to_string(), span: (0, 2).into() } ; "unclosed_string_in_statement")]
-    #[test_case(b"{{-x" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "unclosed_with_left_dash_modifier")]
-    #[test_case(b"{{ x \\-}}" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "escaped_modifier_close_unclosed")]
-    #[test_case(b"{# \\#}" => ParseError::UnclosedDelimiter { delimiter: "#}".to_string(), span: (0, 2).into() } ; "escaped_comment_close_at_eof")]
+    #[test_case(b"{{ \"unterminated" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "unclosed_string_in_interp_reported")]
+    #[test_case(b"{% \"unterminated" => ParseError::UnclosedDelimiter { delimiter: "%}".to_string(), span: (0, 2).into() } ; "unclosed_string_in_stmt_reported")]
+    #[test_case(b"{{-x" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "unclosed_with_left_dash_modifier_reported")]
+    #[test_case(b"{{ x \\-}}" => ParseError::UnclosedDelimiter { delimiter: "}}".to_string(), span: (0, 2).into() } ; "escaped_modifier_close_at_eof_reported")]
+    #[test_case(b"{# \\#}" => ParseError::UnclosedDelimiter { delimiter: "#}".to_string(), span: (0, 2).into() } ; "escaped_comment_close_at_eof_reported")]
     // Invalid modifiers — comment
-    #[test_case(b"{#- x #}" => ParseError::ModifierInComment { span: (2, 1).into() } ; "modifier_after_opening_comment")]
-    #[test_case(b"{#= =#}" => ParseError::ModifierInComment { span: (2, 1).into() } ; "equal_modifier_after_opening_comment")]
-    #[test_case(b"{# x -#}" => ParseError::ModifierInComment { span: (5, 1).into() } ; "modifier_before_closing_comment")]
-    #[test_case(b"{# x\n-#}" => ParseError::ModifierInComment { span: (5, 1).into() } ; "modifier_before_comment_close_across_newline")]
-    fn scan_errors(input: &[u8]) -> ParseError {
+    #[test_case(b"{#- x #}" => ParseError::ModifierInComment { span: (2, 1).into() } ; "modifier_after_opening_comment_rejected")]
+    #[test_case(b"{#= =#}" => ParseError::ModifierInComment { span: (2, 1).into() } ; "equal_modifier_after_opening_comment_rejected")]
+    #[test_case(b"{# x -#}" => ParseError::ModifierInComment { span: (5, 1).into() } ; "modifier_before_closing_comment_rejected")]
+    #[test_case(b"{# x\n-#}" => ParseError::ModifierInComment { span: (5, 1).into() } ; "modifier_before_comment_close_across_newline_rejected")]
+    fn scan_reports_parse_errors(input: &[u8]) -> ParseError {
         let Error::Parse(err) = scan(input).unwrap_err() else {
             panic!("expected parse error");
         };
@@ -546,7 +546,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn odd_backslashes_escape_delimiter(
+        fn odd_backslashes_turn_delimiter_cluster_into_literal(
             delim in prop::sample::select(vec!["{{", "{%", "{#", "{{-", "{%-", "{{=", "{%=", "}}", "%}", "#}", "-}}", "-%}", "=}}", "=%}"]),
             bs_count in (1usize..=31).prop_filter("odd", |n| n % 2 == 1),
             prefix in prop::collection::vec(prop::sample::select(safe_plain_bytes()), 0..=16),
@@ -577,7 +577,7 @@ mod tests {
         }
 
         #[test]
-        fn even_backslashes_leave_delimiter_active(
+        fn even_backslashes_keep_delimiter_active(
             delim in prop::sample::select(vec![b"{{", b"{%", b"{#"]),
             bs_count in (0usize..=32).prop_filter("even", |n| n % 2 == 0),
             prefix in prop::collection::vec(prop::sample::select(safe_plain_bytes()), 0..=16),

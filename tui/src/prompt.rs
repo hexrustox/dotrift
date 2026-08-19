@@ -466,11 +466,11 @@ mod tests {
         }
     }
 
-    #[test_case(Choice::Bike, "bike", 'b'; "derived")]
-    #[test_case(Choice::EVScooter, "ev scooter", 'e'; "derived_acronym")]
-    #[test_case(Choice::Tram, "custom label", 't'; "label_overridden_hotkey_derived")]
-    #[test_case(Choice::Carpool, "carpool", 'z'; "hotkey_overridden_label_derived")]
-    fn make_options_produces_labels_and_hotkeys(variant: Choice, label: &str, hotkey: char) {
+    #[test_case(Choice::Bike, "bike", 'b'; "derives_label_and_hotkey_from_variant_name")]
+    #[test_case(Choice::EVScooter, "ev scooter", 'e'; "splits_acronym_in_derived_label")]
+    #[test_case(Choice::Tram, "custom label", 't'; "derives_hotkey_from_overridden_label")]
+    #[test_case(Choice::Carpool, "carpool", 'z'; "keeps_overridden_hotkey")]
+    fn make_options_derives_or_overrides_label_and_hotkey(variant: Choice, label: &str, hotkey: char) {
         let options = make_options::<Choice>(None).unwrap();
         let option = options
             .iter()
@@ -481,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn make_options_filters_variants_before_building_options() {
+    fn make_options_excludes_variants_rejected_by_filter() {
         let options = make_options::<Choice>(Some(&|choice| *choice != Choice::EVScooter)).unwrap();
 
         assert_eq!(
@@ -494,16 +494,16 @@ mod tests {
     }
 
     #[test]
-    fn make_options_rejects_a_filter_that_removes_every_variant() {
+    fn make_options_errors_with_empty_options_when_filter_removes_all_variants() {
         assert!(matches!(
             make_options::<Choice>(Some(&|_| false)),
             Err(PromptError::EmptyOptions)
         ));
     }
 
-    #[test_case("OverwriteIdentical" => "overwrite identical"; "words")]
-    #[test_case("HTTPServer" => "http server"; "acronym_run")]
-    fn pascal_to_label_converts(value: &str) -> String {
+    #[test_case("OverwriteIdentical" => "overwrite identical"; "splits_on_camel_case_capital")]
+    #[test_case("HTTPServer" => "http server"; "splits_on_capital_after_acronym_run")]
+    fn pascal_to_label_inserts_space_between_words(value: &str) -> String {
         pascal_to_label(value)
     }
 
@@ -520,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn make_options_rejects_duplicate_hotkeys() {
+    fn make_options_errors_with_duplicate_hotkey_when_variants_share_hotkey() {
         assert!(matches!(
             make_options::<DuplicateHotkeys>(None),
             Err(PromptError::DuplicateHotkey('a'))
@@ -539,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    fn make_options_rejects_non_ascii_hotkey() {
+    fn make_options_errors_with_invalid_hotkey_when_hotkey_is_not_an_ascii_letter() {
         assert!(matches!(
             make_options::<InvalidHotkey>(None),
             Err(PromptError::InvalidHotkey('1'))
@@ -561,14 +561,14 @@ mod tests {
     }
 
     #[test]
-    fn selection_previous_wraps_to_last() {
+    fn selection_previous_wraps_from_first_option_to_last() {
         let mut state = selection_state(vec![1, 2, 3], 0);
         state.previous();
         assert_eq!(state.selected, 2);
     }
 
     #[test]
-    fn selection_next_wraps_to_first() {
+    fn selection_next_wraps_from_last_option_to_first() {
         let mut state = selection_state(vec![1, 2, 3], 2);
         state.next();
         assert_eq!(state.selected, 0);
