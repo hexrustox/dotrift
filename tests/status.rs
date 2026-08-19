@@ -3,7 +3,7 @@ mod common;
 use std::fs;
 use std::os::unix::fs::symlink;
 
-use common::TestEnv;
+use common::{TestEnv, snapshot_settings};
 use dotrift::hash::hash_bytes;
 use dotrift::state::{Kind, StateRecord};
 
@@ -89,10 +89,7 @@ fn prints_sorted_lines_with_verdicts() {
     }
 
     let captured = run_status_and_take();
-
-    let mut settings = insta::Settings::clone_current();
-    settings.add_filter(env.root().to_str().unwrap(), "<root>");
-    settings.bind(|| {
+    snapshot_settings(&env).bind(|| {
         insta::assert_snapshot!(captured);
     });
 }

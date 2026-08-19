@@ -827,8 +827,8 @@ mod tests {
         portals! { "*" => "dst" } => panics "is not a regular file or symlink to a regular file";
         "wildcard_matching_broken_symlink_rejected"
     )]
-    fn resolve_portals_test<F: Fn(&Path)>(
-        setup: F,
+    fn resolve_portals_test(
+        setup: impl Fn(&Path),
         portals: BTreeMap<String, String>,
     ) -> Vec<ResolvedPortal> {
         let tmp = tempdir().expect("cannot create temp dir");

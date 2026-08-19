@@ -418,6 +418,19 @@ mod tests {
 
     use super::*;
 
+    fn interp_expr(src: &[u8]) -> Expr {
+        let Node::Interpolate(expr) = parse(scan(src).unwrap(), src).unwrap().pop().unwrap() else {
+            panic!("expected Interpolate")
+        };
+        expr
+    }
+
+    fn render(src: &[u8], vars: &HashMap<String, Value>) -> std::result::Result<String, Error> {
+        let mut out = Vec::new();
+        Template::from_bytes(src).render(&mut out, vars, &TestRegistry)?;
+        Ok(String::from_utf8(out).unwrap())
+    }
+
     #[test_case(br#"a\"b"# => "a\"b"; "escaped_double_quote")]
     #[test_case(br#"a\\b"# => "a\\b"; "escaped_backslash")]
     #[test_case(br#"a\nb"# => "a\\nb"; "other_backslash_verbatim")]
@@ -460,12 +473,9 @@ mod tests {
     #[test_case(b"{{ foo() }}" => Value::Str("bar".to_string()) ; "call_zero_args")]
     #[test_case(b"{{ same(same(\"deep\")) }}" => Value::Str("deep".to_string()) ; "call_nested")]
     fn eval_success(src: &[u8]) -> Value {
-        let Node::Interpolate(expr) = parse(scan(src).unwrap(), src).unwrap().pop().unwrap() else {
-            panic!("expected Interpolate")
-        };
         let vars = var_scope();
         let scope = Scope::new(&vars);
-        eval(&expr, src, &scope, &TestRegistry).unwrap()
+        eval(&interp_expr(src), src, &scope, &TestRegistry).unwrap()
     }
 
     #[test_case(b"{{ missing }}" => RenderError::UndefinedVariable { name:"missing".to_string(), span: (3, 7).into() } ; "undefined_variable")]
@@ -487,12 +497,9 @@ mod tests {
     #[test_case(b"{{ custom(1, 2) }}" => RenderError::Function { msg: "arguments must not match".into(), spans: vec![(10, 1).into(), (13, 1).into()] } ; "custom_error")]
     #[test_case(b"{{ custom_empty() }}" => RenderError::Function { msg: "custom error with no flagged arguments".into(), spans: vec![(3, 14).into()] } ; "custom_error_no_arg_indexes")]
     fn eval_render(src: &[u8]) -> RenderError {
-        let Node::Interpolate(expr) = parse(scan(src).unwrap(), src).unwrap().pop().unwrap() else {
-            panic!("expected Interpolate")
-        };
         let vars = var_scope();
         let scope = Scope::new(&vars);
-        match eval(&expr, src, &scope, &TestRegistry).unwrap_err() {
+        match eval(&interp_expr(src), src, &scope, &TestRegistry).unwrap_err() {
             Error::Render(err) => err,
             e => panic!("expected Render error, got {e:?}"),
         }
@@ -511,22 +518,14 @@ mod tests {
     #[test_case(b"{% for x in empty_list %}{{x}}{% end %}after" => "after"; "for_empty_iterable_silent")]
     #[test_case(b"{% if false %}{% for x in [1] %}{{ missing }}{% end %}{% end %}" => ""; "for_in_untaken_branch_silent")]
     fn eval_body(src: &[u8]) -> String {
-        let mut out = Vec::new();
-        Template::from_bytes(src)
-            .render(&mut out, &var_scope(), &TestRegistry)
-            .unwrap();
-        String::from_utf8(out).unwrap()
+        render(src, &var_scope()).unwrap()
     }
 
     #[test_case(b"{% if str %}x{% end %}" => RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Str, span: (6, 3).into() } ; "if_cond_str")]
     #[test_case(b"{% if no %}{% elif num %}x{% end %}" => RenderError::TypeMismatch { expected: ValueType::Bool, got: ValueType::Int, span: (19, 3).into() } ; "elif_cond_int")]
     #[test_case(b"{% for x in str %}{{x}}{% end %}" => RenderError::TypeMismatch { expected: ValueType::List, got: ValueType::Str, span: (12, 3).into() } ; "for_iterable_str")]
     fn eval_body_error(src: &[u8]) -> RenderError {
-        let mut out = Vec::new();
-        match Template::from_bytes(src)
-            .render(&mut out, &var_scope(), &TestRegistry)
-            .unwrap_err()
-        {
+        match render(src, &var_scope()).unwrap_err() {
             Error::Render(err) => err,
             _ => panic!("expected Render error"),
         }

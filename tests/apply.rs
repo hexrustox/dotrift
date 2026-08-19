@@ -4,8 +4,8 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 
-use common::TestEnv;
-use dotrift::commands::apply::{ApplyOptions, ObstructionChoice, PROMPT_COUNT, set_prompt_choice};
+use common::{ApplyScenario, TestEnv, prompt_count, snapshot_settings, test_name};
+use dotrift::commands::apply::{ApplyOptions, ObstructionChoice, set_prompt_choice};
 use dotrift::hash::hash_bytes;
 use dotrift::state::{Kind, StateDatabase};
 use test_case::test_case;
@@ -272,7 +272,7 @@ use test_case::test_case;
     |_source: &Path, target: &Path| {
         assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"new-a");
         assert_eq!(fs::read(target.join("b.txt")).unwrap(), b"new-b");
-        assert_eq!(PROMPT_COUNT.with(|c|*c.borrow()), 1);
+        assert_eq!(prompt_count(), 1);
     }
     ; "replace_all_latches"
 )]
@@ -284,19 +284,10 @@ use test_case::test_case;
     |_source: &Path, _target: &Path| {}
     ; "empty_deployment_succeeds"
 )]
-fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setup: F, assert: G) {
-    let env = TestEnv::new();
-    let source_dir = env.path("source");
-    let target_dir = env.path("target");
-    fs::create_dir_all(&source_dir).unwrap();
-    fs::create_dir_all(&target_dir).unwrap();
-    fs::write(
-        env.path("source/dotrift.toml"),
-        setup(&source_dir, &target_dir),
-    )
-    .unwrap();
-    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf())).unwrap();
-    assert(&source_dir, &target_dir);
+fn run_apply_test(setup: impl Fn(&Path, &Path) -> &'static str, assert: impl Fn(&Path, &Path)) {
+    let scenario = ApplyScenario::new(setup);
+    scenario.run();
+    assert(&scenario.source, &scenario.target);
 }
 
 #[test_case(
@@ -340,7 +331,7 @@ fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setu
             .unwrap();
         assert_eq!(record.kind, Kind::Symlink);
         assert_eq!(record.source_path, source.join("file.txt"));
-        assert_eq!(PROMPT_COUNT.with(|count| *count.borrow()), 0);
+        assert_eq!(prompt_count(), 0);
     }
     ; "symlink_replaces_on_source_change"
 )]
@@ -636,7 +627,7 @@ fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setu
             .unwrap()
             .unwrap();
         assert_eq!(record.content_hash, Some(hash_bytes(b"original")));
-        assert_eq!(PROMPT_COUNT.with(|count| *count.borrow()), 1);
+        assert_eq!(prompt_count(), 1);
     }
     ; "tampered_copy_prompt_replace_restores"
 )]
@@ -659,7 +650,7 @@ fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setu
             .unwrap()
             .unwrap();
         assert_eq!(record.content_hash, Some(hash_bytes(b"original")));
-        assert_eq!(PROMPT_COUNT.with(|count| *count.borrow()), 1);
+        assert_eq!(prompt_count(), 1);
     }
     ; "tampered_copy_prompt_skip_retains_record"
 )]
@@ -686,7 +677,7 @@ fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setu
             .unwrap();
         assert_eq!(record.kind, Kind::Symlink);
         assert_eq!(record.source_path, source.join("file.txt"));
-        assert_eq!(PROMPT_COUNT.with(|count| *count.borrow()), 1);
+        assert_eq!(prompt_count(), 1);
     }
     ; "tampered_symlink_prompt_replace_restores"
 )]
@@ -729,34 +720,20 @@ fn run_apply_test<F: Fn(&Path, &Path) -> &'static str, G: Fn(&Path, &Path)>(setu
         assert!(fs::symlink_metadata(target.join("sub")).unwrap().is_dir());
         assert_eq!(fs::read(target.join("sub/file.txt")).unwrap(), b"hello");
         assert!(fs::symlink_metadata(target.join("real")).unwrap().is_dir());
-        assert_eq!(PROMPT_COUNT.with(|count| *count.borrow()), 1);
+        assert_eq!(prompt_count(), 1);
     }
     ; "parent_dir_replaced_by_symlink_prompts"
 )]
-fn run_apply_test_twice<
-    F: Fn(&Path, &Path) -> &'static str,
-    G: Fn(&Path, &Path) -> Option<&'static str>,
-    H: Fn(&Path, &Path),
->(
-    setup: F,
-    modify: G,
-    assert: H,
+fn run_apply_test_twice(
+    setup: impl Fn(&Path, &Path) -> &'static str,
+    modify: impl Fn(&Path, &Path) -> Option<&'static str>,
+    assert: impl Fn(&Path, &Path),
 ) {
-    let env = TestEnv::new();
-    let source_dir = env.path("source");
-    let target_dir = env.path("target");
-    fs::create_dir_all(&source_dir).unwrap();
-    fs::create_dir_all(&target_dir).unwrap();
-    let config = setup(&source_dir, &target_dir);
-    fs::write(env.path("source/dotrift.toml"), config).unwrap();
-    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf())).unwrap();
-    fs::write(
-        env.path("source/dotrift.toml"),
-        modify(&source_dir, &target_dir).unwrap_or(config),
-    )
-    .unwrap();
-    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf())).unwrap();
-    assert(&source_dir, &target_dir);
+    let scenario = ApplyScenario::new(setup);
+    scenario.run();
+    scenario.rewrite(modify);
+    scenario.run();
+    assert(&scenario.source, &scenario.target);
 }
 
 #[test_case(
@@ -816,20 +793,10 @@ fn run_apply_test_twice<
     => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("is not a directory"))
     ; "target_directory_is_a_file_fails"
 )]
-fn run_apply_fails<F: Fn(&Path, &Path) -> &'static str>(
-    setup: F,
+fn run_apply_fails(
+    setup: impl Fn(&Path, &Path) -> &'static str,
 ) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
-    let env = TestEnv::new();
-    let source_dir = env.path("source");
-    let target_dir = env.path("target");
-    fs::create_dir_all(&source_dir).unwrap();
-    fs::create_dir_all(&target_dir).unwrap();
-    fs::write(
-        env.path("source/dotrift.toml"),
-        setup(&source_dir, &target_dir),
-    )
-    .unwrap();
-    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf()))
+    ApplyScenario::new(setup).try_run()
 }
 
 #[test_case(
@@ -844,44 +811,26 @@ fn run_apply_fails<F: Fn(&Path, &Path) -> &'static str>(
     => matches Err(e) if e.chain().any(|cause| cause.to_string().contains("literal portal source"))
     ; "source_deleted_between_runs_fails"
 )]
-fn run_apply_test_twice_fails<
-    F: Fn(&Path, &Path) -> &'static str,
-    G: Fn(&Path, &Path) -> Option<&'static str>,
->(
-    setup: F,
-    modify: G,
+fn run_apply_test_twice_fails(
+    setup: impl Fn(&Path, &Path) -> &'static str,
+    modify: impl Fn(&Path, &Path) -> Option<&'static str>,
 ) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
-    let env = TestEnv::new();
-    let source_dir = env.path("source");
-    let target_dir = env.path("target");
-    fs::create_dir_all(&source_dir).unwrap();
-    fs::create_dir_all(&target_dir).unwrap();
-    let config = setup(&source_dir, &target_dir);
-    fs::write(env.path("source/dotrift.toml"), config).unwrap();
-    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf())).unwrap();
-    fs::write(
-        env.path("source/dotrift.toml"),
-        modify(&source_dir, &target_dir).unwrap_or(config),
-    )
-    .unwrap();
-    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf()))
+    let scenario = ApplyScenario::new(setup);
+    scenario.run();
+    scenario.rewrite(modify);
+    scenario.try_run()
 }
 
 #[test]
 fn creates_missing_target_directory() {
     let env = TestEnv::new();
-    let source_dir = env.path("source");
-    let target_dir = env.path("target");
-    fs::create_dir_all(&source_dir).unwrap();
-    fs::write(source_dir.join("file.txt"), b"hello").unwrap();
-    fs::write(
-        source_dir.join("dotrift.toml"),
-        "[portal]\n\"file.txt\" = \"target.txt\"\n",
-    )
-    .unwrap();
-    dotrift::commands::apply::run(&source_dir, Some(target_dir.clone())).unwrap();
-    assert!(fs::symlink_metadata(&target_dir).unwrap().is_dir());
-    assert_eq!(fs::read(target_dir.join("target.txt")).unwrap(), b"hello");
+    let source = env.source_dir();
+    fs::write(source.join("file.txt"), b"hello").unwrap();
+    env.write_config("[portal]\n\"file.txt\" = \"target.txt\"\n");
+    let target = env.path("target");
+    dotrift::commands::apply::run(&source, Some(target.clone())).unwrap();
+    assert!(fs::symlink_metadata(&target).unwrap().is_dir());
+    assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"hello");
 }
 
 #[test_case(
@@ -1191,40 +1140,21 @@ fn creates_missing_target_directory() {
     }
     ; "clean_up_skipped_when_entry_skipped"
 )]
-fn test_apply_clean_up<
-    F: Fn(&Path, &Path) -> &'static str,
-    G: Fn(&Path, &Path) -> Option<&'static str>,
-    H: Fn(&Path, &Path),
->(
-    setup: F,
-    modify: G,
+fn test_apply_clean_up(
+    setup: impl Fn(&Path, &Path) -> &'static str,
+    modify: impl Fn(&Path, &Path) -> Option<&'static str>,
     prune: bool,
-    assert: H,
+    assert: impl Fn(&Path, &Path),
 ) {
-    let env = TestEnv::new();
-    let source_dir = env.path("source");
-    let target_dir = env.path("target");
-    fs::create_dir_all(&source_dir).unwrap();
-    fs::create_dir_all(&target_dir).unwrap();
-    let config = setup(&source_dir, &target_dir);
-    fs::write(env.path("source/dotrift.toml"), config).unwrap();
-    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf())).unwrap();
-    fs::write(
-        env.path("source/dotrift.toml"),
-        modify(&source_dir, &target_dir).unwrap_or(config),
-    )
-    .unwrap();
-    dotrift::commands::apply::run_with_options(
-        &source_dir,
-        Some(target_dir.to_path_buf()),
-        ApplyOptions {
-            clean_up: true,
-            prune_empty_dirs: prune,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    assert(&source_dir, &target_dir);
+    let scenario = ApplyScenario::new(setup);
+    scenario.run();
+    scenario.rewrite(modify);
+    scenario.run_with_options(ApplyOptions {
+        clean_up: true,
+        prune_empty_dirs: prune,
+        ..Default::default()
+    });
+    assert(&scenario.source, &scenario.target);
 }
 
 #[test_case(
@@ -1376,26 +1306,12 @@ fn test_apply_clean_up<
     }
     ; "clean_up_prune_skips_non_empty_parent"
 )]
-fn test_dry_run<F: Fn(&Path, &Path) -> &'static str>(setup: F, options: ApplyOptions) {
+fn test_dry_run(setup: impl Fn(&Path, &Path) -> &'static str, options: ApplyOptions) {
     dotrift::capture::clear();
-    let env = TestEnv::new();
-    let source_dir = env.path("source");
-    let target_dir = env.path("target");
-    fs::create_dir_all(&source_dir).unwrap();
-    fs::write(
-        env.path("source/dotrift.toml"),
-        setup(&source_dir, &target_dir),
-    )
-    .unwrap();
-    dotrift::commands::apply::run_with_options(&source_dir, Some(target_dir.clone()), options)
-        .unwrap();
-
-    let test_name = std::thread::current().name().unwrap().replace(":", "_");
-    let captured = dotrift::capture::take();
-    let mut settings = insta::Settings::clone_current();
-    settings.add_filter(env.root().to_str().unwrap(), "<root>");
-    settings.bind(|| {
-        insta::assert_snapshot!(test_name, captured);
+    let scenario = ApplyScenario::new(setup);
+    scenario.run_with_options(options);
+    snapshot_settings(&scenario.env).bind(|| {
+        insta::assert_snapshot!(test_name(), dotrift::capture::take());
     });
 }
 
@@ -1434,26 +1350,12 @@ fn test_dry_run<F: Fn(&Path, &Path) -> &'static str>(setup: F, options: ApplyOpt
     }
     ; "mixed_deploy_types_deployed"
 )]
-fn test_apply_verbose<F: Fn(&Path, &Path) -> &'static str>(setup: F, options: ApplyOptions) {
+fn test_apply_verbose(setup: impl Fn(&Path, &Path) -> &'static str, options: ApplyOptions) {
     dotrift::capture::clear();
-    let env = TestEnv::new();
-    let source_dir = env.path("source");
-    let target_dir = env.path("target");
-    fs::create_dir_all(&source_dir).unwrap();
-    fs::create_dir_all(&target_dir).unwrap();
-    fs::write(
-        env.path("source/dotrift.toml"),
-        setup(&source_dir, &target_dir),
-    )
-    .unwrap();
-    dotrift::commands::apply::run_with_options(&source_dir, Some(target_dir.clone()), options)
-        .unwrap();
-    let test_name = std::thread::current().name().unwrap().replace(":", "_");
-    let captured = dotrift::capture::take();
-    let mut settings = insta::Settings::clone_current();
-    settings.add_filter(env.root().to_str().unwrap(), "<root>");
-    settings.bind(|| {
-        insta::assert_snapshot!(test_name, captured);
+    let scenario = ApplyScenario::new(setup);
+    scenario.run_with_options(options);
+    snapshot_settings(&scenario.env).bind(|| {
+        insta::assert_snapshot!(test_name(), dotrift::capture::take());
     });
 }
 
@@ -1575,66 +1477,32 @@ fn test_apply_verbose<F: Fn(&Path, &Path) -> &'static str>(setup: F, options: Ap
     }
     ; "no_op_clean_up"
 )]
-fn test_apply_verbose_twice<
-    F: Fn(&Path, &Path) -> &'static str,
-    G: Fn(&Path, &Path) -> Option<&'static str>,
->(
-    setup: F,
-    modify: G,
+fn test_apply_verbose_twice(
+    setup: impl Fn(&Path, &Path) -> &'static str,
+    modify: impl Fn(&Path, &Path) -> Option<&'static str>,
     options: ApplyOptions,
 ) {
-    let env = TestEnv::new();
-    let source_dir = env.path("source");
-    let target_dir = env.path("target");
-    fs::create_dir_all(&source_dir).unwrap();
-    fs::create_dir_all(&target_dir).unwrap();
-    let config = setup(&source_dir, &target_dir);
-    fs::write(env.path("source/dotrift.toml"), config).unwrap();
-    dotrift::commands::apply::run(&source_dir, Some(target_dir.to_path_buf())).unwrap();
-    fs::write(
-        env.path("source/dotrift.toml"),
-        modify(&source_dir, &target_dir).unwrap_or(config),
-    )
-    .unwrap();
+    let scenario = ApplyScenario::new(setup);
+    scenario.run();
+    scenario.rewrite(modify);
     dotrift::capture::clear();
-    dotrift::commands::apply::run_with_options(
-        &source_dir,
-        Some(target_dir.to_path_buf()),
-        options,
-    )
-    .unwrap();
-    let test_name = std::thread::current().name().unwrap().replace(":", "_");
-    let captured = dotrift::capture::take();
-    let mut settings = insta::Settings::clone_current();
-    settings.add_filter(env.root().to_str().unwrap(), "<root>");
-    settings.bind(|| {
-        insta::assert_snapshot!(test_name, captured);
+    scenario.run_with_options(options);
+    snapshot_settings(&scenario.env).bind(|| {
+        insta::assert_snapshot!(test_name(), dotrift::capture::take());
     });
 }
 
 #[test]
 fn quiet_suppresses_summary() {
-    let env = TestEnv::new();
-    let source_dir = env.path("source");
-    let target_dir = env.path("target");
-    fs::create_dir_all(&source_dir).unwrap();
-    fs::create_dir_all(&target_dir).unwrap();
-    fs::write(source_dir.join("a.txt"), b"A").unwrap();
-    fs::write(source_dir.join("b.txt"), b"B").unwrap();
-    fs::write(
-        source_dir.join("dotrift.toml"),
-        "[portal]\n\"a.txt\" = \"a.txt\"\n\"b.txt\" = \"sub/b.txt\"\n",
-    )
-    .unwrap();
+    let scenario = ApplyScenario::new(|source, _target| {
+        fs::write(source.join("a.txt"), b"A").unwrap();
+        fs::write(source.join("b.txt"), b"B").unwrap();
+        "[portal]\n\"a.txt\" = \"a.txt\"\n\"b.txt\" = \"sub/b.txt\"\n"
+    });
     dotrift::capture::clear();
-    dotrift::commands::apply::run_with_options(
-        &source_dir,
-        Some(target_dir.clone()),
-        ApplyOptions {
-            quiet: true,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    scenario.run_with_options(ApplyOptions {
+        quiet: true,
+        ..Default::default()
+    });
     assert_eq!(dotrift::capture::take(), "");
 }

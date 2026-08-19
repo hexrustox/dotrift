@@ -546,41 +546,31 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn selection_previous_wraps_to_last() {
-        let mut state = SelectionState {
-            options: vec![1, 2, 3]
+    fn selection_state(options: Vec<i32>, selected: usize) -> SelectionState<i32> {
+        SelectionState::<i32> {
+            options: options
                 .into_iter()
                 .map(|value| super::OptionEntry {
                     value,
                     label: value.to_string(),
-                    hotkey: char::from_digit(value, 10).unwrap(),
+                    hotkey: char::from_digit(value as u32, 10).unwrap(),
                 })
                 .collect(),
-            selected: 0,
-        };
+            selected,
+        }
+    }
 
+    #[test]
+    fn selection_previous_wraps_to_last() {
+        let mut state = selection_state(vec![1, 2, 3], 0);
         state.previous();
-
         assert_eq!(state.selected, 2);
     }
 
     #[test]
     fn selection_next_wraps_to_first() {
-        let mut state = SelectionState {
-            options: vec![1, 2, 3]
-                .into_iter()
-                .map(|value| super::OptionEntry {
-                    value,
-                    label: value.to_string(),
-                    hotkey: char::from_digit(value, 10).unwrap(),
-                })
-                .collect(),
-            selected: 2,
-        };
-
+        let mut state = selection_state(vec![1, 2, 3], 2);
         state.next();
-
         assert_eq!(state.selected, 0);
     }
 }

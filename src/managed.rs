@@ -94,7 +94,7 @@ mod tests {
         |t| crate::record!(s, t.join("link"), t.join("elsewhere")) => false;
         "symlink_record_but_target_missing"
     )]
-    fn managed_verdict<T: Fn(&Path), F: Fn(&Path) -> StateRecord>(setup: T, record: F) -> bool {
+    fn managed_verdict(setup: impl Fn(&Path), record: impl Fn(&Path) -> StateRecord) -> bool {
         let tmp = tempdir().unwrap();
         setup(tmp.path());
         is_managed(&record(tmp.path())).unwrap()

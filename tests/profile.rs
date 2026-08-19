@@ -1,21 +1,10 @@
 mod common;
 
-use std::fs;
 use std::path::Path;
 
 use common::TestEnv;
 use dotrift::cli::ProfileCommand;
 use test_case::test_case;
-
-fn source_dir(env: &TestEnv) -> std::path::PathBuf {
-    let path = env.path("source");
-    fs::create_dir_all(&path).unwrap();
-    path
-}
-
-fn write_data_file(env: &TestEnv, contents: &str) {
-    fs::write(env.path("source/dotrift_data.toml"), contents).unwrap();
-}
 
 fn run_and_take(source: Option<&Path>, command: ProfileCommand) -> String {
     dotrift::capture::clear();
@@ -25,12 +14,7 @@ fn run_and_take(source: Option<&Path>, command: ProfileCommand) -> String {
 
 fn run_expects_error(source: Option<&Path>, command: ProfileCommand, needle: &str) {
     let error = dotrift::commands::profile::run(source, command).unwrap_err();
-    assert!(
-        error
-            .chain()
-            .any(|cause| cause.to_string().contains(needle)),
-        "expected an error containing `{needle}` but got: {error:?}"
-    );
+    common::assert_error_chain(&error, needle);
 }
 
 #[test_case(None, &[], ProfileCommand::List => ""; "list_without_data_file_prints_nothing")]
@@ -68,9 +52,9 @@ fn run_expects_error(source: Option<&Path>, command: ProfileCommand, needle: &st
 )]
 fn output_matrix(data: Option<&str>, active: &[&str], command: ProfileCommand) -> String {
     let env = TestEnv::new();
-    let source = source_dir(&env);
+    let source = env.source_dir();
     if let Some(contents) = data {
-        write_data_file(&env, contents);
+        env.write_data_file(contents);
     }
     for name in active {
         env.database().activate_profile(name).unwrap();
@@ -91,8 +75,8 @@ fn list_nonexistent_source_directory_errors() {
 #[test]
 fn activate_defined_profile_succeeds() {
     let env = TestEnv::new();
-    let source = source_dir(&env);
-    write_data_file(&env, "[profile.work]\n");
+    let source = env.source_dir();
+    env.write_data_file("[profile.work]\n");
     assert_eq!(
         run_and_take(
             Some(&source),
@@ -110,8 +94,8 @@ fn activate_defined_profile_succeeds() {
 #[test]
 fn activate_undefined_profile_errors() {
     let env = TestEnv::new();
-    let source = source_dir(&env);
-    write_data_file(&env, "[profile.other]\n");
+    let source = env.source_dir();
+    env.write_data_file("[profile.other]\n");
     run_expects_error(
         Some(&source),
         ProfileCommand::Activate {
@@ -125,8 +109,8 @@ fn activate_undefined_profile_errors() {
 #[test]
 fn activate_reactivation_moves_to_precedence_end() {
     let env = TestEnv::new();
-    let source = source_dir(&env);
-    write_data_file(&env, "[profile.a]\n[profile.b]\n");
+    let source = env.source_dir();
+    env.write_data_file("[profile.a]\n[profile.b]\n");
     let database = env.database();
     database.activate_profile("a").unwrap();
     database.activate_profile("b").unwrap();
@@ -196,9 +180,8 @@ fn deactivate_stale_profile_without_definition_succeeds() {
 #[test]
 fn show_renders_base_variables() {
     let env = TestEnv::new();
-    let source = source_dir(&env);
-    write_data_file(
-        &env,
+    let source = env.source_dir();
+    env.write_data_file(
         "[variable]\neditor = \"vim\"\ntheme = \"dark\"\ncount = 42\nenabled = true\ntags = [\"a\", \"b\"]\nsettings = { lang = \"rust\", indent = 2 }\n",
     );
     insta::assert_snapshot!(run_and_take(Some(&source), ProfileCommand::Show));
@@ -207,9 +190,8 @@ fn show_renders_base_variables() {
 #[test]
 fn show_most_recently_activated_profile_wins() {
     let env = TestEnv::new();
-    let source = source_dir(&env);
-    write_data_file(
-        &env,
+    let source = env.source_dir();
+    env.write_data_file(
         "[variable]\nv = \"base\"\n[profile.p1]\nv = \"first\"\n[profile.p2]\nv = \"second\"\n",
     );
     let database = env.database();
@@ -229,9 +211,8 @@ fn show_most_recently_activated_profile_wins() {
 #[test]
 fn show_unions_keys_across_multiple_active_profiles() {
     let env = TestEnv::new();
-    let source = source_dir(&env);
-    write_data_file(
-        &env,
+    let source = env.source_dir();
+    env.write_data_file(
         "[variable]\nbase = \"base\"\n[profile.a]\nbase = \"a\"\nfrom_a = \"A\"\n[profile.b]\nbase = \"b\"\nfrom_b = \"B\"\n[profile.c]\nbase = \"c\"\nfrom_c = \"C\"\n",
     );
     let database = env.database();
@@ -247,11 +228,8 @@ fn show_unions_keys_across_multiple_active_profiles() {
 #[test]
 fn all_state_transitions_round_trip() {
     let env = TestEnv::new();
-    let source = source_dir(&env);
-    write_data_file(
-        &env,
-        "[variable]\nv = \"base\"\n[profile.work]\nv = \"over\"\n",
-    );
+    let source = env.source_dir();
+    env.write_data_file("[variable]\nv = \"base\"\n[profile.work]\nv = \"over\"\n");
     let database = env.database();
     database.activate_profile("work").unwrap();
     assert_eq!(

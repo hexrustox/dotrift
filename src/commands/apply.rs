@@ -798,6 +798,16 @@ mod tests {
     use tempfile::tempdir;
     use test_case::test_case;
 
+    fn test_db() -> (tempfile::TempDir, StateDatabase) {
+        let tmp = tempdir().unwrap();
+        let database = StateDatabase::open_at(&tmp.path().join("db")).unwrap();
+        (tmp, database)
+    }
+
+    fn prompt_count() -> usize {
+        PROMPT_COUNT.with(|count| *count.borrow())
+    }
+
     #[test_case(|t| t.join("file") => None; "direct_child_has_no_obstruction")]
     #[test_case(|t| {
         fs::create_dir_all(t.join("a/b/c")).unwrap();
@@ -820,7 +830,7 @@ mod tests {
     #[test_case(|t| t.join("a/b/file") => None; "empty_root_target_has_missing_parent")]
     #[test_case(|_| PathBuf::from("/outside/target/file") => panics ""; "target_outside_root")]
     #[test_case(|_| PathBuf::from("/") => panics ""; "target_has_no_parent")]
-    fn parent_obstruction_test<F: Fn(&Path) -> PathBuf>(setup: F) -> Option<PathBuf> {
+    fn parent_obstruction_test(setup: impl Fn(&Path) -> PathBuf) -> Option<PathBuf> {
         let tmp = tempdir().unwrap();
         parent_obstruction(tmp.path(), &setup(tmp.path()))
             .unwrap()
@@ -928,18 +938,14 @@ mod tests {
         => panics ""
         ; "missing_path_is_an_error"
     )]
-    fn remove_path_test<
-        F: Fn(&mut StateDatabase, &Path) -> PathBuf,
-        G: Fn(&StateDatabase, &Path),
-    >(
-        setup: F,
-        assert: G,
+    fn remove_path_test(
+        setup: impl Fn(&mut StateDatabase, &Path) -> PathBuf,
+        assert: impl Fn(&StateDatabase, &Path),
     ) {
-        let tmp = tempdir().unwrap();
-        let mut database = StateDatabase::open_at(&tmp.path().join("db")).unwrap();
-        let path = setup(&mut database, tmp.path());
+        let (_tmp, mut database) = test_db();
+        let path = setup(&mut database, _tmp.path());
         remove_path(&database, &path).unwrap();
-        assert(&database, tmp.path())
+        assert(&database, _tmp.path())
     }
 
     macro_rules! entry {
@@ -1223,25 +1229,21 @@ mod tests {
         => panics ""
         ; "template_with_undefined_variable_errors"
     )]
-    fn deploy_entry_test<
-        F: Fn(&mut StateDatabase, &Path) -> config::DeploymentEntry,
-        G: Fn(&StateDatabase, &Path),
-    >(
-        setup: F,
-        assert: G,
+    fn deploy_entry_test(
+        setup: impl Fn(&mut StateDatabase, &Path) -> config::DeploymentEntry,
+        assert: impl Fn(&StateDatabase, &Path),
     ) -> EntryResult {
-        let tmp = tempdir().unwrap();
-        let mut database = StateDatabase::open_at(&tmp.path().join("db")).unwrap();
-        let entry = setup(&mut database, tmp.path());
+        let (_tmp, mut database) = test_db();
+        let entry = setup(&mut database, _tmp.path());
         let mut replace_all = false;
         let result = deploy_entry(
             &database,
-            tmp.path(),
+            _tmp.path(),
             &entry,
             &HashMap::new(),
             &mut replace_all,
         );
-        assert(&database, tmp.path());
+        assert(&database, _tmp.path());
         result.unwrap()
     }
 
@@ -1319,31 +1321,27 @@ mod tests {
         => vec![EntryResult::Replaced, EntryResult::Replaced]
         ; "replace_all_latches_via_target_prompt_then_removes_parent_obstruction_without_prompt"
     )]
-    fn deploy_entry_replace_all_test<
-        F: Fn(&mut StateDatabase, &Path) -> Vec<config::DeploymentEntry>,
-        G: Fn(&StateDatabase, &Path),
-    >(
-        setup: F,
-        assert: G,
+    fn deploy_entry_replace_all_test(
+        setup: impl Fn(&mut StateDatabase, &Path) -> Vec<config::DeploymentEntry>,
+        assert: impl Fn(&StateDatabase, &Path),
     ) -> Vec<EntryResult> {
-        let tmp = tempdir().unwrap();
-        let mut database = StateDatabase::open_at(&tmp.path().join("db")).unwrap();
+        let (_tmp, mut database) = test_db();
         set_prompt_choice(ObstructionChoice::ReplaceAll);
-        let entries = setup(&mut database, tmp.path());
+        let entries = setup(&mut database, _tmp.path());
         let mut replace_all = false;
         let mut results = Vec::new();
         for entry in &entries {
             let result = deploy_entry(
                 &database,
-                tmp.path(),
+                _tmp.path(),
                 entry,
                 &HashMap::new(),
                 &mut replace_all,
             );
             results.push(result.unwrap());
         }
-        assert(&database, tmp.path());
-        assert_eq!(PROMPT_COUNT.with(|c| *c.borrow()), 1);
+        assert(&database, _tmp.path());
+        assert_eq!(prompt_count(), 1);
         results
     }
 
@@ -1396,9 +1394,9 @@ mod tests {
         |_t| HashSet::new() => false;
         "path_is_a_regular_file"
     )]
-    fn would_be_empty_test<F: Fn(&Path) -> PathBuf, G: Fn(&Path) -> HashSet<PathBuf>>(
-        setup: F,
-        removals: G,
+    fn would_be_empty_test(
+        setup: impl Fn(&Path) -> PathBuf,
+        removals: impl Fn(&Path) -> HashSet<PathBuf>,
     ) -> bool {
         let tmp = tempdir().unwrap();
         would_be_empty(&setup(tmp.path()), &removals(tmp.path())).unwrap()
@@ -1449,7 +1447,7 @@ mod tests {
         |_t| PathBuf::from("/") => panics "";
         "absolute_path_with_no_strip_prefix"
     )]
-    fn has_symlink_component_test<F: Fn(&Path) -> PathBuf>(setup: F) -> bool {
+    fn has_symlink_component_test(setup: impl Fn(&Path) -> PathBuf) -> bool {
         let tmp = tempdir().unwrap();
         has_symlink_component(tmp.path(), &setup(tmp.path())).unwrap()
     }
@@ -1504,7 +1502,7 @@ mod tests {
         |t| t.join("a/b/file") => 0;
         "missing_parent_is_not_pruned"
     )]
-    fn prune_parents_test<F: Fn(&Path) -> PathBuf>(setup: F) -> usize {
+    fn prune_parents_test(setup: impl Fn(&Path) -> PathBuf) -> usize {
         let tmp = tempdir().unwrap();
         prune_parents(tmp.path(), &setup(tmp.path()), false).unwrap()
     }
@@ -1647,21 +1645,16 @@ mod tests {
         };
         "prunes_empty_parent_dirs"
     )]
-    fn cleanup_test<
-        F: Fn(&mut StateDatabase, &Path),
-        G: Fn(&Path) -> HashSet<PathBuf>,
-        H: Fn(&StateDatabase, &Path, usize, usize),
-    >(
-        setup: F,
-        desired: G,
+    fn cleanup_test(
+        setup: impl Fn(&mut StateDatabase, &Path),
+        desired: impl Fn(&Path) -> HashSet<PathBuf>,
         options: ApplyOptions,
-        assert: H,
+        assert: impl Fn(&StateDatabase, &Path, usize, usize),
     ) {
-        let tmp = tempdir().unwrap();
-        let mut database = StateDatabase::open_at(&tmp.path().join("db")).unwrap();
-        setup(&mut database, tmp.path());
+        let (_tmp, mut database) = test_db();
+        setup(&mut database, _tmp.path());
         let (removed, pruned) =
-            cleanup(&database, tmp.path(), &desired(tmp.path()), options).unwrap();
-        assert(&database, tmp.path(), removed, pruned);
+            cleanup(&database, _tmp.path(), &desired(_tmp.path()), options).unwrap();
+        assert(&database, _tmp.path(), removed, pruned);
     }
 }

@@ -879,6 +879,29 @@ mod tests {
         };
     }
 
+    /// Parses `{{ <src> }}` and unwraps the single Interpolate expression.
+    fn interp_expr(src: &[u8]) -> Expr {
+        let src = [b"{{", src, b"}}"].concat();
+        let Node::Interpolate(expr) = parse(scan(&src).unwrap(), &src).unwrap().pop().unwrap()
+        else {
+            panic!("expected Interpolate")
+        };
+        expr
+    }
+
+    /// Parses `src` and asserts the result is a Parse error.
+    fn expect_parse_error(src: &[u8]) -> ParseError {
+        let Error::Parse(err) = parse(scan(src).unwrap(), src).unwrap_err() else {
+            panic!("expected parse error");
+        };
+        err
+    }
+
+    /// Parses `src` and unwraps its single top-level node.
+    fn first_node(src: &[u8]) -> Node {
+        parse(scan(src).unwrap(), src).unwrap().pop().unwrap()
+    }
+
     // -- string literals --
     #[test_case(br#""""# => expr!(str 3..3, 2..4) ; "empty_string")]
     #[test_case(b"\"hi\"" => expr!(str 3..5, 2..6) ; "string_literal")]
@@ -949,12 +972,7 @@ mod tests {
     #[test_case(b"  x  " => expr!(var 4..5) ; "trimmed_whitespace_body")]
     #[test_case(b"\n x \n" => expr!(var 4..5) ; "trimmed_multiline_body")]
     fn parse_interp(src: &[u8]) -> Expr {
-        let src = [b"{{", src, b"}}"].concat();
-        let Node::Interpolate(expr) = parse(scan(&src).unwrap(), &src).unwrap().pop().unwrap()
-        else {
-            panic!("expected Interpolate")
-        };
-        expr
+        interp_expr(src)
     }
 
     #[test_case(b"{% if yes %}Y{% end %}" => Node::If {
@@ -1041,7 +1059,7 @@ mod tests {
         }],
     } ; "for_with_nested_if")]
     fn parse_stmt_node(src: &[u8]) -> Node {
-        parse(scan(src).unwrap(), src).unwrap().pop().unwrap()
+        first_node(src)
     }
 
     // -- empty / whitespace --
@@ -1092,11 +1110,7 @@ mod tests {
     #[test_case(b"[a,]" => ParseError::TrailingComma { span: (4, 1).into() } ; "trailing_comma_list")]
     #[test_case(b"[a b]" => ParseError::UnexpectedTokenAfterExpr { span: (5, 1).into() } ; "list_missing_comma")]
     fn parse_interp_error(src: &[u8]) -> ParseError {
-        let src = [b"{{", src, b"}}"].concat();
-        let Error::Parse(err) = parse(scan(&src).unwrap(), &src).unwrap_err() else {
-            panic!("expected parse error");
-        };
-        err
+        expect_parse_error(&[b"{{", src, b"}}"].concat())
     }
 
     // -- empty / invalid statements --
@@ -1132,11 +1146,7 @@ mod tests {
     #[test_case(b"for 1 in list" => ParseError::InvalidVariable { span: (6, 1).into() } ; "for_digit_start_var")]
     #[test_case(b"for x in in" => ParseError::ReservedKeyword { keyword: "in".into(), span: (11, 2).into() } ; "for_reserved_keyword_iterable")]
     fn parse_stmt_error(src: &[u8]) -> ParseError {
-        let src = [b"{%", src, b"%}"].concat();
-        let Error::Parse(err) = parse(scan(&src).unwrap(), &src).unwrap_err() else {
-            panic!("expected parse error");
-        };
-        err
+        expect_parse_error(&[b"{%", src, b"%}"].concat())
     }
 
     // -- orphan terminators --
@@ -1161,9 +1171,6 @@ mod tests {
     #[test_case(b"{% if true %}{% else %}" => ParseError::UnclosedBlock { span: (0, 13).into() } ; "if_else_missing_end")]
     #[test_case(b"{% for x in list %}{% if true %}text{% end %}" => ParseError::UnclosedBlock { span: (0, 19).into() } ; "for_body_with_unclosed_inner_if")]
     fn parse_stmt_nodes_error(src: &[u8]) -> ParseError {
-        let Error::Parse(err) = parse(scan(src).unwrap(), src).unwrap_err() else {
-            panic!("expected parse error");
-        };
-        err
+        expect_parse_error(src)
     }
 }
