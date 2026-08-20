@@ -8,7 +8,13 @@ use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system}
 use test_case::test_case;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
+const RENDER_SETTLE: Duration = Duration::from_millis(100);
 const UTF8_ENV: &[(&str, &str)] = &[("LC_ALL", "en_US.UTF-8")];
+
+/// crossterm renders `Clear(FromCursorDown)` as CSI `J`; the prompt emits it
+/// exactly once per render (in `clear_prompt`), so counting it tracks
+/// re-renders without coupling to any user-facing text.
+const RENDER_CLEAR: &str = "\x1b[J";
 
 #[derive(Clone, Copy)]
 enum PromptFixture {
@@ -16,6 +22,8 @@ enum PromptFixture {
     Many,
     Default,
     Custom,
+    Multiline,
+    Wide,
 }
 
 impl PromptFixture {
@@ -29,6 +37,8 @@ impl PromptFixture {
             PromptFixture::Many => "many",
             PromptFixture::Default => "default",
             PromptFixture::Custom => "custom",
+            PromptFixture::Multiline => "multiline",
+            PromptFixture::Wide => "wide",
         }
     }
 }
@@ -49,6 +59,7 @@ struct PromptSession {
     rx: Receiver<Vec<u8>>,
     output: Vec<u8>,
     screen: vt100::Parser,
+    cursor_query_answered: bool,
 }
 
 impl PromptSession {
@@ -86,6 +97,7 @@ impl PromptSession {
             rx,
             output: Vec::new(),
             screen: vt100::Parser::new(rows, cols, 0),
+            cursor_query_answered: false,
         }
     }
 
@@ -97,17 +109,30 @@ impl PromptSession {
     fn absorb(&mut self, chunk: Vec<u8>) {
         self.screen.process(&chunk);
         self.output.extend_from_slice(&chunk);
+        // The prompt queries the cursor position once, before rendering
+        // anything, so the cursor is always at home (row 1, column 1) at that
+        // point. Answer the query so `crossterm::cursor::position` can return.
+        if !self.cursor_query_answered && self.output.windows(4).any(|window| window == b"\x1b[6n")
+        {
+            self.cursor_query_answered = true;
+            self.writer
+                .write_all(b"\x1b[1;1R")
+                .expect("answer cursor position query");
+            self.writer.flush().expect("flush cursor position answer");
+        }
     }
 
-    /// Blocks until the prompt's first output chunk arrives. The prompt only
-    /// emits output after entering raw mode, so this signals that sending
-    /// input is now safe.
+    /// Blocks until the prompt's cursor-position query has been answered. The
+    /// prompt emits that query (and the hide-cursor sequence) only after
+    /// entering raw mode, so this signals that sending input is now safe.
     fn wait_for_first_chunk(&mut self) {
-        let chunk = self
-            .rx
-            .recv_timeout(READY_TIMEOUT)
-            .expect("prompt never rendered anything (timeout)");
-        self.absorb(chunk);
+        while !self.cursor_query_answered {
+            let chunk = self
+                .rx
+                .recv_timeout(READY_TIMEOUT)
+                .expect("prompt never rendered anything (timeout)");
+            self.absorb(chunk);
+        }
     }
 
     fn send(&mut self, keys: &[u8]) {
@@ -119,12 +144,47 @@ impl PromptSession {
         self.master.resize(pty_size(rows, cols)).expect("resize");
     }
 
-    fn finish(mut self) -> Vec<u8> {
+    fn drain_and_wait(&mut self) {
         while let Ok(chunk) = self.rx.recv() {
             self.absorb(chunk);
         }
         self.child.wait().expect("child status");
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        self.drain_and_wait();
         self.output
+    }
+
+    /// Drains output until the prompt has rendered `renders` times, so a
+    /// mid-interaction screen snapshot reflects a fully flushed re-render
+    /// rather than a wall-clock quiet period. Returns only once any tail bytes
+    /// of the final render have settled.
+    fn drain_until(&mut self, renders: usize) {
+        while self.occurrences(RENDER_CLEAR) < renders {
+            let chunk = self
+                .rx
+                .recv_timeout(READY_TIMEOUT)
+                .expect("prompt did not render expected output (timeout)");
+            self.absorb(chunk);
+        }
+        // The clear bytes mark the start of a render, so absorb any tail of
+        // the final flush; the fixture blocks in event::read right after
+        // flushing, so the stream going quiet means the render fully arrived.
+        while let Ok(chunk) = self.rx.recv_timeout(RENDER_SETTLE) {
+            self.absorb(chunk);
+        }
+    }
+
+    fn occurrences(&self, marker: &str) -> usize {
+        self.output
+            .windows(marker.len())
+            .filter(|window| *window == marker.as_bytes())
+            .count()
+    }
+
+    fn screen(&mut self) -> &vt100::Screen {
+        self.screen.screen()
     }
 
     /// Drains the remaining output and snapshots the full render.
@@ -154,6 +214,40 @@ fn keyboard_input_selects_or_cancels(fixture: PromptFixture, keys: &[u8]) {
 }
 
 #[test]
+fn multiline_question_redisplays_from_column_zero_on_navigation() {
+    let mut session = PromptSession::spawn_standard(PromptFixture::Multiline);
+    session.wait_for_first_chunk();
+    session.send(b"\x1b[B");
+    session.send(b"\x1b[B");
+    session.drain_until(3);
+    assert_snapshot!(session.screen().contents());
+    session.send(b"\r");
+    session.finish();
+}
+
+#[test]
+fn long_question_and_option_labels_wrap_and_rerender_cleanly() {
+    let mut session = PromptSession::spawn(PromptFixture::Wide, 24, 40, UTF8_ENV);
+    session.wait_for_first_chunk();
+    session.send(b"\x1b[B");
+    session.drain_until(2);
+    let screen = session.screen();
+    assert_eq!(
+        screen.contents().matches("Select your preferred").count(),
+        1
+    );
+    let (_, cols) = screen.size();
+    let mut rows: Vec<String> = screen.rows(0, cols).collect();
+    while rows.last().is_some_and(String::is_empty) {
+        rows.pop();
+    }
+    let snapshot = rows.join("\n");
+    assert_snapshot!(snapshot);
+    session.send(b"\r");
+    session.finish();
+}
+
+#[test]
 fn unicode_disabled_renders_ascii_markers() {
     let mut session = PromptSession::spawn(
         PromptFixture::Basic,
@@ -162,7 +256,7 @@ fn unicode_disabled_renders_ascii_markers() {
         &[("LANG", "C"), ("LC_CTYPE", "C"), ("LC_ALL", "C")],
     );
     session.wait_for_first_chunk();
-    session.send(b"\x1b");
+    session.send(b"\r");
     session.finish_and_snapshot();
 }
 
@@ -172,7 +266,7 @@ fn small_terminal_scrolls_options_to_stay_reachable() {
     session.wait_for_first_chunk();
     session.send(b"\x1b[B");
     session.send(b"\x1b[B");
-    session.send(b"\x1b");
+    session.send(b"\r");
     session.finish_and_snapshot();
 }
 
@@ -200,7 +294,7 @@ fn assert_color_free(output: &[u8]) {
 fn no_color_env_disables_color_escapes() {
     let mut session = PromptSession::spawn(PromptFixture::Basic, 24, 120, &[("NO_COLOR", "1")]);
     session.wait_for_first_chunk();
-    session.send(b"\x1b");
+    session.send(b"\r");
     assert_color_free(&session.finish());
 }
 
@@ -208,6 +302,6 @@ fn no_color_env_disables_color_escapes() {
 fn dumb_terminal_disables_color_escapes() {
     let mut session = PromptSession::spawn(PromptFixture::Basic, 24, 120, &[("TERM", "dumb")]);
     session.wait_for_first_chunk();
-    session.send(b"\x1b");
+    session.send(b"\r");
     assert_color_free(&session.finish());
 }

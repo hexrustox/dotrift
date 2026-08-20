@@ -179,21 +179,21 @@ where
         queue!(stdout, cursor::Hide)?;
 
         let mut state = SelectionState::new(options, selected);
-        let mut rendered_lines = 0;
+        let position = cursor::position()?;
         loop {
-            rendered_lines = render(
+            render(
                 &mut stdout,
                 &self.question,
                 &self.style,
                 &state,
                 unicode_support,
                 color_support,
-                rendered_lines,
+                position,
             )?;
             stdout.flush()?;
 
             let mut cancel = || {
-                clear_prompt(&mut stdout, rendered_lines)?;
+                clear_prompt(&mut stdout, position)?;
                 stdout.flush()?;
                 Err(PromptError::Cancelled)
             };
@@ -212,7 +212,7 @@ where
                         state.select_hotkey(c.to_ascii_lowercase());
                     }
                     KeyCode::Enter if key.modifiers.is_empty() => {
-                        clear_prompt(&mut stdout, rendered_lines)?;
+                        clear_prompt(&mut stdout, position)?;
                         let option = &state.options[state.selected];
                         let marker = if unicode_support { "✓" } else { "done" };
                         writeln!(
@@ -338,9 +338,9 @@ fn render<E>(
     state: &SelectionState<E>,
     unicode_support: bool,
     color_support: bool,
-    previous_lines: usize,
+    position: (u16, u16),
 ) -> io::Result<usize> {
-    clear_prompt(stdout, previous_lines)?;
+    clear_prompt(stdout, position)?;
     let (_, rows) = terminal::size()?;
     let visible_count = usize::from(rows).saturating_sub(3).max(1);
     let question_lines = question.lines().count();
@@ -408,15 +408,12 @@ where
     }
 }
 
-fn clear_prompt(stdout: &mut impl Write, lines: usize) -> io::Result<()> {
-    if lines > 0 {
-        queue!(
-            stdout,
-            cursor::MoveUp(lines as u16),
-            cursor::MoveToColumn(0)
-        )?;
-    }
-    queue!(stdout, terminal::Clear(ClearType::FromCursorDown))
+fn clear_prompt(stdout: &mut impl Write, position: (u16, u16)) -> io::Result<()> {
+    queue!(
+        stdout,
+        cursor::MoveTo(position.0, position.1),
+        terminal::Clear(ClearType::FromCursorDown)
+    )
 }
 
 fn is_unicode() -> bool {

@@ -47,6 +47,29 @@ impl PromptOption for CustomChoice {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter)]
+enum WideChoice {
+    ElectricBike,
+    SharedRide,
+    RentalScooter,
+}
+
+impl PromptOption for WideChoice {
+    fn label(&self) -> Option<&str> {
+        match self {
+            WideChoice::ElectricBike => {
+                Some("an electric bicycle charged at home or your workplace overnight")
+            }
+            WideChoice::SharedRide => {
+                Some("sharing a ride with neighbors commuting along the same route each morning")
+            }
+            WideChoice::RentalScooter => {
+                Some("a scooter rented from a dock on the street corner near the station")
+            }
+        }
+    }
+}
+
 fn summarize<E: std::fmt::Debug>(result: Result<E, PromptError>) {
     match result {
         Ok(choice) => println!("confirmed: {choice:?}"),
@@ -80,6 +103,16 @@ fn main() {
         "custom" => summarize(
             SelectPrompt::<CustomChoice>::new()
                 .question("Pick an option")
+                .interact(),
+        ),
+        "multiline" => summarize(
+            SelectPrompt::<BasicChoice>::new()
+                .question("Pick an option\n(you can change it)")
+                .interact(),
+        ),
+        "wide" => summarize(
+            SelectPrompt::<WideChoice>::new()
+                .question("Select your preferred daily commute option from the list below, weighing the cost, the travel time, and the environmental impact of each")
                 .interact(),
         ),
         other => {

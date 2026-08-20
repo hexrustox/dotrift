@@ -1,0 +1,18 @@
+---
+source: tui/tests/prompt.rs
+expression: snapshot
+---
+Select your preferred daily commute opti
+on from the list below, weighing the cos
+t, the travel time, and the environmenta
+l impact of each
+  ○ [e] an electric bicycle charged at h
+ome or your workplace overnight
+  ● [s] sharing a ride with neighbors co
+mmuting along the same route each mornin
+g
+  ○ [r] a scooter rented from a dock on 
+the street corner near the station
+
+  ↑/↓ navigate  Enter select  A-Z jump  
+Esc cancel

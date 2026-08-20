@@ -1,12 +1,7 @@
 ---
 source: tui/tests/prompt.rs
-expression: screen
+expression: session.screen().contents()
 ---
-Pick an option
-(you can change it)
-  ● [b] bike
-  ○ [m] metro
-  ○ [t] tram
 Pick an option
 (you can change it)
   ○ [b] bike
