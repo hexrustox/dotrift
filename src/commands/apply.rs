@@ -587,10 +587,15 @@ fn prompt_for_obstruction(
 
 #[cfg(not(any(test, feature = "testing")))]
 fn path_kind(path: &Path) -> std::io::Result<&'static str> {
-    Ok(if fs::symlink_metadata(path)?.is_dir() {
+    let meta = fs::symlink_metadata(path)?;
+    Ok(if meta.is_dir() {
         "directory"
-    } else {
+    } else if meta.is_file() {
         "file"
+    } else if meta.is_symlink() {
+        "symlink"
+    } else {
+        "unknown"
     })
 }
 

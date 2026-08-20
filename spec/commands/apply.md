@@ -96,20 +96,21 @@ absolute location and its kind, and reports that the obstructing path is
 already present:
 
 ```
-Cannot deploy {kind} {source}: {kind} {obstruction} is already present.
+Cannot deploy {kind} {source} because {kind} {obstruction} is already present.
 How would you like to proceed?
 ```
 
-The kind is `file` or `directory`, decided by the path's own non-following
-metadata: a directory is `directory`, and everything else — regular files,
-symlinks, and special filesystem objects alike — is `file`. Paths are shown
-in absolute form. No size, modification time, link target, or entry count is
-shown.
+The kind is reported from the path's own non-following metadata, one of
+`directory`, `file`, `symlink`, or `unknown`: a directory is `directory`, a
+regular file is `file`, a symlink is `symlink`, and any other filesystem
+object — a FIFO, socket, device, or otherwise unresolvable kind — is
+`unknown`. Paths are shown in absolute form. No size, modification time, link
+target, or entry count is shown.
 
 An unmanaged obstruction offers:
 
 - `skip` — leave the target unchanged and continue with later entries.
-- `view detail` — show a content diff of the two files, then return to the
+- `view diff` — show a content diff of the two files, then return to the
   prompt.
 - `replace` — remove the obstruction and deploy the entry.
 - `replace all` — latch for this run: every upcoming obstruction prompt
@@ -127,12 +128,12 @@ The prompt choices are provided by the TUI/prompt API; `apply` consumes the
 API's result and does not implement terminal detection or a non-interactive
 fallback.
 
-`view detail` is offered only when both paths resolve, after following
+`view diff` is offered only when both paths resolve, after following
 symlinks, to regular files; it then shows a content diff of the two files.
 For a template entry, the rendered output is diffed against the target; a
 render failure shows the error and exits. For mixed
 file/directory kinds, symlinks resolving to directories, or special objects,
-`view detail` is omitted because no further useful information can be shown.
+`view diff` is omitted because no further useful information can be shown.
 
 The diff is displayed through the pager named by `$DOTRIFT_PAGER` when set,
 otherwise `$PAGER`, otherwise printed to standard output. An empty value
@@ -275,8 +276,8 @@ adds per-path `removed` and `pruned` lines (see [Output](#output)). A removal
 that fails at the filesystem level fails the run through the normal error
 path.
 
-`--dry-run --clean-up` reports the removals, relinquishments, and prunes the
-real run would perform, without changing the filesystem.
+`--dry-run --clean-up` reports the removals and prunes the real run would
+perform, without changing the filesystem.
 
 ### `--prune-empty-dirs`
 
