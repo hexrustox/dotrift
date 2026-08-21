@@ -204,6 +204,12 @@
       "sourceType": "github",
       "skillPath": "skills/productivity/writing-great-skills/SKILL.md",
       "computedHash": "4deb21855fb4deeeb1b8217b041faff003fd0c915d24a22f636851c520bc9c5c"
+    },
+    "writing-test-cases": {
+      "source": "hexrustox/skills",
+      "sourceType": "github",
+      "skillPath": "skills/writing-test-cases/SKILL.md",
+      "computedHash": "676b0732b0c6ee338acd41ec90dfbfae879cf0d62423c12ace159a99a6bcf564"
     }
   }
 }
