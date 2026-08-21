@@ -51,7 +51,8 @@ Maps source paths to target paths.
 * **Literal keys** (no wildcards) map exactly one source file or directory:
   * A literal file maps to exactly one target path.
   * A literal directory maps recursively; its contents are deployed beneath
-    the target destination, preserving descendants. Empty source directories
+    the target destination, preserving descendants. A symlink to a directory
+    is mapped like the directory it resolves to. Empty source directories
     produce no deployment entries.
 * **Glob keys** (containing wildcards) select matching source files. The
   value is a destination directory.
@@ -69,9 +70,47 @@ the value to form the final target path.
 
 ### Recursion and multi-match
 
-Literal directories and `dir/**` globs recurse. A source path may match
-multiple portals, producing multiple targets. Empty source directories are
-ignored.
+Literal directories and `dir/**` globs recurse, including through symlinked
+directories (see [Source symlink behavior](#source-symlink-behavior)). A
+source path may match multiple portals, producing multiple targets. Empty
+source directories are ignored.
+
+## Source symlink behavior
+
+Source symlinks are transparent during portal resolution: traversal follows
+them, whatever form the portal key takes. This section is the single
+statement of source-side symlink semantics; the command and global-option
+specs reference it rather than restate it.
+
+* **Traversal follows.** Globs descend into symlinked directories, and a
+  literal key may traverse symlinked path components. A symlink to a
+  directory is treated as the directory it resolves to: a literal naming one
+  maps recursively, and a glob reaching one descends into it. A symlinked
+  directory is never itself a deployable entry.
+* **Symlinked files deploy.** A source path that is a symlink to a regular
+  file is a deployable entry like any regular file, and the deploy type
+  controls what the target becomes:
+  * `symlink` — the target path becomes a symlink pointing to the source path
+    itself.
+  * `copy` — the link is resolved and the resolved bytes are copied; the
+    target is a regular file.
+  * `template` — the link is resolved and the resolved bytes are rendered as
+    a template; the target is a regular file.
+* **Dangling symlinks are errors.** A literal naming a dangling symlink, or a
+  glob matching one, is a configuration error. A dangling symlink that no
+  portal names or matches is simply not deployed.
+* **Cycles are errors.** A symlink cycle encountered during traversal is a
+  configuration error.
+* **Paths stay logical.** A file reached through a symlinked directory
+  deploys and records under its through-link source path, never a resolved
+  one. The same file reachable by two paths deploys twice, to two different
+  targets; only target-path *collisions* are rejected.
+* **Non-regular resolutions are errors.** A symlink that resolves to neither
+  a regular file nor a directory is a configuration error for every deploy
+  type.
+
+Every error in this section is a configuration error: it halts execution
+before any filesystem change.
 
 ## `[rule]`
 

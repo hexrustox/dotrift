@@ -16,13 +16,18 @@ Subcommand specs reference this file rather than restating these rules.
   raised only when both `XDG_DATA_HOME` and `HOME` are unset.
 * **Description:** Overrides the source directory. The source directory is
   resolved before `dotrift.toml` is read, and the configuration cannot set it.
+  A source directory that is itself a symlink is followed: portal resolution
+  walks the directory it resolves to (see `../dotrift-toml.md`, Source
+  symlink behavior).
 
 ### `-t, --target <dir>`
 
 * **Type:** path.
 * **Default:** `$HOME`. An error is raised when `$HOME` is unset or empty.
 * **Description:** Overrides the target directory. The resolved value must be
-  absolute.
+  absolute. A target directory that is itself a symlink is followed when it
+  resolves to a directory; one that resolves to a non-directory or dangles is
+  an error at preflight (see `apply.md`).
 
 No other global options are defined.
 
@@ -32,6 +37,12 @@ Any flag or argument that supplies a path may be given as a relative path. It
 is resolved against the process's current working directory to an absolute
 path immediately after CLI parsing. This applies to every path-supplying
 argument across all subcommands, not just the global options.
+
+A `--source` or `--target` root that is itself a symlink is followed: the
+root is used through the directory it resolves to. Roots otherwise keep the
+logical path as supplied; the one place they are resolved further is the
+source/target overlap comparison, which canonicalizes both roots before
+comparing them (ADR-0012).
 
 ## Target directory precedence
 

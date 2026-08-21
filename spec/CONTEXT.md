@@ -27,7 +27,7 @@ _Avoid_: computed target
 
 **Desired deployment**:
 The complete set of resolved portal entries `apply` intends to deploy for a
-given run: portal resolution, filtered by the ignore file and validated for
+given run: *portal resolution*, filtered by the ignore file and validated for
 collisions, with rules applied. Comparing it against the target directory and
 the management state drives `apply`'s decisions.
 _Avoid_: plan (generic)
@@ -36,6 +36,13 @@ _Avoid_: plan (generic)
 One entry in the `[portal]` table mapping a source pattern or literal to a
 target destination.
 _Avoid_: mapping, route
+
+**Portal resolution**:
+The activity that turns `[portal]` keys into source-path/target-path pairs by
+walking the source directory. Source symlinks are transparent to it —
+traversal follows them — and a file reached through one deploys under its
+logical source path.
+_Avoid_: discovery, scanning
 
 **Stripping prefix**:
 Portion of a glob portal key up to but not including the first path component

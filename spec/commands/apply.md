@@ -31,23 +31,26 @@ Before any filesystem change, `apply` verifies:
 - The control files are readable and well-formed, and the rendered
   `dotrift.toml` is valid (see `dotrift-toml.md` Validation).
 - Every literal portal source path exists. A literal naming a missing source
-  path is a configuration error. Glob portals that match zero source paths are
-  valid no-ops.
+  path or a dangling symlink is a configuration error. Glob portals that match
+  zero source paths are valid no-ops.
 - No two portal resolutions produce the same target path (collision), and no
   two desired target paths place one as an ancestor of the other (structural
   conflict).
 - The source and target roots satisfy the overlap rule: the source directory
   may lie inside the target directory, but the target directory may not equal
-  the source directory or lie inside it.
-- Every source path is a regular file or a symlink to a regular file. Special
-  source filesystem objects (FIFOs, sockets, device files, and so on) are
-  configuration errors for every deploy type.
+  the source directory or lie inside it. Both roots are canonicalized,
+  resolving symlinks fully, before they are compared (see
+  [`global.md`](global.md), Path resolution).
+- Every source path is a regular file or a symlink to a regular file,
+  resolved per the source symlink behavior (see
+  [`../dotrift-toml.md`](../dotrift-toml.md), Source symlink behavior).
+  Special source filesystem objects (FIFOs, sockets, device files, and so on)
+  are configuration errors for every deploy type.
 - The target directory root: absent → created during execution when the
-  desired deployment is non-empty; present but not a directory → error before
-  deployment. The target root is never treated as an ordinary replaceable
-  obstruction.
-- A copy or template entry whose source is a symlink that does not resolve to a
-  regular file fails preflight.
+  desired deployment is non-empty; a symlink root that resolves to a directory
+  is allowed and deployed through; present but not resolving to a directory →
+  error before deployment. The target root is never treated as an ordinary
+  replaceable obstruction.
 
 Preflight does not render deployed templates (see
 [Template rendering](#template-rendering)). No source snapshot is taken:
@@ -119,10 +122,12 @@ An unmanaged obstruction offers:
 `replace` may remove any filesystem object, including recursively deleting a
 non-empty directory. One `replace` decision authorises removal of the entire
 obstructing subtree — untracked files, clean managed files, modified managed
-files, nested directories, and special objects alike. Deletion runs one entry
-at a time, deepest-first, and stops at the first error; state is updated after
-each completed deletion. There is no `abort` option; an external interrupt may
-terminate the process under normal OS signal handling.
+files, nested directories, and special objects alike. Removal never follows
+symlinks: a symlink inside the subtree, or the obstruction itself when it is a
+symlink, is unlinked as a link and whatever it points at is left untouched.
+Deletion runs one entry at a time, deepest-first, and stops at the first error;
+state is updated after each completed deletion. There is no `abort` option; an
+external interrupt may terminate the process under normal OS signal handling.
 
 The prompt choices are provided by the TUI/prompt API; `apply` consumes the
 API's result and does not implement terminal detection or a non-interactive
@@ -144,11 +149,15 @@ non-zero exit status never fails the run.
 ### Parent directories
 
 Missing parent directories are created as needed and never recorded as
-managed. A required parent component that exists as a non-directory is an
-unmanaged obstruction resolved with the normal prompt. A symlink parent
-component is always an obstruction, even when it resolves to a directory —
-symlinks are never followed for traversal. Replacing a parent obstruction may
-remove the subtree beneath it.
+managed. A symlink parent component that resolves to a directory is traversed:
+the entry deploys through the link, and the write lands wherever the link
+resolves — possibly outside the target directory root or inside the source
+tree. Only the roots are overlap-checked, never a resolved parent. A required
+parent component that exists but is neither a directory nor a symlink
+resolving to one is an unmanaged obstruction resolved with the normal prompt.
+Replacing a parent obstruction may remove the subtree beneath it, except that
+a symlink obstruction is removed as a link, leaving whatever it points at
+untouched (see [Obstruction prompts](#obstruction-prompts)).
 
 ## Template rendering
 
@@ -264,11 +273,13 @@ removal candidate, while a negated pattern that re-includes it removes it from
 the candidate set.
 
 Only a stale path whose managed check passes — still a *managed path* — is
-removed. A stale path modified since the last apply is an obstruction and is
-never silently deleted: the file is left untouched and its record is
-relinquished, making it an ordinary untracked path. A record whose target no
-longer exists is relinquished as well, with nothing left on disk. Relinquishing
-neither fails the run nor is reported outside a dry-run.
+removed. Removal reaches through symlink parent components: a stale managed
+file behind a symlink parent is unlinked. A stale path modified since the
+last apply is an obstruction and is never silently deleted: the file is left
+untouched and its record is relinquished, making it an ordinary untracked
+path. A record whose target no longer exists is relinquished as well, with
+nothing left on disk. Relinquishing neither fails the run nor is reported
+outside a dry-run.
 
 `--clean-up` is silent by default: a real run prints nothing per removed path,
 and its summary line still reports the removal and prune counts. `--verbose`
@@ -284,8 +295,9 @@ perform, without changing the filesystem.
 `--prune-empty-dirs` may only be used together with `--clean-up`; using it
 alone is an error. After each removal, the parent chain of the removed path is
 walked upward while each directory is empty, removing it, and stopping at the
-first non-empty directory. The target directory root is never pruned, and a
-symlink parent component is never traversed or pruned. Pruning runs after
+first non-empty directory. The target directory root is never pruned, and the
+walk never crosses a symlink component: a symlink parent is never removed, and
+directories behind one are never pruned, even when empty. Pruning runs after
 removals in the same post-deploy phase, so a directory that still holds a
 deployed entry is non-empty and is left alone. Directories are never recorded,
 so pruning touches no state.
