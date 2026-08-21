@@ -563,3 +563,74 @@ fn validate_relative(value: &str, what: &str) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+    use test_case::test_case;
+
+    use super::*;
+
+    #[test_case("000" => 0)]
+    #[test_case("100" => 64)]
+    #[test_case("017" => 15)]
+    #[test_case("770" => 504)]
+    #[test_case("777" => 511)]
+    fn parses_three_octal_digits_to_their_value(s: &str) -> u32 {
+        u32::from(DeployMode::try_from(s.to_string()).expect("valid octal mode string"))
+    }
+
+    #[test_case("" => matches Err(_) ; "empty_rejected")]
+    #[test_case("7" => matches Err(_) ; "single_digit_rejected")]
+    #[test_case("77" => matches Err(_) ; "two_digits_rejected")]
+    #[test_case("7777" => matches Err(_) ; "four_digits_rejected")]
+    #[test_case("a77" => matches Err(_) ; "non_octal_first_byte_rejected")]
+    #[test_case("7a7" => matches Err(_) ; "non_octal_middle_byte_rejected")]
+    #[test_case("77a" => matches Err(_) ; "non_octal_last_byte_rejected")]
+    #[test_case("779" => matches Err(_) ; "digit_nine_rejected")]
+    #[test_case("888" => matches Err(_) ; "digit_eight_rejected")]
+    fn string_not_of_three_octal_digits_is_rejected(s: &str) -> Result<DeployMode, miette::Report> {
+        DeployMode::try_from(s.to_string())
+    }
+
+    #[test_case(0 => 0 ; "zero")]
+    #[test_case(0o100 => 64 ; "middle_value")]
+    #[test_case(0o777 => 511 ; "max_allowed")]
+    fn u32_in_octal_range_converts_to_its_value(value: u32) -> u32 {
+        u32::from(DeployMode::try_from(value).expect("valid octal mode value"))
+    }
+
+    #[test_case(0o1000 => matches Err(_) ; "just_above_max_rejected")]
+    #[test_case(u32::MAX => matches Err(_) ; "max_u32_rejected")]
+    fn u32_out_of_octal_range_is_rejected(value: u32) -> Result<DeployMode, miette::Report> {
+        DeployMode::try_from(value)
+    }
+
+    #[test_case("" => matches Ok(RuleConfig { deploy_type: None, mode: None }) ; "empty_table_means_no_properties")]
+    #[test_case("type = \"symlink\"" => matches Ok(RuleConfig { deploy_type: Some(DeployType::Symlink), mode: None }) ; "symlink_type_parsed")]
+    #[test_case("type = \"copy\"" => matches Ok(RuleConfig { deploy_type: Some(DeployType::Copy), mode: None }) ; "copy_type_parsed")]
+    #[test_case("type = \"template\"" => matches Ok(RuleConfig { deploy_type: Some(DeployType::Template), mode: None }) ; "template_type_parsed")]
+    #[test_case("mode = \"644\"" => matches Ok(RuleConfig { deploy_type: None, mode: Some(DeployMode(0o644)) }) ; "mode_parsed_without_type")]
+    #[test_case("type = \"copy\"\nmode = \"644\"" => matches Ok(RuleConfig { deploy_type: Some(DeployType::Copy), mode: Some(DeployMode(0o644)) }) ; "mode_combines_with_copy")]
+    fn deserializes_valid_rule_config(toml: &str) -> Result<RuleConfig, toml::de::Error> {
+        toml::from_str(toml)
+    }
+
+    #[test_case("type = \"symlink\"\nmode = \"644\"" => matches Err(e) if e.to_string().contains("cannot be used") ; "mode_rejected_with_symlink")]
+    #[test_case("bogus = 1" => matches Err(_) ; "unknown_property_rejected")]
+    #[test_case("type = \"hardlink\"" => matches Err(_) ; "invalid_type_rejected")]
+    #[test_case("mode = \"888\"" => matches Err(_) ; "invalid_mode_rejected")]
+    fn rejects_invalid_rule_config(toml: &str) -> Result<RuleConfig, toml::de::Error> {
+        toml::from_str(toml)
+    }
+
+    proptest! {
+        #[test]
+        fn parses_exactly_when_string_is_three_octal_digits(s in "[0-9a-zA-Z]{0,6}") {
+            let is_three_octal = s.len() == 3 && s.bytes().all(|b| (b'0'..=b'7').contains(&b));
+            let expected = is_three_octal.then(|| u32::from_str_radix(&s, 8).unwrap());
+            let actual = DeployMode::try_from(s).ok().map(u32::from);
+            prop_assert_eq!(actual, expected);
+        }
+    }
+}
