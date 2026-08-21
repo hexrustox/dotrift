@@ -53,7 +53,7 @@
       "source": "mattpocock/skills",
       "sourceType": "github",
       "skillPath": "skills/productivity/grilling/SKILL.md",
-      "computedHash": "a16b2f661db6caf310d7e02dd0d069e597cb888873e210e66f641eae715c5f23"
+      "computedHash": "4dd886b0196bf43729d954ae326016f2bd9f5f79d892500b407c33a753362f14"
     },
     "handoff": {
       "source": "mattpocock/skills",
@@ -101,31 +101,31 @@
       "source": "hexrustox/skills",
       "sourceType": "github",
       "skillPath": "skills/rust-code-style/SKILL.md",
-      "computedHash": "fc27ef4528d6abff075066e33717a65f5d071904a88427d78593417a29e15a9e"
+      "computedHash": "c12cf83b1b8920aa22b94e21c467964263f7010534f23142f416ecf01d69cc12"
     },
     "rust-insta-crate": {
       "source": "hexrustox/skills",
       "sourceType": "github",
       "skillPath": "skills/rust-insta-crate/SKILL.md",
-      "computedHash": "b65726f61cf2902cdf211724e7aa9ebd566da05541d22a7813b1961a70ca1ffc"
+      "computedHash": "264e21a17a0639dc0c597ee4cdb78abd8ddb8fc202395c21a5acfb16313db5c1"
     },
     "rust-miette-crate": {
       "source": "hexrustox/skills",
       "sourceType": "github",
       "skillPath": "skills/rust-miette-crate/SKILL.md",
-      "computedHash": "44dfe4d6ce808988b6b70af25e918515e534e44401cb57875f3cd39d3baa4a6c"
+      "computedHash": "56b3445d2f1994eba52a57a424ec7d3ef16142f4b19cc0d2d2c31de9c975e36a"
     },
     "rust-proptest-crate": {
       "source": "hexrustox/skills",
       "sourceType": "github",
       "skillPath": "skills/rust-proptest-crate/SKILL.md",
-      "computedHash": "eeebd183c7b43a240f9e26213205b5abbe1cd3f4c8f505a2d3e25660d471c0bc"
+      "computedHash": "61b9355e66e34f15c106b3ad59095586617ee81025124a1e82fc3273d071a556"
     },
     "rust-test-case-crate": {
       "source": "hexrustox/skills",
       "sourceType": "github",
       "skillPath": "skills/rust-test-case-crate/SKILL.md",
-      "computedHash": "1d429b83cc2d4c6d15e27d610c4cd992646cc46fb7e659e3204efb1b336a79e8"
+      "computedHash": "2c601de28754dc5acf06922f160b43e974bbc33622b0924ff7829255f30c0666"
     },
     "setup-matt-pocock-skills": {
       "source": "mattpocock/skills",

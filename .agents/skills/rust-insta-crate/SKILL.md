@@ -1,6 +1,6 @@
 ---
 name: rust-insta-crate
-description: Write Rust snapshot tests with the `insta` crate — decide between snapshot assertions and literal `assert_eq!`/`assert!` via a decision tree, pick the right macro (`assert_snapshot!`, `assert_debug_snapshot!`, the serde serializers, `assert_binary_snapshot!`), store snapshots inline or in `.snap` files, redact or filter volatile values, and review pending `.snap`/`.snap.new` files and accept them with `cargo insta accept`. Use when writing, adding, or reviewing Rust tests that pin a value's output, choosing whether a value should be a snapshot or a literal assertion, or handling a snapshot change.
+description: Write Rust snapshot tests with the `insta` crate — snapshot assertions vs literal `assert_eq!`/`assert!`, inline vs `.snap` storage, redaction and filtering of volatile values, and accepting snapshot changes. Use when writing, adding, or reviewing tests that pin a value's output, deciding between a snapshot and a literal assertion, or handling a snapshot change.
 ---
 
 # insta

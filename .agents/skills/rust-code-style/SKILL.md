@@ -1,6 +1,6 @@
 ---
 name: rust-code-style
-description: "Apply Rust code style — cosmetic rules that change how the code reads, never what it computes — covering comments and doc comments, naming (types, methods, bindings, and test names — plain `#[test]` fns and `test-case`/`rstest` cases), imports and full paths, visibility and `pub` scope, type annotations, and struct-literal shorthand. Use when writing, editing, or reviewing Rust code: commenting or documenting, naming or renaming (including renaming tests), choosing `use` vs a qualified path, tidying imports, choosing visibility (`pub`, `pub(crate)`, `pub(super)`), annotating types, or simplifying struct literals."
+description: "Apply Rust code style — cosmetic rules that change how the code reads, covering comments, naming, imports, visibility and `pub` scope, type annotations, and struct-literal shorthand. Use when writing, editing, or reviewing Rust code: commenting, naming or renaming, choosing `use` vs a qualified path, tidying imports, choosing visibility, annotating types, or simplifying struct literals."
 ---
 
 # Rust code style

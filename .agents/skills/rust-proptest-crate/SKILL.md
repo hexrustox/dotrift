@@ -1,6 +1,6 @@
 ---
 name: rust-proptest-crate
-description: "Write Rust property-based tests with the `proptest` crate — the `proptest!` macro (block and closure forms, `in strategy` / `arg: Type` parameters, per-block config), non-panicking assertions (`prop_assert!`, `prop_assert_eq!`, `prop_assert_ne!`), input filtering (`prop_assume!`), strategy unions (`prop_oneof!`), custom strategy functions (`prop_compose!`), and the `#[property_test]` attribute macro. Use when writing, adding, or reviewing proptest tests, choosing or building a strategy for a generated input, or interpreting a proptest failure (shrinking, regressions)."
+description: "Write Rust property-based tests with the `proptest` crate — the `proptest!` macro, non-panicking assertions, input filtering, strategy unions, custom strategies, and the `#[property_test]` attribute macro. Use when writing, adding, or reviewing proptest tests, choosing or building a strategy for a generated input, or interpreting a proptest failure (shrinking, regressions)."
 ---
 
 # proptest

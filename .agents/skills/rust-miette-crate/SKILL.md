@@ -1,6 +1,6 @@
 ---
 name: rust-miette-crate
-description: "Implement the writing-error-messages rules in Rust with the `miette` crate — carry the message as the thiserror `#[error]` fragment, chain context with `.wrap_err()`, the positioned note as a `#[label]` over a `#[source_code]`, and advice as `help`. Define `#[derive(Error, Debug, Diagnostic)]` error types, raise and propagate errors with `miette::Result`, `.into_diagnostic()`, `miette!`, `bail!`, `ensure!`, and render fancy diagnostics by returning `miette::Result` from `main`. Use when writing, editing, or reviewing miette diagnostics, error types, or error-handling code in Rust."
+description: "Write readable Rust error messages with the `miette` crate — carry the message as the thiserror `#[error]` fragment, chain context with `.wrap_err()`, position notes with `#[label]` over `#[source_code]`, and advice as `help`. Use when writing, editing, or reviewing miette diagnostics, error types, or error-handling code in Rust."
 ---
 
 # miette

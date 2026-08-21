@@ -1,6 +1,6 @@
 ---
 name: rust-test-case-crate
-description: Write parametrized Rust tests with the `test-case` crate's `#[test_case(...)]` macro — inputs, expected-output matchers (equality, `matches`, `panics`, `with` closure, `using` function, `it`/`is` hamcrest matchers), `ignore`/`inconclusive` modifiers, comments and generated test names, async and extra attributes. Use when writing, adding, or reviewing `#[test_case]` tests, or choosing an output matcher.
+description: Write parametrized Rust tests with the `test-case` crate's `#[test_case(...)]` macro — inputs, expected-output matchers, `ignore`/`inconclusive` modifiers, comments, async, and extra attributes. Use when writing, adding, or reviewing `#[test_case]` tests, or choosing an output matcher.
 ---
 
 # test-case
