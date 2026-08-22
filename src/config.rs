@@ -104,6 +104,7 @@ struct FileConfig {
 #[derive(Debug, Clone, Copy)]
 struct RuleConfig {
     deploy_type: Option<DeployType>,
+    // TODO allow unset
     mode: Option<DeployMode>,
 }
 
@@ -567,6 +568,7 @@ fn validate_relative(value: &str, what: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
+    use tempfile::tempdir;
     use test_case::test_case;
 
     use super::*;
@@ -632,5 +634,358 @@ mod tests {
             let actual = DeployMode::try_from(s).ok().map(u32::from);
             prop_assert_eq!(actual, expected);
         }
+    }
+
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("a")).expect("cannot create temp dir");
+            fs::create_dir(t.join("b")).expect("cannot create temp dir");
+            (t.join("a"), t.join("b"))
+        } => true;
+        "disjoint_sibling_roots_do_not_overlap"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("target/source")).expect("cannot create temp dirs");
+            (t.join("target/source"), t.join("target"))
+        } => true;
+        "source_nested_inside_target_does_not_overlap"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("root")).expect("cannot create temp dir");
+            (t.join("root"), t.join("root"))
+        } => false;
+        "equal_roots_overlap"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("root/target")).expect("cannot create temp dirs");
+            (t.join("root"), t.join("root/target"))
+        } => false;
+        "target_inside_source_overlaps"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("root/x/y/z")).expect("cannot create temp dirs");
+            (t.join("root"), t.join("root/x/y/z"))
+        } => false;
+        "deeply_nested_target_inside_source_overlaps"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("real")).expect("cannot create temp dir");
+            std::os::unix::fs::symlink(t.join("real"), t.join("link")).expect("cannot create symlink");
+            (t.join("real"), t.join("link"))
+        } => false;
+        "target_symlinked_onto_source_overlaps"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("real/nested")).expect("cannot create temp dirs");
+            std::os::unix::fs::symlink(t.join("real/nested"), t.join("link")).expect("cannot create symlink");
+            (t.join("real"), t.join("link"))
+        } => false;
+        "target_symlink_pointing_into_source_overlaps"
+    )]
+    fn roots_satisfy_overlap_rule(setup: impl Fn(&Path) -> (PathBuf, PathBuf)) -> bool {
+        let dir = tempdir().expect("cannot create temp dir");
+        let (source, target) = setup(dir.path());
+        validate_overlap(&source, &target).is_ok()
+    }
+
+    macro_rules! portal_map {
+        ($($source:literal => $target:literal),* $(,)?) => {
+            BTreeMap::from([
+                $(($source.to_string(), $target.to_string())),*
+            ])
+        };
+    }
+
+    macro_rules! resolved_list {
+        ($($source:literal => $target:literal),* $(,)?) => {
+            {
+                let vec: Vec<ResolvedPortal> = vec![
+                    $(ResolvedPortal {
+                        source: PathBuf::from($source),
+                        target: PathBuf::from($target),
+                    }),*
+                ];
+                vec
+            }
+        };
+    }
+
+    #[test_case(|_t| portal_map!() => resolved_list!(); "empty_portals_produce_no_entries")]
+    #[test_case(
+        |t| {
+            fs::write(t.join("vimrc"), b"set").unwrap();
+            portal_map!("vimrc" => ".vimrc")
+        } => resolved_list!("vimrc" => ".vimrc");
+        "literal_file_maps_to_exact_target"
+    )]
+    #[test_case(
+        |t| {
+            fs::write(t.join("vimrc"), b"set").unwrap();
+            portal_map!("./vimrc" => "./.vimrc")
+        } => resolved_list!("vimrc" => ".vimrc");
+        "dot_slash_prefix_is_stripped"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("nvim/lua")).unwrap();
+            fs::write(t.join("nvim/init.lua"), b"-- lua").unwrap();
+            fs::write(t.join("nvim/lua/mappings.lua"), b"-- mappings").unwrap();
+            portal_map!("nvim" => ".config/nvim")
+        } => resolved_list!(
+            "nvim/init.lua" => ".config/nvim/init.lua",
+            "nvim/lua/mappings.lua" => ".config/nvim/lua/mappings.lua"
+        );
+        "directory_portal_appends_relative_suffix"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("config/sub")).unwrap();
+            fs::write(t.join("config/one.toml"), b"a").unwrap();
+            fs::write(t.join("config/sub/two.toml"), b"b").unwrap();
+            portal_map!("config/*.toml" => ".config")
+        } => resolved_list!(
+            "config/one.toml" => ".config/one.toml",
+            "config/sub/two.toml" => ".config/sub/two.toml"
+        );
+        "wildcard_pattern_appends_remainder"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("empty")).unwrap();
+            portal_map!("empty" => ".config/empty")
+        } => resolved_list!();
+        "empty_directory_expands_to_nothing"
+    )]
+    #[test_case(
+        |t| {
+            fs::write(t.join("real"), b"content").unwrap();
+            std::os::unix::fs::symlink(t.join("real"), t.join("link")).unwrap();
+            portal_map!("link" => ".link")
+        } => resolved_list!("link" => ".link");
+        "symlink_to_file_maps_to_exact_target"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("real")).unwrap();
+            fs::write(t.join("real/a"), b"a").unwrap();
+            fs::write(t.join("real/b"), b"b").unwrap();
+            std::os::unix::fs::symlink(t.join("real"), t.join("dirlink")).unwrap();
+            portal_map!("dirlink" => ".config")
+        } => resolved_list!(
+            "dirlink/a" => ".config/a",
+            "dirlink/b" => ".config/b"
+        );
+        "symlink_to_directory_maps_contents"
+    )]
+    #[test_case(
+        |t| {
+            fs::write(t.join("data"), b"content").unwrap();
+            std::os::unix::fs::symlink(t.join("data"), t.join("link.lnk")).unwrap();
+            portal_map!("*.lnk" => ".dots")
+        } => resolved_list!("link.lnk" => ".dots/link.lnk");
+        "symlink_file_matched_by_wildcard"
+    )]
+    #[test_case(|_t| portal_map!("" => ".vimrc") => panics "invalid portal source path"; "empty_source_is_rejected")]
+    #[test_case(|_t| portal_map!("vimrc" => "/home/.vimrc") => panics "invalid portal target path"; "absolute_target_is_rejected")]
+    #[test_case(|_t| portal_map!("a/../vimrc" => ".vimrc") => panics "a/../vimrc"; "parent_component_in_source_is_rejected")]
+    #[test_case(|_t| portal_map!("{a,b}" => ".a") => panics "in portal source"; "brace_expansion_in_source_is_rejected")]
+    #[test_case(|_t| portal_map!("a" => ".{a,b}") => panics "in portal target"; "brace_expansion_in_target_is_rejected")]
+    #[test_case(|_t| portal_map!("a" => "*.conf") => panics "cannot contain glob syntax"; "wildcard_target_is_rejected")]
+    #[test_case(|_t| portal_map!("missing" => ".missing") => panics "does not exist"; "missing_literal_source_is_rejected")]
+    #[test_case(
+        |t| {
+            std::os::unix::fs::symlink(t.join("nowhere"), t.join("link")).unwrap();
+            portal_map!("link" => "link")
+        } => panics "dangling symlink";
+        "dangling_literal_source_is_rejected"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("dir")).unwrap();
+            fs::write(t.join("dir/ok"), b"ok").unwrap();
+            std::os::unix::fs::symlink(t.join("nowhere"), t.join("dir/broken")).unwrap();
+            portal_map!("dir" => ".config")
+        } => panics "dangling symlink";
+        "dangling_symlink_within_directory_is_rejected"
+    )]
+    #[test_case(
+        |t| {
+            fs::write(t.join("ok"), b"ok").unwrap();
+            std::os::unix::fs::symlink(t.join("nowhere"), t.join("broken")).unwrap();
+            portal_map!("*" => ".dots")
+        } => panics "dangling symlink";
+        "dangling_symlink_matched_by_wildcard_is_rejected"
+    )]
+    #[test_case(
+        |t| {
+            std::os::unix::fs::symlink(t.join("a"), t.join("a")).unwrap();
+            portal_map!("a" => ".a")
+        } => panics "cannot inspect source path";
+        "self_referential_symlink_is_rejected"
+    )]
+    #[test_case(
+        |t| {
+            std::os::unix::fs::symlink(t.join("b"), t.join("a")).unwrap();
+            std::os::unix::fs::symlink(t.join("a"), t.join("b")).unwrap();
+            portal_map!("a" => ".a")
+        } => panics "cannot inspect source path";
+        "mutual_symlink_cycle_is_rejected"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("dir")).unwrap();
+            fs::write(t.join("dir/real"), b"x").unwrap();
+            std::os::unix::fs::symlink(t.join("dir"), t.join("dir/loop")).unwrap();
+            portal_map!("dir" => ".config")
+        } => panics "symlink cycle detected";
+        "symlink_cycle_within_directory_is_rejected"
+    )]
+    fn expands_portals_to_resolved_entries(
+        setup: impl Fn(&Path) -> BTreeMap<String, String>,
+    ) -> Vec<ResolvedPortal> {
+        let dir = tempdir().expect("cannot create temp dir");
+        let mut entries = resolve_portals(dir.path(), &setup(dir.path()))
+            .unwrap()
+            .into_iter()
+            .map(|entry| ResolvedPortal {
+                source: entry.source.strip_prefix(dir.path()).unwrap().to_path_buf(),
+                target: entry.target,
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.source.clone());
+        entries
+    }
+
+    #[test_case(resolved_list!(); "empty_target_set_is_valid")]
+    #[test_case(resolved_list!("a" => ".config/a") ; "single_distinct_target_is_valid")]
+    #[test_case(resolved_list!("a" => ".config/a", "b" => ".config/b") ; "distinct_targets_under_shared_directory")]
+    #[test_case(resolved_list!("a" => "x/y", "b" => "x/z") ; "sibling_targets_under_nested_directory")]
+    #[test_case(resolved_list!("a" => "deep/a/b/c", "b" => "deep/d/e") ; "deeply_nested_distinct_targets")]
+    #[test_case(resolved_list!("a" => ".config", "b" => ".config") => panics "collision at"; "identical_targets_collide")]
+    #[test_case(resolved_list!("a" => "x", "b" => "x/y") => panics "structural conflict"; "file_target_blocked_by_nested_target")]
+    #[test_case(resolved_list!("a" => "x/y", "b" => "x") => panics "structural conflict"; "nested_target_blocked_by_file_target")]
+    #[test_case(resolved_list!("a" => "x/y/z", "b" => "x/y") => panics "structural conflict"; "deeply_nested_target_blocked_by_file_target")]
+    fn validates_targets_are_structurally_disjoint(entries: Vec<ResolvedPortal>) {
+        validate_targets(&entries).unwrap()
+    }
+
+    macro_rules! resolved {
+        ($source:literal, $target:literal) => {
+            ResolvedPortal {
+                source: PathBuf::from($source),
+                target: PathBuf::from($target),
+            }
+        };
+    }
+
+    macro_rules! rule_map {
+        ($($source:literal => $config:expr),* $(,)?) => {
+            indexmap::IndexMap::from_iter([
+                $((Pattern::new($source).unwrap(), $config)),*
+            ])
+        };
+    }
+
+    macro_rules! rule_config {
+        ($deploy:ident) => {
+            RuleConfig {
+                deploy_type: Some(DeployType::$deploy),
+                mode: None,
+            }
+        };
+        ($deploy:ident, $mode:literal) => {
+            RuleConfig {
+                deploy_type: Some(DeployType::$deploy),
+                mode: Some(DeployMode($mode)),
+            }
+        };
+    }
+
+    macro_rules! deploy_entry {
+        ($source:literal, $target:literal, $deploy:ident) => {
+            DeploymentEntry {
+                source_path: PathBuf::from($source),
+                target_path: PathBuf::from($target),
+                deploy_type: DeployType::$deploy,
+                mode: None,
+            }
+        };
+        ($source:literal, $target:literal, $deploy:ident, $mode:literal) => {
+            DeploymentEntry {
+                source_path: PathBuf::from($source),
+                target_path: PathBuf::from($target),
+                deploy_type: DeployType::$deploy,
+                mode: Some(DeployMode($mode)),
+            }
+        };
+    }
+
+    #[test_case(
+        resolved!("vimrc", ".vimrc"), rule_map!()
+        => deploy_entry!("vimrc", ".vimrc", Symlink);
+        "no_rules_defaults_to_symlink_without_mode"
+    )]
+    #[test_case(
+        resolved!("vimrc", ".vimrc"), rule_map!("*" => rule_config!(Copy))
+        => deploy_entry!("vimrc", ".vimrc", Copy);
+        "copy_rule_overrides_default_symlink"
+    )]
+    #[test_case(
+        resolved!("vimrc", ".vimrc"), rule_map!("*" => rule_config!(Template))
+        => deploy_entry!("vimrc", ".vimrc", Template);
+        "template_rule_overrides_default_symlink"
+    )]
+    #[test_case(
+        resolved!("vimrc", ".vimrc"), rule_map!("*" => rule_config!(Copy, 0o644))
+        => deploy_entry!("vimrc", ".vimrc", Copy, 0o644);
+        "mode_is_applied_with_copy"
+    )]
+    #[test_case(
+        resolved!("vimrc", ".vimrc"), rule_map!("*.conf" => rule_config!(Copy, 0o600))
+        => deploy_entry!("vimrc", ".vimrc", Symlink);
+        "unmatched_rule_is_ignored"
+    )]
+    #[test_case(
+        resolved!("vimrc", ".vimrc"), rule_map!("*" => rule_config!(Template), "*.vimrc" => rule_config!(Copy))
+        => deploy_entry!("vimrc", ".vimrc", Copy);
+        "last_matching_rule_wins_type"
+    )]
+    #[test_case(
+        resolved!("vimrc", ".vimrc"), rule_map!("*" => rule_config!(Copy, 0o600), "*.vimrc" => rule_config!(Template))
+        => deploy_entry!("vimrc", ".vimrc", Template, 0o600);
+        "mode_survives_later_type_only_rule"
+    )]
+    #[test_case(
+        resolved!("deep", "nested/x"), rule_map!("nested/*" => rule_config!(Template))
+        => deploy_entry!("deep", "nested/x", Template);
+        "pattern_applies_to_nested_target"
+    )]
+    #[test_case(
+        resolved!("vimrc", ".vimrc"), rule_map!("*" => rule_config!(Copy, 0o644), "*.vimrc" => rule_config!(Symlink))
+        => panics "conflicting rules";
+        "mode_with_effective_symlink_is_rejected"
+    )]
+    fn applies_matching_rules(
+        entry: ResolvedPortal,
+        rules: indexmap::IndexMap<Pattern, RuleConfig>,
+    ) -> DeploymentEntry {
+        let dir = tempdir().expect("cannot create temp dir");
+        let actual = match apply_rules(entry, &rules, dir.path()) {
+            Ok(actual) => actual,
+            Err(error) => panic!("apply_rules failed: {error}"),
+        };
+        let mut actual = actual;
+        actual.target_path = actual
+            .target_path
+            .strip_prefix(dir.path())
+            .expect("target path is under the temp dir")
+            .to_path_buf();
+        actual
     }
 }
