@@ -178,9 +178,11 @@ miette::set_hook(Box::new(|_| {
 ```
 
 Useful options: `.terminal_links`, `.unicode`, `.context_lines`,
-`.force_graphical(..)` / `.force_narratable(..)` (override the auto-detect
-between graphical and plain rendering), `.syntax_highlighting(true)` (needs
-the `syntect-highlighter` feature). Common adjustments stay one-liners on
+`.force_graphical(..)` / `.force_narrated(..)` (override the auto-detect
+between graphical and plain rendering), `.with_syntax_highlighting(..)` /
+`.without_syntax_highlighting()` (the `syntect-highlighter` feature turns
+highlighting on by default; with it, use the former for a custom highlighter
+and the latter to disable). Common adjustments stay one-liners on
 `MietteHandlerOpts`; a fully custom printer (e.g. machine-readable output)
 implements the `ReportHandler` trait — `JSONReportHandler` ships for JSON and
 `NarratableReportHandler` is the screen-reader/plain-text printer selected

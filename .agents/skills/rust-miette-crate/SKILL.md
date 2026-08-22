@@ -7,25 +7,25 @@ description: "Write readable Rust error messages with the `miette` crate — car
 
 `miette` turns errors into fancy diagnostics: an error message with optional
 positioned notes drawn into a source snippet, separate help text, an error
-code, and a cause chain. It is the Rust rendering backend for the
-`writing-error-messages` rules — the wording lives there, the carrier lives
-here.
+code, a clickable URL, a severity, and a cause chain. It composes with
+`thiserror`: keep the `Error` derive and add `Diagnostic` on top.
 
-## The rules map onto miette constructs
+This skill catalogs the miette API so you know which construct produces which
+part of a rendered report.
 
-Run `writing-error-messages` over every message; place each piece on the
-structure that renders it:
+A rendered diagnostic has these parts, each fed by one API piece:
 
-| writing-error-messages | miette |
+| report part | miette API |
 | --- | --- |
-| the message (rules 1–3) | thiserror `#[error("...")]` fragment |
-| chained context (rule 3) | `.wrap_err("...")` (`WrapErr`) |
-| positioned note (rule 5) | `#[label("...")]` + `#[source_code]` |
-| advice, plain note, internal-error note (rules 4, 5, 7) | `help` |
-| renders at top-level handler, stderr (rule 6) | `main() -> miette::Result<()>` |
-
-Never concatenate advice into the message (rule 4): the label and the `help`
-text are the message's separate pieces.
+| the message | thiserror `#[error("...")]` fragment |
+| chained context | `.wrap_err("...")` (`WrapErr`) |
+| positioned note in the source | `#[label("...")]` + `#[source_code]` |
+| plain advice below the report | `#[help]` or `#[diagnostic(help(...))]` |
+| machine-readable code | `#[diagnostic(code(pkg::name))]` |
+| clickable link | `#[diagnostic(url(...))]` or `url(docsrs)` |
+| severity (warning/advice) | `#[diagnostic(severity(Warning))]` |
+| grouped sub-errors | `#[related]` |
+| renders at top level to stderr | `main() -> miette::Result<()>` |
 
 ## Setup
 
@@ -43,7 +43,9 @@ miette = { version = "7", features = ["fancy"] }
 
 A **library** adds plain `miette` — `fancy` pulls heavy rendering dependencies
 and belongs only in the top-level crate that prints. The `derive` feature (the
-only default) is all a library needs.
+only default) is all a library needs. Optional features: `serde`
+(`MietteDiagnostic` round-trips), `syntect-highlighter` (syntax highlighting,
+enable from the binary side).
 
 ## Library vs application
 
@@ -88,16 +90,20 @@ fn load(version: &str) -> Result<()> {
 }
 ```
 
-## The message — `#[error("...")]`
+## The `Diagnostic` derive
 
-The `#[error]` attribute is the message. Write it exactly per
-`writing-error-messages`: one lowercase fragment, no period, backticked tokens,
-what is wrong rather than the fix. `#[error("try parsing a valid version")]`
-prescribes — the fix belongs on `help`, not here.
+All miette-specific attributes live on the `#[derive(Diagnostic)]` type, which
+sits next to `#[derive(Error)]`:
 
-## The positioned note — `#[label]`
+### `#[error("...")]` — the message
 
-A located error (rule 5) needs source plus a marker into it:
+The `#[error]` attribute (from `thiserror`) is the top-line message. Keep it a
+single lowercase fragment describing what is wrong; the fix belongs on `help`,
+not here. It supports `{field}` format arguments.
+
+### `#[source_code]` and `#[label]` — positioned notes
+
+A located error needs source plus a marker into it:
 
 1. **`#[source_code]`** — one field holding the source the labels point into,
    any type implementing `SourceCode`. `String`, a borrowed `&str`, and
@@ -105,7 +111,7 @@ A located error (rule 5) needs source plus a marker into it:
    normal cases; a custom source (lazy, huge, or spanning multiple files) is in
    `references/dynamic-diagnostics-and-handlers.md`.
 2. **`#[label("text")]`** — one or more fields of a span type; the label's
-   text is a positioned note.
+   text is a positioned note drawn under the range in the source snippet.
 
 ```rust
 #[derive(Error, Debug, Diagnostic)]
@@ -128,14 +134,14 @@ or `Option` of those for a label that may not apply. All offsets are **byte**
 offsets into the source, not character or line positions.
 
 One label per field (`#[label(primary, "...")]` marks the primary, at most
-once per error; `#[label(collection, "...")]` takes a `Vec` of any
-`Into<SourceSpan>` type when the count is unknown — details in
+once per error; `#[label(collection, "...")]` takes any iterable of
+`Into<SourceSpan>` when the count is unknown — details in
 `references/dynamic-diagnostics-and-handlers.md`).
 
-## The advice — `help`
+### `#[help]` — advice
 
-Advice (rules 4, 5, 7) rides on the `help` field, never in the message.
-Static per error type:
+Plain advice below the report rides on the `help` field, never in the
+message. Static per error type:
 
 ```rust
 #[derive(Error, Debug, Diagnostic)]
@@ -156,32 +162,66 @@ pub struct CannotOpen {
 }
 ```
 
-`#[diagnostic(help("..."))]` supports format arguments over the fields, so it
-stays dynamic too: `#[diagnostic(help("try `{path}` without the extension"))]`.
+The static form takes a plain string; per-instance dynamic text goes on the
+`#[help]` field. (Format arguments are not applied to `help`.)
 
-## Raising errors
+### `#[diagnostic]` — code, url, severity
 
-- `miette!("msg")` — build a `Report` from a message (like `anyhow!`).
+- `#[diagnostic(code(pkg::error_name))]` — a stable machine-readable code
+  rendered with the report.
+- `#[diagnostic(url(...))]` — makes the code a clickable link. `url(docsrs)`
+  links to the error type's own docs.rs page; a format string to an arbitrary
+  URL: `url("https://docs.example/errors#{}", code)`.
+- `#[diagnostic(severity(Warning))]` — `Severity::Advice`, `Severity::Warning`,
+  or `Severity::Error` (the default); non-`Error` severities render distinctly.
+
+### `#[related]` — multiple errors
+
+Tag an `IntoIter` field with `#[related]` to render sub-errors together under
+one diagnostic — useful for validation that collects every failure instead of
+stopping at the first. Each sub-error may carry its own `#[label]`; all draw
+against the parent's `#[source_code]`.
+
+```rust
+#[derive(Error, Debug, Diagnostic)]
+#[error("config has invalid fields")]
+pub struct ConfigErrors {
+    #[source_code]
+    src: String,
+    #[related]
+    inner: Vec<ConfigError>,
+}
+```
+
+## Runtime / app-side API
+
+- `miette!("msg")` — build a `Report` from a message (like `anyhow!`); also
+  accepts the same `severity`/`code`/`help`/`labels`/`url` keys as `diagnostic!`.
 - `bail!("msg")` — return early with a `Report`: `return Err(miette!("msg").into())`.
 - `ensure!(cond, "msg")` — bail unless the condition holds.
+- `diagnostic!(...)` — like `miette!` but yields a `MietteDiagnostic`, a plain
+  struct you can inspect, modify, serde-round-trip, and `.into()` a `Report`.
+  Accepts `code`, `help`, `labels`, `url`, `severity` keys plus the message.
 - `Err(my_error)?` — a `Diagnostic` error converts into `Report` via `From`.
 - `.into_diagnostic()` — wrap any `std::error::Error` into a `Report`.
-- `.wrap_err("context")` — `WrapErr`/`Context`, the rule-3 chain.
+- `.wrap_err("context")` — `WrapErr`/`Context`, chained context.
+- `.with_source_code(src)` — attach source to a `Report` at the place the
+  source is known (e.g. `main` after a file is read).
+- `LabeledSpan::at(range, label)` / `LabeledSpan::at_offset(offset, label)` /
+  `LabeledSpan::new(Option<String>, offset, len)` — runtime-built labels, byte
+  offsets into the source passed to `.with_source_code(...)`.
 
 ## Rendering
 
-The fancy report renders once at the top-level handler (rule 6): `main`
-returns `miette::Result<()>` and the runtime prints the returned `Err` to
-stderr, decorations and unicode disabled when stderr is not a terminal. `{:?}`
-on a `Report` renders the same diagnostic anywhere; `{}` prints only the top
-message — prefer `{:?}` where you print a report. Set a custom handler with
-`miette::set_hook` — see `references/dynamic-diagnostics-and-handlers.md`.
+The fancy report renders once at the top-level handler: `main` returns
+`miette::Result<()>` and the runtime prints the returned `Err` to stderr,
+falling back to the narratable plain-text printer when stderr is not a
+graphical terminal (off-TTY or `NO_COLOR`). `{:?}` on a `Report` renders the
+same diagnostic anywhere; `{}` prints only the top message — prefer `{:?}`
+where you print a report.
 
 ## Pointers
 
-- Read `writing-error-messages` and run it over every message, label, and
-  `help` text you write here.
-- `#[error]` and variant naming per `rust-code-style`.
 - Runtime-built diagnostics, delayed source, multiple related errors, custom
   handlers, and a `#[source_code]` that is not plain owned text (lazy, byte,
   or multi-file sources): read `references/dynamic-diagnostics-and-handlers.md`.

@@ -143,7 +143,7 @@ fn sqrt(number: u64) -> u64 { number.isqrt() }
 
 ## Comment and test names
 
-The trailing `; "text"` is the case's name in `cargo test` output — `parent::fn::text`. Without it the name is generated from the arguments and expected output. Keep the string snake_case and behavior + pinned outcome; see the `rust-code-style` skill for the naming rules.
+The trailing `; "text"` is the case's name in `cargo test` output — `parent::fn::text`. Without it the name is generated from the arguments and expected output. Keep the string snake_case and behavior + pinned outcome.
 
 ## Extra attributes and async
 

@@ -334,7 +334,5 @@ This macro generates a helper struct whose exact name, fields, and even existenc
 ## Pointers
 
 - Read `references/strategies.md` when building a strategy expression (`in strategy`, `prop_compose!`, `#[strategy = ...]`) or tuning the runner — it catalogs every strategy module, the `Strategy` combinator suite, `ProptestConfig` fields and env vars, and direct `TestRunner` use.
-- Decide *whether* a behavior warrants a property test with the `choosing-test-type` skill (branch 2: risk in the input space, a one-line invariant).
-- Name tests (`proptest!` block functions and `#[property_test]` fns) as behavior + pinned outcome; see `rust-code-style`.
 - API docs: https://docs.rs/proptest/latest/proptest/
 - Tutorial: https://proptest-rs.github.io/proptest/proptest/index.html
