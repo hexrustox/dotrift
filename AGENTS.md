@@ -5,7 +5,6 @@ source directory to a target directory via `dotrift.toml`.
 
 ## Documentation index
 
-- [Testing conventions](docs/agents/testing.md)
 - [Issue tracker](docs/agents/issue-tracker.md)
 - [Domain docs](docs/agents/domain.md)
 
@@ -25,6 +24,19 @@ Source files under `legacy/` are archived from a prior implementation. New code
 may read them for reference but must never copy from them. The same applies to
 specs archived under `legacy/` — reference only, never authoritative; new specs
 live in `spec/`.
+
+## Directory conventions
+
+- Root crate `dotrift`: library modules live flat in `src/*.rs`; subcommand
+  handlers in `src/commands/`; `src/main.rs` stays a thin entrypoint.
+- Integration tests sit in root `tests/`, one file per command/behavior;
+  shared helpers in `tests/common/mod.rs`, insta snapshots in
+  `tests/snapshots/`.
+- Workspace members are self-contained in their directory (`tui/`,
+  `templater/`, `demo/`): same `src/` + `tests/` split, plus a per-crate
+  `spec/` (authoritative) and `legacy/` archive. Benches only exist in
+  `templater/benches/`.
+- Extra binaries go in `<crate>/src/bin/` (e.g., `demo/src/bin/prompt.rs`).
 
 ## Toolchain
 
