@@ -1,3 +1,4 @@
+// TODO optimize template rendering & hash calculating once only for each file
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -385,9 +386,6 @@ fn report_dry_run_pruning(target_root: &Path, removals: &HashSet<PathBuf>) -> Re
             if directory == target_root || !directory.starts_with(target_root) {
                 break;
             }
-            // if has_symlink_component(target_root, &directory)? {
-            //     break;
-            // }
             if !would_be_empty(&directory, &planned)? {
                 break;
             }
@@ -422,28 +420,6 @@ fn would_be_empty(path: &Path, removals: &HashSet<std::path::PathBuf>) -> Result
     Ok(true)
 }
 
-// fn has_symlink_component(target_root: &Path, path: &Path) -> Result<bool> {
-//     let relative = path
-//         .strip_prefix(target_root)
-//         .map_err(|_| miette!("path is outside target directory"))?;
-//     let mut current = target_root.to_path_buf();
-//     for component in relative.components() {
-//         current.push(component);
-//         match fs::symlink_metadata(&current) {
-//             Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
-//             Ok(_) => {}
-//             Err(error)
-//                 if error.kind() == std::io::ErrorKind::NotFound
-//                     || error.kind() == std::io::ErrorKind::NotADirectory =>
-//             {
-//                 return Ok(false);
-//             }
-//             Err(error) => return Err(miette!(error).wrap_err("cannot inspect target parent")),
-//         }
-//     }
-//     Ok(false)
-// }
-
 fn prune_parents(target_root: &Path, removed_path: &Path, verbose: bool) -> Result<usize> {
     let mut current = removed_path.parent();
     let mut count = 0;
@@ -451,9 +427,6 @@ fn prune_parents(target_root: &Path, removed_path: &Path, verbose: bool) -> Resu
         if parent == target_root || !parent.starts_with(target_root) {
             break;
         }
-        // if has_symlink_component(target_root, parent)? {
-        //     break;
-        // }
         let metadata = match fs::symlink_metadata(parent) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
@@ -800,4 +773,152 @@ fn parent_obstruction(target_root: &Path, target_path: &Path) -> Result<Option<P
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use test_case::test_case;
+
+    #[test_case(|t| t.join("file") => None ; "target_directly_below_root_reports_no_obstruction")]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a/b")).unwrap();
+            t.join("a/b/file")
+        } => None;
+        "directory_parents_report_no_obstruction"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            t.join("a/b/file")
+        } => None;
+        "missing_parent_component_reports_no_obstruction"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            fs::write(t.join("a/b"), "occupied").unwrap();
+            t.join("a/b/file")
+        } => Some(PathBuf::from("a/b"));
+        "file_parent_reported_as_obstruction"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a/b")).unwrap();
+            fs::write(t.join("a/b/f"), "content").unwrap();
+            std::os::unix::fs::symlink(t.join("a/b/f"), t.join("a/b/link")).unwrap();
+            t.join("a/b/link/file")
+        } => Some(PathBuf::from("a/b/link"));
+        "symlink_to_file_parent_reported_as_obstruction"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a/real")).unwrap();
+            std::os::unix::fs::symlink(t.join("a/real"), t.join("a/dirlink")).unwrap();
+            t.join("a/dirlink/file")
+        } => None;
+        "symlink_to_directory_parent_reports_no_obstruction"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            std::os::unix::fs::symlink(t.join("a/nowhere"), t.join("a/broken")).unwrap();
+            t.join("a/broken/file")
+        } => Some(PathBuf::from("a/broken"));
+        "dangling_symlink_parent_reported_as_obstruction"
+    )]
+    #[test_case(|_t| PathBuf::from("/unrelated/nested/target") => panics "outside target directory" ; "target_outside_target_root_is_rejected")]
+    #[test_case(|_t| PathBuf::from("/") => panics "no parent" ; "target_without_parent_is_rejected")]
+    fn reports_parent_obstruction_for(setup: impl Fn(&Path) -> PathBuf) -> Option<PathBuf> {
+        let dir = tempdir().expect("cannot create temp dir");
+        parent_obstruction(dir.path(), &setup(dir.path()))
+            .unwrap_or_else(|error| panic!("{error}"))
+            .map(|path| path.strip_prefix(dir.path()).unwrap().to_path_buf())
+    }
+
+    #[test_case(|_t| vec![] => true ; "empty_directory_reports_empty")]
+    #[test_case(|t| {
+        fs::write(t.join("file"), "content").unwrap();
+        vec![]
+    } => false ; "directory_with_unremoved_file_reports_not_empty")]
+    #[test_case(|t| {
+        fs::write(t.join("a"), "content").unwrap();
+        fs::write(t.join("b"), "content").unwrap();
+        vec![t.join("a"), t.join("b")]
+    } => true ; "directory_with_all_files_removed_reports_empty")]
+    #[test_case(|t| {
+        fs::write(t.join("a"), "content").unwrap();
+        fs::write(t.join("b"), "content").unwrap();
+        vec![t.join("a")]
+    } => false ; "directory_with_some_files_kept_reports_not_empty")]
+    #[test_case(|t| {
+        fs::create_dir_all(t.join("sub")).unwrap();
+        fs::write(t.join("sub/file"), "content").unwrap();
+        vec![t.join("sub")]
+    } => true ; "directory_with_subdir_removed_reports_empty")]
+    fn reports_would_be_empty_for(setup: impl Fn(&Path) -> Vec<PathBuf>) -> bool {
+        let dir = tempdir().expect("cannot create temp dir");
+        would_be_empty(dir.path(), &HashSet::from_iter(setup(dir.path()))).unwrap()
+    }
+
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            t.join("a/file")
+        },
+        |t| assert!(!t.join("a").exists())
+        ; "empty_parent_pruned"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a/b")).unwrap();
+            t.join("a/b/file")
+        },
+        |t| {
+            assert!(!t.join("a/b").exists());
+            assert!(!t.join("a").exists());
+        }
+        ; "nested_empty_parents_pruned_up_to_root"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("a/b")).unwrap();
+            fs::write(t.join("a/keep"), "content").unwrap();
+            t.join("a/b/file")
+        },
+        |t| {
+            assert!(!t.join("a/b").exists());
+            assert!(t.join("a").exists());
+            assert!(t.join("a/keep").exists());
+        }
+        ; "pruning_stops_at_non_empty_parent"
+    )]
+    #[test_case(
+        |t| {
+            fs::write(t.join("a"), "occupied").unwrap();
+            t.join("a/x")
+        },
+        |t| assert_eq!(fs::read_to_string(t.join("a")).unwrap(), "occupied")
+        ; "non_directory_parent_stops_pruning"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("real")).unwrap();
+            std::os::unix::fs::symlink(t.join("real"), t.join("link")).unwrap();
+            t.join("link/file")
+        },
+        |t| {
+            assert!(fs::symlink_metadata(t.join("link"))
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            assert!(t.join("real").exists());
+        }
+        ; "symlink_parent_stops_pruning"
+    )]
+    fn prunes_empty_parents_for(setup: impl Fn(&Path) -> PathBuf, assert: impl Fn(&Path)) {
+        let dir = tempdir().expect("cannot create temp dir");
+        prune_parents(dir.path(), &setup(dir.path()), false)
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert(dir.path());
+    }
+}
