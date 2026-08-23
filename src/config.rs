@@ -16,7 +16,7 @@ use crate::data::DataFile;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum DeployType {
+pub enum DeployType {
     Symlink,
     Copy,
     Template,
@@ -24,7 +24,7 @@ pub(crate) enum DeployType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "DeployModeRepr")]
-pub(crate) struct DeployMode(u32);
+pub struct DeployMode(pub u32);
 
 impl From<DeployMode> for u32 {
     fn from(value: DeployMode) -> Self {
@@ -76,7 +76,7 @@ impl TryFrom<u32> for DeployMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DeploymentEntry {
+pub struct DeploymentEntry {
     pub source_path: PathBuf,
     pub target_path: PathBuf,
     pub deploy_type: DeployType,
@@ -84,7 +84,7 @@ pub(crate) struct DeploymentEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DesiredDeployment {
+pub struct DesiredDeployment {
     pub target_directory: PathBuf,
     pub entries: Vec<DeploymentEntry>,
     pub variable_context: HashMap<String, Value>,
@@ -138,7 +138,8 @@ struct ResolvedPortal {
     target: PathBuf,
 }
 
-pub(crate) fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDeployment> {
+pub fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDeployment> {
+    // TODO more precise error
     if !source.is_dir() {
         return Err(miette!(
             "source directory `{}` does not exist",
@@ -565,6 +566,27 @@ fn validate_relative(value: &str, what: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any(test, feature = "testing"))]
+#[macro_export]
+macro_rules! deploy_entry {
+    ($source:expr, $target:expr, $deploy:ident) => {
+        $crate::config::DeploymentEntry {
+            source_path: std::path::PathBuf::from($source),
+            target_path: std::path::PathBuf::from($target),
+            deploy_type: $crate::config::DeployType::$deploy,
+            mode: None,
+        }
+    };
+    ($source:expr, $target:expr, $deploy:ident, $mode:expr) => {
+        $crate::config::DeploymentEntry {
+            source_path: std::path::PathBuf::from($source),
+            target_path: std::path::PathBuf::from($target),
+            deploy_type: $crate::config::DeployType::$deploy,
+            mode: Some($crate::config::DeployMode($mode)),
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
@@ -902,25 +924,6 @@ mod tests {
         ($deploy:ident, $mode:literal) => {
             RuleConfig {
                 deploy_type: Some(DeployType::$deploy),
-                mode: Some(DeployMode($mode)),
-            }
-        };
-    }
-
-    macro_rules! deploy_entry {
-        ($source:literal, $target:literal, $deploy:ident) => {
-            DeploymentEntry {
-                source_path: PathBuf::from($source),
-                target_path: PathBuf::from($target),
-                deploy_type: DeployType::$deploy,
-                mode: None,
-            }
-        };
-        ($source:literal, $target:literal, $deploy:ident, $mode:literal) => {
-            DeploymentEntry {
-                source_path: PathBuf::from($source),
-                target_path: PathBuf::from($target),
-                deploy_type: DeployType::$deploy,
                 mode: Some(DeployMode($mode)),
             }
         };
