@@ -336,7 +336,12 @@ fn cleanup(
         }
         let exists = match fs::symlink_metadata(path) {
             Ok(_) => true,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    || error.kind() == std::io::ErrorKind::NotADirectory =>
+            {
+                false
+            }
             Err(error) => return Err(miette!(error).wrap_err("cannot inspect stale target")),
         };
         if !exists {
@@ -507,17 +512,13 @@ fn prompt_for_obstruction(
     #[cfg(any(test, feature = "testing"))]
     {
         PROMPT_COUNT.with_borrow_mut(|count| *count += 1);
-        Ok(
-            PROMPT_CHOICE.with(|current| match &mut *current.borrow_mut() {
-                test_hooks::PromptChoices::Single(choice) => choice
-                    .as_ref()
-                    .expect("obstruction prompt reached without a test choice set")
-                    .clone(),
-                test_hooks::PromptChoices::Sequence(choices) => choices
-                    .pop()
-                    .expect("obstruction prompt choices exhausted by test"),
-            }),
-        )
+        PROMPT_CHOICE.with(|current| match &mut *current.borrow_mut() {
+            test_hooks::PromptChoices::Single(None) => Err(PromptError::Cancelled),
+            test_hooks::PromptChoices::Single(Some(choice)) => Ok(choice.clone()),
+            test_hooks::PromptChoices::Sequence(choices) => Ok(choices
+                .pop()
+                .expect("obstruction prompt choices exhausted by test")),
+        })
     }
 
     #[cfg(not(any(test, feature = "testing")))]
