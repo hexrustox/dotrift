@@ -50,38 +50,56 @@ pub struct StateRecord {
 }
 
 #[cfg(any(test, feature = "testing"))]
-#[macro_export]
-macro_rules! record {
-    (f, $target:expr, $hash:expr) => {
-        $crate::state::StateRecord {
-            target_path: std::path::PathBuf::from($target),
-            source_path: std::path::PathBuf::new(),
-            kind: $crate::state::Kind::File,
-            content_hash: Some($hash.into()),
-        }
-    };
-    (s, $target:expr, $source:expr) => {
-        $crate::state::StateRecord {
-            target_path: std::path::PathBuf::from($target),
-            source_path: std::path::PathBuf::from($source),
-            kind: $crate::state::Kind::Symlink,
-            content_hash: None,
-        }
-    };
+pub mod test_hooks {
+    use std::{cell::RefCell, path::PathBuf};
+
+    #[macro_export]
+    macro_rules! record {
+        (f, $target:expr, $hash:expr) => {
+            $crate::state::StateRecord {
+                target_path: std::path::PathBuf::from($target),
+                source_path: std::path::PathBuf::new(),
+                kind: $crate::state::Kind::File,
+                content_hash: Some($hash.into()),
+            }
+        };
+        (s, $target:expr, $source:expr) => {
+            $crate::state::StateRecord {
+                target_path: std::path::PathBuf::from($target),
+                source_path: std::path::PathBuf::from($source),
+                kind: $crate::state::Kind::Symlink,
+                content_hash: None,
+            }
+        };
+    }
+
+    thread_local! {
+        pub static TEST_STATE_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    }
+}
+
+fn state_root() -> Result<PathBuf> {
+    #[cfg(any(test, feature = "testing"))]
+    {
+        Ok(test_hooks::TEST_STATE_ROOT
+            .with(|root| root.borrow().clone())
+            .unwrap())
+    }
+
+    #[cfg(not(any(test, feature = "testing")))]
+    {
+        let state_home = dirs::state_dir()
+            .or_else(dirs::data_dir)
+            .map(|state_home| state_home.join("dotrift"))
+            .ok_or_else(|| miette!("XDG_STATE_HOME and XDG_DATA_HOME are unset"))
+            .wrap_err("cannot resolve state location")?;
+        Ok(state_home)
+    }
 }
 
 pub struct StateDatabase {
     connection: Connection,
     pub path: PathBuf,
-}
-
-fn state_root() -> Result<PathBuf> {
-    let state_home = dirs::state_dir()
-        .or_else(dirs::data_dir)
-        .map(|state_home| state_home.join("dotrift"))
-        .ok_or_else(|| miette!("XDG_STATE_HOME and XDG_DATA_HOME are unset"))
-        .wrap_err("cannot resolve state location")?;
-    Ok(state_home)
 }
 
 impl StateDatabase {

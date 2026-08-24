@@ -1,31 +1,21 @@
 #![allow(dead_code)]
 
+use dotrift::commands::apply::ApplyOptions;
+use dotrift::state::{StateDatabase, test_hooks::TEST_STATE_ROOT};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
-
-use dotrift::commands::apply::ApplyOptions;
-use dotrift::state::StateDatabase;
 use tempfile::TempDir;
 
-static STATE_HOME_LOCK: Mutex<()> = Mutex::new(());
-
 pub struct TestEnv {
-    _guard: MutexGuard<'static, ()>,
     root: TempDir,
 }
 
 impl TestEnv {
     pub fn new() -> Self {
-        let guard = STATE_HOME_LOCK.lock().expect("state home lock poisoned");
         let root = TempDir::new().expect("cannot create temp dir");
-        unsafe {
-            std::env::set_var("XDG_STATE_HOME", root.path().join("state"));
-        }
-        Self {
-            _guard: guard,
-            root,
-        }
+        TEST_STATE_ROOT.with_borrow_mut(|r| *r = Some(root.path().join("state")));
+        Self { root }
     }
 
     pub fn root(&self) -> &Path {
@@ -81,14 +71,18 @@ pub fn test_name() -> String {
     std::thread::current().name().unwrap().replace(":", "_")
 }
 
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
 /// Sets a set of environment variables and restores their previous values on
 /// drop.
 pub struct EnvVarGuard {
     previous: Vec<(&'static str, Option<String>)>,
+    _guard: MutexGuard<'static, ()>,
 }
 
 impl EnvVarGuard {
     pub fn set<'a>(vars: impl IntoIterator<Item = (&'static str, Option<&'a str>)>) -> Self {
+        let _guard = ENV_LOCK.lock().expect("env lock poisoned");
         let previous = vars
             .into_iter()
             .map(|(name, value)| {
@@ -102,7 +96,7 @@ impl EnvVarGuard {
                 (name, previous)
             })
             .collect();
-        Self { previous }
+        Self { previous, _guard }
     }
 }
 
@@ -176,7 +170,7 @@ impl ApplyScenario {
 
 /// Number of obstruction prompts fired by the current test.
 pub fn prompt_count() -> usize {
-    dotrift::commands::apply::PROMPT_COUNT.with(|count| *count.borrow())
+    dotrift::commands::apply::test_hooks::PROMPT_COUNT.with(|count| *count.borrow())
 }
 
 /// Asserts that some cause in `error`'s chain contains `needle`.

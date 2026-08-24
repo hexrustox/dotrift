@@ -8,7 +8,7 @@ use std::{
 
 use common::{ApplyScenario, TestEnv, assert_error_chain, prompt_count};
 use dotrift::ExitStatus;
-use dotrift::commands::apply::{ApplyOptions, ObstructionChoice, set_prompt_choice};
+use dotrift::commands::apply::{ApplyOptions, ObstructionChoice, test_hooks::set_prompt_choice};
 use dotrift::hash::hash_bytes;
 use dotrift::state::{Kind, StateDatabase};
 use test_case::test_case;

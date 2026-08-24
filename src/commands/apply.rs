@@ -474,7 +474,7 @@ impl PromptOption for ObstructionChoice {
 }
 
 #[cfg(any(test, feature = "testing"))]
-mod test_hooks {
+pub mod test_hooks {
     use std::cell::RefCell;
 
     use super::ObstructionChoice;
@@ -485,8 +485,7 @@ mod test_hooks {
     }
 
     thread_local! {
-        pub static PROMPT_CHOICE: RefCell<PromptChoices> =
-            const { RefCell::new(PromptChoices::Single(None)) };
+        pub static PROMPT_CHOICE: RefCell<PromptChoices> = const { RefCell::new(PromptChoices::Single(None)) };
         pub static PROMPT_COUNT: RefCell<usize> = const { RefCell::new(0) };
     }
 
@@ -501,21 +500,19 @@ mod test_hooks {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
-pub use test_hooks::{PROMPT_CHOICE, PROMPT_COUNT, set_prompt_choice, set_prompt_choices};
-
-#[cfg_attr(any(test, feature = "testing"), allow(unused_variables))]
 fn prompt_for_obstruction(
-    entry: &config::DeploymentEntry,
-    obstruction: &Path,
+    #[allow(unused_variables)] entry: &config::DeploymentEntry,
+    #[allow(unused_variables)] obstruction: &Path,
 ) -> std::result::Result<ObstructionChoice, PromptError> {
     #[cfg(any(test, feature = "testing"))]
     {
+        use test_hooks::{PROMPT_CHOICE, PROMPT_COUNT, PromptChoices};
+
         PROMPT_COUNT.with_borrow_mut(|count| *count += 1);
         PROMPT_CHOICE.with(|current| match &mut *current.borrow_mut() {
-            test_hooks::PromptChoices::Single(None) => Err(PromptError::Cancelled),
-            test_hooks::PromptChoices::Single(Some(choice)) => Ok(choice.clone()),
-            test_hooks::PromptChoices::Sequence(choices) => Ok(choices
+            PromptChoices::Single(None) => Err(PromptError::Cancelled),
+            PromptChoices::Single(Some(choice)) => Ok(choice.clone()),
+            PromptChoices::Sequence(choices) => Ok(choices
                 .pop()
                 .expect("obstruction prompt choices exhausted by test")),
         })
@@ -523,7 +520,24 @@ fn prompt_for_obstruction(
 
     #[cfg(not(any(test, feature = "testing")))]
     {
+        use std::{fs, path::Path};
+
         use crossterm::style::Color;
+
+        use super::{ObstructionChoice, PromptError, config};
+
+        fn path_kind(path: &Path) -> std::io::Result<&'static str> {
+            let meta = fs::symlink_metadata(path)?;
+            Ok(if meta.is_dir() {
+                "directory"
+            } else if meta.is_file() {
+                "file"
+            } else if meta.is_symlink() {
+                "symlink"
+            } else {
+                "unknown"
+            })
+        }
 
         let question = format!(
             "Cannot deploy {} {} because {} {} is already present.\nHow would you like to proceed?",
@@ -545,20 +559,6 @@ fn prompt_for_obstruction(
             .filter(move |choice| should_show_diff || *choice != ObstructionChoice::ViewDiff)
             .interact()
     }
-}
-
-#[cfg(not(any(test, feature = "testing")))]
-fn path_kind(path: &Path) -> std::io::Result<&'static str> {
-    let meta = fs::symlink_metadata(path)?;
-    Ok(if meta.is_dir() {
-        "directory"
-    } else if meta.is_file() {
-        "file"
-    } else if meta.is_symlink() {
-        "symlink"
-    } else {
-        "unknown"
-    })
 }
 
 fn view_diff(
