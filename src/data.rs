@@ -13,12 +13,7 @@ pub(crate) struct DataFile {
 
 impl DataFile {
     pub(crate) fn read(source: &Path) -> Result<Self> {
-        if !source.is_dir() {
-            return Err(miette!(
-                "source directory `{}` does not exist",
-                source.display()
-            ));
-        }
+        crate::ensure_source_dir(source)?;
         let path = source.join("dotrift_data.toml");
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,

@@ -8,7 +8,7 @@ pub mod managed;
 pub mod state;
 pub mod template;
 
-use std::path::Path;
+use std::{fs, path::Path};
 
 use miette::{Result, WrapErr, miette};
 
@@ -27,5 +27,23 @@ pub(crate) fn ensure_absolute(path: &Path) -> Result<std::path::PathBuf> {
             .map_err(|error| miette!(error))
             .wrap_err("cannot resolve the current directory")?
             .join(path))
+    }
+}
+
+pub(crate) fn ensure_source_dir(path: &Path) -> Result<()> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(miette!(
+            "source directory `{}` is not a directory",
+            path.display()
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(miette!(
+            "source directory `{}` does not exist",
+            path.display()
+        )),
+        Err(error) => Err(miette!(error).wrap_err(format!(
+            "cannot access source directory `{}`",
+            path.display()
+        ))),
     }
 }

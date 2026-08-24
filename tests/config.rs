@@ -340,7 +340,8 @@ fn profile_overlay_replaces_whole_value_without_recursive_merge() {
 }
 
 #[test_case(
-    |env| env.root().join("missing") ;
+    |env| env.root().join("missing"),
+    "does not exist" ;
     "missing_source_dir_is_rejected"
 )]
 #[test_case(
@@ -348,17 +349,19 @@ fn profile_overlay_replaces_whole_value_without_recursive_merge() {
         let file = env.root().join("plain-file");
         fs::write(&file, b"data").unwrap();
         file
-    } ;
+    },
+    "is not a directory" ;
     "source_path_that_is_a_file_is_rejected"
 )]
 fn source_that_is_not_a_directory_fails_with_does_not_exist(
     setup: impl FnOnce(&TestEnv) -> PathBuf,
+    expected: &str,
 ) {
     let env = TestEnv::new();
     let source = setup(&env);
     let error =
         config::read(&source, Some(env.target_dir())).expect_err("non-directory source must fail");
-    assert_error_chain(&error, "does not exist");
+    assert_error_chain(&error, expected);
 }
 
 #[test]

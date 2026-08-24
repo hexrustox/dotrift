@@ -139,13 +139,7 @@ struct ResolvedPortal {
 }
 
 pub fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDeployment> {
-    // TODO more precise error
-    if !source.is_dir() {
-        return Err(miette!(
-            "source directory `{}` does not exist",
-            source.display()
-        ));
-    }
+    crate::ensure_source_dir(source)?;
     let data = DataFile::read(source)?;
     let active = crate::state::StateDatabase::open_read_only()?
         .map_or_else(|| Ok(Vec::new()), |db| db.active_profiles())?;
