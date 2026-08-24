@@ -8,7 +8,7 @@ use common::{ApplyScenario, EnvVarGuard, TestEnv, snapshot_settings, test_name};
 use dotrift::commands::apply::{ObstructionChoice, set_prompt_choices};
 use test_case::test_case;
 
-fn write_capture_script(env: &TestEnv) -> (PathBuf, PathBuf) {
+fn capture_script(env: &TestEnv) -> (PathBuf, PathBuf) {
     let output = env.path("viewdiff.txt");
     let script = env.path("capture-pager.sh");
     fs::write(&script, format!("#!/bin/sh\ncat > {}\n", output.display())).unwrap();
@@ -16,23 +16,33 @@ fn write_capture_script(env: &TestEnv) -> (PathBuf, PathBuf) {
     (script, output)
 }
 
-fn install_capture_pager(env: &TestEnv) -> (EnvVarGuard, PathBuf) {
-    let (script, output) = write_capture_script(env);
-    let guard = EnvVarGuard::set([
-        ("DOTRIFT_PAGER", Some(script.to_str().unwrap())),
-        ("PAGER", Some("")),
-    ]);
-    (guard, output)
+fn copy_diff_setup(source: &Path, target: &Path) -> &'static str {
+    fs::write(source.join("file.txt"), b"new content\n").unwrap();
+    fs::write(target.join("target.txt"), b"old content\n").unwrap();
+    "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
 }
 
-#[test_case(
-    |source: &Path, target: &Path| {
-        fs::write(source.join("file.txt"), b"new content\n").unwrap();
-        fs::write(target.join("target.txt"), b"old content\n").unwrap();
-        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
+enum PagerChoice {
+    CaptureScript,
+    MissingBinary,
+    Unset,
+}
+
+fn resolve_pager(choice: PagerChoice, env: &TestEnv) -> (Option<String>, Option<PathBuf>) {
+    match choice {
+        PagerChoice::CaptureScript => {
+            let (script, output) = capture_script(env);
+            (Some(script.to_str().unwrap().to_owned()), Some(output))
+        }
+        PagerChoice::MissingBinary => (
+            Some(env.path("no-such-pager").to_string_lossy().into_owned()),
+            None,
+        ),
+        PagerChoice::Unset => (None, None),
     }
-    ; "shows_single_line_copy_diff"
-)]
+}
+
+#[test_case(copy_diff_setup ; "shows_single_line_copy_diff")]
 #[test_case(
     |source: &Path, target: &Path| {
         fs::write(source.join("dotrift_data.toml"), "[variable]\nmessage = \"hello\"\n").unwrap();
@@ -44,92 +54,52 @@ fn install_capture_pager(env: &TestEnv) -> (EnvVarGuard, PathBuf) {
 )]
 fn view_diff_prompt_output(setup: impl Fn(&Path, &Path) -> &'static str) {
     let scenario = ApplyScenario::new(setup);
-    let (_pager, diff_file) = install_capture_pager(&scenario.env);
+    let (script, output) = capture_script(&scenario.env);
+    let _guard = EnvVarGuard::set([
+        ("DOTRIFT_PAGER", Some(script.to_str().unwrap())),
+        ("PAGER", Some("")),
+    ]);
     set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
     scenario.run();
-    let diff = fs::read_to_string(diff_file).unwrap();
+    let diff = fs::read_to_string(output).unwrap();
     snapshot_settings(&scenario.env).bind(|| {
         insta::assert_snapshot!(test_name(), &diff);
     });
 }
 
-fn write_copy_diff_fixture(env: &TestEnv) -> (PathBuf, PathBuf) {
-    let source = env.path("source");
-    let target = env.path("target");
-    fs::create_dir_all(&source).unwrap();
-    fs::create_dir_all(&target).unwrap();
-    fs::write(source.join("file.txt"), b"new content\n").unwrap();
-    fs::write(target.join("target.txt"), b"old content\n").unwrap();
-    fs::write(
-        source.join("dotrift.toml"),
-        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n",
-    )
-    .unwrap();
-    (source, target)
-}
-
-fn run_view_diff_with_env(env: &TestEnv, dotrift_pager: Option<&str>, pager: Option<&str>) {
-    let (source, target) = write_copy_diff_fixture(env);
-    let _guard = EnvVarGuard::set([("DOTRIFT_PAGER", dotrift_pager), ("PAGER", pager)]);
+#[test_case(Some(""), PagerChoice::CaptureScript ; "blank_dotrift_pager_falls_back_to_pager")]
+#[test_case(Some("   "), PagerChoice::CaptureScript ; "whitespace_dotrift_pager_falls_back_to_pager")]
+#[test_case(None, PagerChoice::Unset ; "no_pager_configured_prints_diff_to_stdout")]
+#[test_case(Some(""), PagerChoice::MissingBinary ; "failing_pager_falls_back_to_stdout")]
+fn pager_fallback(dotrift_pager: Option<&str>, pager: PagerChoice) {
+    let scenario = ApplyScenario::new(copy_diff_setup);
+    let (pager_value, output) = resolve_pager(pager, &scenario.env);
+    let _guard = EnvVarGuard::set([
+        ("DOTRIFT_PAGER", dotrift_pager),
+        ("PAGER", pager_value.as_deref()),
+    ]);
     set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
     dotrift::capture::clear();
-    dotrift::commands::apply::run(&source, Some(target)).unwrap();
-}
-
-#[test]
-fn blank_dotrift_pager_falls_back_to_pager() {
-    let env = TestEnv::new();
-    let (script, output) = write_capture_script(&env);
-    run_view_diff_with_env(&env, Some(""), Some(script.to_str().unwrap()));
-    let diff = fs::read_to_string(output).unwrap();
-    snapshot_settings(&env).bind(|| {
+    scenario.run();
+    let diff = match output {
+        Some(path) => fs::read_to_string(path).unwrap(),
+        None => dotrift::capture::take(),
+    };
+    snapshot_settings(&scenario.env).bind(|| {
         insta::assert_snapshot!(test_name(), &diff);
-    });
-}
-
-#[test]
-fn whitespace_dotrift_pager_falls_back_to_pager() {
-    let env = TestEnv::new();
-    let (script, output) = write_capture_script(&env);
-    run_view_diff_with_env(&env, Some("   "), Some(script.to_str().unwrap()));
-    let diff = fs::read_to_string(output).unwrap();
-    snapshot_settings(&env).bind(|| {
-        insta::assert_snapshot!(test_name(), &diff);
-    });
-}
-
-#[test]
-fn no_pager_configured_prints_diff_to_stdout() {
-    let env = TestEnv::new();
-    run_view_diff_with_env(&env, None, None);
-    let captured = dotrift::capture::take();
-    snapshot_settings(&env).bind(|| {
-        insta::assert_snapshot!(test_name(), &captured);
-    });
-}
-
-#[test]
-fn failing_pager_falls_back_to_stdout() {
-    let env = TestEnv::new();
-    let missing = env.path("no-such-pager");
-    run_view_diff_with_env(&env, Some(""), Some(missing.to_str().unwrap()));
-    let captured = dotrift::capture::take();
-    snapshot_settings(&env).bind(|| {
-        insta::assert_snapshot!(test_name(), &captured);
     });
 }
 
 #[test]
 fn failing_dotrift_pager_raises_error() {
-    let env = TestEnv::new();
-    let missing = env.path("no-such-pager");
-    let (source, target) = write_copy_diff_fixture(&env);
+    let scenario = ApplyScenario::new(copy_diff_setup);
+    let (pager_value, _) = resolve_pager(PagerChoice::MissingBinary, &scenario.env);
     let _guard = EnvVarGuard::set([
-        ("DOTRIFT_PAGER", Some(missing.to_str().unwrap())),
+        ("DOTRIFT_PAGER", pager_value.as_deref()),
         ("PAGER", Some("")),
     ]);
     set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
-    let error = dotrift::commands::apply::run(&source, Some(target)).unwrap_err();
+    let error = scenario.try_run().unwrap_err();
     let rendered = format!("{error}");
     assert!(rendered.contains("cannot run DOTRIFT_PAGER"), "{rendered}");
 }
