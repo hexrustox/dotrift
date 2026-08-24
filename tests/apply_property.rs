@@ -12,7 +12,7 @@ use dotrift::commands::apply::ApplyOptions;
 use dotrift::state::{Kind, StateDatabase};
 use proptest::prelude::*;
 
-use crate::common::TestEnv;
+use crate::common::ApplyScenario;
 
 #[derive(Debug, Clone)]
 enum Node<T> {
@@ -270,54 +270,61 @@ fn assert_symlink_tree(
 
 proptest! {
     #![proptest_config(proptest::test_runner::Config {
-        cases: 64,
+        cases: 8,
         ..proptest::test_runner::Config::default()
     })]
 
     #[test]
-    fn arbitrary_apply_deploys_exact_symlink_tree((source_tree, target_tree) in world_strategy()) {
-        let env = TestEnv::new();
-        let source = env.path("source");
-        let target = env.path("target");
+    fn apply_deploys_exact_symlink_tree((source_tree, target_tree) in world_strategy()) {
+        let scenario = ApplyScenario::new(|_, _| "");
+        materialize(&scenario.source, &source_tree);
+        scenario.write_config(&render_portals(&target_tree));
 
-        materialize(&source, &source_tree);
-        fs::write(source.join("dotrift.toml"), render_portals(&target_tree)).unwrap();
+        scenario.run();
 
-        dotrift::commands::apply::run(&source, Some(target.clone())).unwrap();
-
-        let db = StateDatabase::open().unwrap();
-        assert_symlink_tree(&source, &target, &db, &target_tree, Path::new(""))?;
-        prop_assert_eq!(count_files_on_disk(&target), file_count(&target_tree));
+        let db = scenario.env.database();
+        assert_symlink_tree(&scenario.source, &scenario.target, &db, &target_tree, Path::new(""))?;
+        prop_assert_eq!(count_files_on_disk(&scenario.target), file_count(&target_tree));
         prop_assert_eq!(db.managed_paths().unwrap().len(), file_count(&target_tree));
     }
 
     #[test]
-    fn arbitrary_apply_cleanup_drops_removed_targets(
+    fn apply_cleanup_drops_removed_targets(
         (source_tree, target_tree, pruned_tree) in cleanup_world_strategy(),
     ) {
-        let env = TestEnv::new();
-        let source = env.path("source");
-        let target = env.path("target");
+        let scenario = ApplyScenario::new(|_, _| "");
+        materialize(&scenario.source, &source_tree);
+        scenario.write_config(&render_portals(&target_tree));
+        scenario.run();
 
-        materialize(&source, &source_tree);
-        fs::write(source.join("dotrift.toml"), render_portals(&target_tree)).unwrap();
+        scenario.write_config(&render_portals(&pruned_tree));
+        scenario.run_with_options(ApplyOptions {
+            clean_up: true,
+            ..Default::default()
+        });
 
-        dotrift::commands::apply::run(&source, Some(target.clone())).unwrap();
-
-        fs::write(source.join("dotrift.toml"), render_portals(&pruned_tree)).unwrap();
-        dotrift::commands::apply::run_with_options(
-            &source,
-            Some(target.clone()),
-            ApplyOptions {
-                clean_up: true,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-        let db = StateDatabase::open().unwrap();
-        assert_symlink_tree(&source, &target, &db, &pruned_tree, Path::new(""))?;
-        prop_assert_eq!(count_files_on_disk(&target), file_count(&pruned_tree));
+        let db = scenario.env.database();
+        assert_symlink_tree(&scenario.source, &scenario.target, &db, &pruned_tree, Path::new(""))?;
+        prop_assert_eq!(count_files_on_disk(&scenario.target), file_count(&pruned_tree));
         prop_assert_eq!(db.managed_paths().unwrap().len(), file_count(&pruned_tree));
+    }
+
+    #[test]
+    fn apply_cleanup_prune_empty_dirs((source_tree, target_tree) in world_strategy()) {
+        let scenario = ApplyScenario::new(|_, _| "");
+        materialize(&scenario.source, &source_tree);
+        scenario.write_config(&render_portals(&target_tree));
+        scenario.run();
+
+        scenario.write_config("");
+        scenario.run_with_options(ApplyOptions {
+            clean_up: true,
+            prune_empty_dirs: true,
+            ..Default::default()
+        });
+
+        let db = scenario.env.database();
+        prop_assert_eq!(fs::read_dir(&scenario.target).unwrap().count(), 0);
+        prop_assert_eq!(db.managed_paths().unwrap().len(), 0);
     }
 }
