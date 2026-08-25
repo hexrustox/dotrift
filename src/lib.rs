@@ -8,9 +8,13 @@ pub mod managed;
 pub mod state;
 pub mod template;
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use miette::{Result, WrapErr, miette};
+use normalize_path::NormalizePath;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitStatus {
@@ -46,4 +50,20 @@ pub(crate) fn ensure_source_dir(path: &Path) -> Result<()> {
             path.display()
         ))),
     }
+}
+
+pub(crate) fn prettify_path(path: &Path) -> PathBuf {
+    let normalized = path.normalize();
+    if let Some(home) = dirs::home_dir() {
+        let home = home.normalize();
+        if let Ok(stripped) = normalized.strip_prefix(&home) {
+            if stripped.as_os_str().is_empty() {
+                return PathBuf::from("~");
+            }
+            let mut result = PathBuf::from("~");
+            result.extend(stripped.iter());
+            return result;
+        }
+    }
+    normalized
 }

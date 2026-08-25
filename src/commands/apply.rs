@@ -16,7 +16,7 @@ use tui::prompt::{PromptError, PromptOption};
 use crate::{
     ExitStatus,
     config::{self, DeployType},
-    hash, managed, println_capture,
+    hash, managed, prettify_path, println_capture,
     state::{Kind, StateDatabase, StateLock, StateRecord},
     template,
 };
@@ -77,19 +77,19 @@ pub fn run_with_options(
             EntryResult::Deployed => {
                 deployed += 1;
                 if options.verbose {
-                    println_capture!("deployed {}", entry.target_path.display());
+                    println_capture!("deployed {}", prettify_path(&entry.target_path).display());
                 }
             }
             EntryResult::Replaced => {
                 replaced += 1;
                 if options.verbose {
-                    println_capture!("replaced {}", entry.target_path.display());
+                    println_capture!("replaced {}", prettify_path(&entry.target_path).display());
                 }
             }
             EntryResult::Skipped => {
                 skipped += 1;
                 if options.verbose {
-                    println_capture!("skipped {}", entry.target_path.display());
+                    println_capture!("skipped {}", prettify_path(&entry.target_path).display());
                 }
             }
             EntryResult::Cancelled => return Ok(ExitStatus::Cancelled),
@@ -290,6 +290,7 @@ fn deploy_entry(
     })
 }
 
+// TODO show type & mode
 fn report_dry_run_entry(
     database: &StateDatabase,
     target_root: &Path,
@@ -306,7 +307,7 @@ fn report_dry_run_entry(
     } else {
         "deployed"
     };
-    println_capture!("{action} {}", entry.target_path.display());
+    println_capture!("{action} {}", prettify_path(&entry.target_path).display());
     Ok(())
 }
 
@@ -358,13 +359,13 @@ fn cleanup(
         }
         if dry_run {
             planned_removals.insert(path.clone());
-            println_capture!("removed {}", path.display());
+            println_capture!("removed {}", prettify_path(path).display());
             continue;
         }
         remove_path(database, path)?;
         removed += 1;
         if options.verbose {
-            println_capture!("removed {}", path.display());
+            println_capture!("removed {}", prettify_path(path).display());
         }
         if options.prune_empty_dirs {
             pruned += prune_parents(target_root, path, options.verbose)?;
@@ -394,7 +395,7 @@ fn report_dry_run_pruning(target_root: &Path, removals: &HashSet<PathBuf>) -> Re
             if !would_be_empty(&directory, &planned)? {
                 break;
             }
-            println_capture!("pruned {}", directory.display());
+            println_capture!("pruned {}", prettify_path(&directory).display());
             planned.insert(directory.clone());
             current = directory.parent().map(Path::to_path_buf);
         }
@@ -449,7 +450,7 @@ fn prune_parents(target_root: &Path, removed_path: &Path, verbose: bool) -> Resu
             .map_err(|error| miette!(error).wrap_err("cannot prune empty directory"))?;
         count += 1;
         if verbose {
-            println_capture!("pruned {}", parent.display());
+            println_capture!("pruned {}", prettify_path(parent).display());
         }
         current = parent.parent();
     }
@@ -524,8 +525,6 @@ fn prompt_for_obstruction(
 
         use crossterm::style::Color;
 
-        use super::{ObstructionChoice, PromptError, config};
-
         fn path_kind(path: &Path) -> std::io::Result<&'static str> {
             let meta = fs::symlink_metadata(path)?;
             Ok(if meta.is_dir() {
@@ -542,9 +541,9 @@ fn prompt_for_obstruction(
         let question = format!(
             "Cannot deploy {} {} because {} {} is already present.\nHow would you like to proceed?",
             path_kind(&entry.source_path)?,
-            entry.source_path.display(),
+            with_tilde(&entry.source_path).display(),
             path_kind(obstruction)?,
-            obstruction.display()
+            with_tilde(obstruction).display()
         );
         let style = tui::prompt::PromptStyle {
             done_question: Color::Grey,
