@@ -290,7 +290,6 @@ fn deploy_entry(
     })
 }
 
-// TODO show type & mode
 fn report_dry_run_entry(
     database: &StateDatabase,
     target_root: &Path,
@@ -307,7 +306,19 @@ fn report_dry_run_entry(
     } else {
         "deployed"
     };
-    println_capture!("{action} {}", prettify_path(&entry.target_path).display());
+    let deploy_type = match entry.deploy_type {
+        DeployType::Symlink => "symlink",
+        DeployType::Copy => "copy",
+        DeployType::Template => "template",
+    };
+    let suffix = match entry.mode {
+        Some(mode) => format!("[{deploy_type} {:03o}]", u32::from(mode)),
+        None => format!("[{deploy_type}]"),
+    };
+    println_capture!(
+        "{action} {} {suffix}",
+        prettify_path(&entry.target_path).display()
+    );
     Ok(())
 }
 
@@ -541,9 +552,9 @@ fn prompt_for_obstruction(
         let question = format!(
             "Cannot deploy {} {} because {} {} is already present.\nHow would you like to proceed?",
             path_kind(&entry.source_path)?,
-            with_tilde(&entry.source_path).display(),
+            prettify_path(&entry.source_path).display(),
             path_kind(obstruction)?,
-            with_tilde(obstruction).display()
+            prettify_path(obstruction).display()
         );
         let style = tui::prompt::PromptStyle {
             done_question: Color::Grey,

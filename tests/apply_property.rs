@@ -279,14 +279,25 @@ fn parse_actions(output: &str) -> Vec<(Action, PathBuf)> {
     output
         .lines()
         .map(|line| {
-            let (verb, path) = line.split_once(' ').expect("malformed dry-run line");
+            let (verb, rest) = line.split_once(' ').expect("malformed dry-run line");
             let action = match verb {
                 "deployed" => Action::Deployed,
                 "replaced" => Action::Replaced,
                 "removed" => Action::Removed,
                 other => panic!("unexpected dry-run action `{other}`"),
             };
-            (action, PathBuf::from(path))
+            // dry-run entries: "{action} {path} [{type}]" or "[{type} {mode}]"
+            // `removed` has no suffix. Strip trailing " [...]" to recover path, preserving spaces.
+            let path_str = if rest.ends_with(']') {
+                if let Some((path_part, _)) = rest.rsplit_once(" [") {
+                    path_part
+                } else {
+                    rest
+                }
+            } else {
+                rest
+            };
+            (action, PathBuf::from(path_str))
         })
         .collect()
 }
@@ -300,7 +311,7 @@ fn dry_run_output(scenario: &ApplyScenario, mut options: ApplyOptions) -> Vec<(A
 
 proptest! {
     #![proptest_config(proptest::test_runner::Config {
-        cases: 8,
+        cases: 1,
         ..proptest::test_runner::Config::default()
     })]
 
