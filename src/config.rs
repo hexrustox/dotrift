@@ -6,13 +6,19 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use glob::Pattern;
+use glob::{MatchOptions, Pattern};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use miette::{Result, WrapErr, miette};
 use serde::Deserialize;
 use templater::value::Value;
 
 use crate::data::DataFile;
+
+const GLOB_MATCH_OPTIONS: MatchOptions = MatchOptions {
+    case_sensitive: true,
+    require_literal_separator: true,
+    require_literal_leading_dot: false,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -362,7 +368,7 @@ fn resolve_portals(
                     source.display()
                 )
             })?;
-            if !pattern.matches_path(relative) {
+            if !pattern.matches_path_with(relative, GLOB_MATCH_OPTIONS) {
                 return Ok(());
             }
             match kind {
@@ -522,7 +528,7 @@ fn apply_rules(
     let mut deploy_type = DeployType::Symlink;
     let mut mode = None;
     for (pattern, rule) in rules {
-        if pattern.matches_path(&entry.target) {
+        if pattern.matches_path_with(&entry.target, GLOB_MATCH_OPTIONS) {
             if let Some(value) = rule.deploy_type {
                 deploy_type = value;
             }
@@ -742,6 +748,18 @@ mod tests {
     )]
     #[test_case(
         |t| {
+            fs::create_dir_all(t.join("a")).unwrap();
+            fs::create_dir_all(t.join("sub/a")).unwrap();
+            fs::write(t.join("a/b"), b"a").unwrap();
+            fs::write(t.join("sub/a/b"), b"b").unwrap();
+            portal_map!("a/b" => "dir")
+        } => resolved_list!(
+            "a/b" => "dir",
+        );
+        "literal_portal_is_anchored_does_not_match_nested_path"
+    )]
+    #[test_case(
+        |t| {
             fs::write(t.join("vimrc"), b"set").unwrap();
             portal_map!("./vimrc" => "./.vimrc")
         } => resolved_list!("vimrc" => ".vimrc");
@@ -766,10 +784,21 @@ mod tests {
             fs::write(t.join("config/sub/two.toml"), b"b").unwrap();
             portal_map!("config/*.toml" => ".config")
         } => resolved_list!(
+            "config/one.toml" => ".config/one.toml"
+        );
+        "wildcard_pattern_does_not_cross_directory"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("config/sub")).unwrap();
+            fs::write(t.join("config/one.toml"), b"a").unwrap();
+            fs::write(t.join("config/sub/two.toml"), b"b").unwrap();
+            portal_map!("config/**/*.toml" => ".config")
+        } => resolved_list!(
             "config/one.toml" => ".config/one.toml",
             "config/sub/two.toml" => ".config/sub/two.toml"
         );
-        "wildcard_pattern_appends_remainder"
+        "recursive_wildcard_pattern_appends_remainder"
     )]
     #[test_case(
         |t| {
@@ -967,6 +996,46 @@ mod tests {
         resolved!("vimrc", ".vimrc"), rule_map!("*" => rule_config!(Copy, 0o644), "*.vimrc" => rule_config!(Symlink))
         => panics "conflicting rules";
         "mode_with_effective_symlink_is_rejected"
+    )]
+    #[test_case(
+        resolved!("src", "a/b"), rule_map!("a/b" => rule_config!(Copy))
+        => deploy_entry!("src", "a/b", Copy);
+        "literal_rule_matches_exact_target"
+    )]
+    #[test_case(
+        resolved!("src", "sub/a/b"), rule_map!("a/b" => rule_config!(Copy))
+        => deploy_entry!("src", "sub/a/b", Symlink);
+        "literal_rule_does_not_match_nested_prefix"
+    )]
+    #[test_case(
+        resolved!("src", "a/b/c"), rule_map!("a/b" => rule_config!(Copy))
+        => deploy_entry!("src", "a/b/c", Symlink);
+        "literal_rule_does_not_match_child"
+    )]
+    #[test_case(
+        resolved!("src", "a/b"), rule_map!("a/*" => rule_config!(Copy))
+        => deploy_entry!("src", "a/b", Copy);
+        "wildcard_single_component_matches_direct_child"
+    )]
+    #[test_case(
+        resolved!("src", "a/b/c"), rule_map!("a/*" => rule_config!(Copy))
+        => deploy_entry!("src", "a/b/c", Symlink);
+        "wildcard_single_component_does_not_cross_separator"
+    )]
+    #[test_case(
+        resolved!("src", "a/b"), rule_map!("*" => rule_config!(Copy))
+        => deploy_entry!("src", "a/b", Symlink);
+        "star_does_not_match_nested_target"
+    )]
+    #[test_case(
+        resolved!("src", "a/b/c"), rule_map!("a/**" => rule_config!(Copy))
+        => deploy_entry!("src", "a/b/c", Copy);
+        "recursive_wildcard_matches_deep_target"
+    )]
+    #[test_case(
+        resolved!("src", "a/b"), rule_map!("a/**" => rule_config!(Copy))
+        => deploy_entry!("src", "a/b", Copy);
+        "recursive_wildcard_matches_direct_child"
     )]
     fn applies_matching_rules(
         entry: ResolvedPortal,
