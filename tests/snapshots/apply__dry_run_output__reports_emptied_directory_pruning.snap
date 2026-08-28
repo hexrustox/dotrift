@@ -1,8 +1,0 @@
----
-source: tests/apply.rs
-expression: captured
----
-deployed <root>/target/file.txt
-removed <root>/target/a/b/stale.txt
-pruned <root>/target/a/b
-pruned <root>/target/a

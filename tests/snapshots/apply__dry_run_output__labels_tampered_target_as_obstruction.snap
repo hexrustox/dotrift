@@ -1,5 +1,0 @@
----
-source: tests/apply.rs
-expression: captured
----
-obstruction <root>/target/target.txt

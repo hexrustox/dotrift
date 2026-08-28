@@ -1,7 +1,0 @@
----
-source: tests/apply.rs
-expression: captured
----
-replaced <root>/target/a.txt
-replaced <root>/target/sub/b.txt
-deployed 0, replaced 2, skipped 0

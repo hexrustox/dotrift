@@ -1,6 +1,0 @@
----
-source: tests/apply.rs
-expression: captured
----
-deployed <root>/target/a.txt
-deployed <root>/target/sub/b.txt

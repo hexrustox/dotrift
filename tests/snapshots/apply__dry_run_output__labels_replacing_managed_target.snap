@@ -1,5 +1,0 @@
----
-source: tests/apply.rs
-expression: captured
----
-replaced <root>/target/target.txt

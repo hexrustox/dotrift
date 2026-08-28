@@ -1,6 +1,6 @@
 ---
 source: tests/apply_view_diff.rs
-expression: output
+expression: "&diff"
 ---
 --- <root>/target/target.txt
 +++ <root>/source/greeting.txt

@@ -1,7 +1,0 @@
----
-source: tests/apply.rs
-expression: captured
----
-replaced <root>/target/a.txt
-deployed <root>/target/b.txt
-obstruction <root>/target/c.txt

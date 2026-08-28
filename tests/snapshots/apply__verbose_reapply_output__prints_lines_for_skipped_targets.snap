@@ -1,6 +1,0 @@
----
-source: tests/apply.rs
-expression: captured
----
-skipped <root>/target/a.txt
-deployed 0, replaced 0, skipped 1
