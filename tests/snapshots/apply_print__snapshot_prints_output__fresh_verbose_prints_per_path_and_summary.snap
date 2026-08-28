@@ -1,0 +1,7 @@
+---
+source: tests/apply_print.rs
+expression: captured
+---
+deployed <root>/target/a.txt
+deployed <root>/target/b.txt
+deployed 2, replaced 0, skipped 0

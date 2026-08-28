@@ -1,0 +1,7 @@
+---
+source: tests/apply_print.rs
+expression: captured
+---
+replaced <root>/target/keep.txt
+removed <root>/target/remove.txt
+deployed 0, replaced 1, skipped 0, removed 1, pruned 0
