@@ -1,9 +1,12 @@
 use std::path::Path;
 
+use crossterm::style::Color;
 use miette::{Result, miette};
+use tui::apply_color;
 
 use crate::{
     cli::ProfileCommand,
+    color_enabled,
     data::DataFile,
     println_capture,
     state::{StateDatabase, StateLock},
@@ -31,7 +34,11 @@ fn list(source: &Path) -> Result<()> {
         .map_or_else(|| Ok(Vec::new()), |db| db.active_profiles())?;
     for name in data.profile.keys() {
         if active.iter().any(|(active_name, _)| active_name == name) {
-            println_capture!("{} (active)", name);
+            println_capture!(
+                "{} {}",
+                name,
+                apply_color("(active)", Color::Green, color_enabled!())
+            );
         } else {
             println_capture!("{}", name);
         }

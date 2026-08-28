@@ -8,13 +8,17 @@ use std::{
     process::{Command, Stdio},
 };
 
+use crossterm::style::Color;
 use miette::{Result, WrapErr, miette};
 use strum::EnumIter;
 use templater::value::Value;
-use tui::prompt::{PromptError, PromptOption};
+use tui::{
+    apply_color,
+    prompt::{PromptError, PromptOption},
+};
 
 use crate::{
-    ExitStatus,
+    ExitStatus, color_enabled,
     config::{self, DeployType},
     hash, managed, prettify_path, println_capture,
     state::{Kind, StateDatabase, StateLock, StateRecord},
@@ -77,19 +81,31 @@ pub fn run_with_options(
             EntryResult::Deployed => {
                 deployed += 1;
                 if options.verbose {
-                    println_capture!("deployed {}", prettify_path(&entry.target_path).display());
+                    println_capture!(
+                        "{} {}",
+                        apply_color("deployed", Color::Green, color_enabled!()),
+                        prettify_path(&entry.target_path).display()
+                    );
                 }
             }
             EntryResult::Replaced => {
                 replaced += 1;
                 if options.verbose {
-                    println_capture!("replaced {}", prettify_path(&entry.target_path).display());
+                    println_capture!(
+                        "{} {}",
+                        apply_color("replaced", Color::Cyan, color_enabled!()),
+                        prettify_path(&entry.target_path).display()
+                    );
                 }
             }
             EntryResult::Skipped => {
                 skipped += 1;
                 if options.verbose {
-                    println_capture!("skipped {}", prettify_path(&entry.target_path).display());
+                    println_capture!(
+                        "{} {}",
+                        apply_color("skipped", Color::DarkGrey, color_enabled!()),
+                        prettify_path(&entry.target_path).display()
+                    );
                 }
             }
             EntryResult::Cancelled => return Ok(ExitStatus::Cancelled),
@@ -297,14 +313,14 @@ fn report_dry_run_entry(
 ) -> Result<()> {
     let obstruction = parent_obstruction(target_root, &entry.target_path)?;
     let target_exists = fs::symlink_metadata(&entry.target_path).is_ok();
-    let action = if obstruction.is_some()
+    let (action, color) = if obstruction.is_some()
         || (target_exists && !is_target_managed(database, &entry.target_path)?)
     {
-        "obstruction"
+        ("obstruction", Color::Yellow)
     } else if target_exists {
-        "replaced"
+        ("replaced", Color::Cyan)
     } else {
-        "deployed"
+        ("deployed", Color::Green)
     };
     let deploy_type = match entry.deploy_type {
         DeployType::Symlink => "symlink",
@@ -316,7 +332,8 @@ fn report_dry_run_entry(
         None => format!("[{deploy_type}]"),
     };
     println_capture!(
-        "{action} {} {suffix}",
+        "{} {} {suffix}",
+        apply_color(action, color, color_enabled!()),
         prettify_path(&entry.target_path).display()
     );
     Ok(())
@@ -370,13 +387,21 @@ fn cleanup(
         }
         if dry_run {
             planned_removals.insert(path.clone());
-            println_capture!("removed {}", prettify_path(path).display());
+            println_capture!(
+                "{} {}",
+                apply_color("removed", Color::Red, color_enabled!()),
+                prettify_path(path).display()
+            );
             continue;
         }
         remove_path(database, path)?;
         removed += 1;
         if options.verbose {
-            println_capture!("removed {}", prettify_path(path).display());
+            println_capture!(
+                "{} {}",
+                apply_color("removed", Color::Red, color_enabled!()),
+                prettify_path(path).display()
+            );
         }
         if options.prune_empty_dirs {
             pruned += prune_parents(target_root, path, options.verbose)?;
@@ -406,7 +431,11 @@ fn report_dry_run_pruning(target_root: &Path, removals: &HashSet<PathBuf>) -> Re
             if !would_be_empty(&directory, &planned)? {
                 break;
             }
-            println_capture!("pruned {}", prettify_path(&directory).display());
+            println_capture!(
+                "{} {}",
+                apply_color("pruned", Color::Magenta, color_enabled!()),
+                prettify_path(&directory).display()
+            );
             planned.insert(directory.clone());
             current = directory.parent().map(Path::to_path_buf);
         }
@@ -461,7 +490,11 @@ fn prune_parents(target_root: &Path, removed_path: &Path, verbose: bool) -> Resu
             .map_err(|error| miette!(error).wrap_err("cannot prune empty directory"))?;
         count += 1;
         if verbose {
-            println_capture!("pruned {}", prettify_path(parent).display());
+            println_capture!(
+                "{} {}",
+                apply_color("pruned", Color::Magenta, color_enabled!()),
+                prettify_path(parent).display()
+            );
         }
         current = parent.parent();
     }

@@ -2,11 +2,13 @@ use clap::Parser;
 use miette::{Error, miette};
 
 use dotrift::{
-    ExitStatus,
+    COLOR_SUPPORT, ExitStatus,
     cli::{Cli, Command},
 };
 
 fn main() -> Result<(), Error> {
+    *COLOR_SUPPORT.write().unwrap() = tui::color_support();
+
     let cli = Cli::parse();
     let (source, target, command) = cli.resolve()?;
     let mut status = ExitStatus::Success;

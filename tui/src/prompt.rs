@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    fmt::{Debug, Display},
+    fmt::Debug,
     io::{self, IsTerminal, Write},
 };
 
@@ -12,7 +12,8 @@ use crossterm::{
     terminal::{self, ClearType},
 };
 use strum::IntoEnumIterator;
-use supports_color::Stream;
+
+use crate::{apply_color, color_support};
 
 /// Optional per-variant presentation overrides for [`SelectPrompt`].
 pub trait PromptOption {
@@ -62,9 +63,9 @@ impl Default for PromptStyle {
         Self {
             question: Color::Reset,
             done_question: Color::Reset,
-            selected: Color::Green,
+            selected: Color::Blue,
             unselected: Color::Reset,
-            marker_selected: Color::Green,
+            marker_selected: Color::Blue,
             marker_unselected: Color::Reset,
             done: Color::Green,
             help: Color::Reset,
@@ -172,7 +173,7 @@ where
         }
 
         let unicode_support = is_unicode();
-        let color_support = supports_color::on(Stream::Stdout).is_some();
+        let color_support = color_support();
         let mut stdout = io::stdout();
         terminal::enable_raw_mode()?;
         let _guard = TerminalGuard;
@@ -362,27 +363,22 @@ fn render<E>(
     for (index, option) in state.options[start..end].iter().enumerate() {
         let index = index + start;
         let is_selected = index == state.selected;
-        let marker = if is_selected { selected } else { unselected };
-        let marker_color = if is_selected {
-            style.marker_selected
+        if is_selected {
+            write!(
+                stdout,
+                "  {} {}\r\n",
+                apply_color(selected, style.marker_selected, color_support),
+                apply_color(option.label.clone(), style.selected, color_support)
+            )?;
         } else {
-            style.marker_unselected
-        };
-        let row_color = if is_selected {
-            style.selected
-        } else {
-            Color::Reset
-        };
-        write!(
-            stdout,
-            "  {}{}\r\n",
-            apply_color(marker, marker_color, color_support),
-            apply_color(
-                format!(" [{}] {}", option.hotkey, option.label),
-                row_color,
-                color_support
-            )
-        )?;
+            write!(
+                stdout,
+                "  {} [{}] {}\r\n",
+                apply_color(unselected, style.marker_unselected, color_support),
+                apply_color(option.hotkey, style.unselected, color_support).bold(),
+                apply_color(option.label.clone(), style.unselected, color_support)
+            )?;
+        }
     }
     writeln!(
         stdout,
@@ -394,18 +390,6 @@ fn render<E>(
         )
     )?;
     Ok(question_lines + (end - start) + 2)
-}
-
-fn apply_color<T>(content: T, color: Color, enabled: bool) -> String
-where
-    T: Display + Stylize,
-    T::Styled: Display,
-{
-    if enabled {
-        content.with(color).to_string()
-    } else {
-        content.to_string()
-    }
 }
 
 fn clear_prompt(stdout: &mut impl Write, position: (u16, u16)) -> io::Result<()> {

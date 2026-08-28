@@ -11,10 +11,20 @@ pub mod template;
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::{LazyLock, RwLock},
 };
 
 use miette::{Result, WrapErr, miette};
 use normalize_path::NormalizePath;
+
+pub static COLOR_SUPPORT: LazyLock<RwLock<bool>> = LazyLock::new(|| RwLock::new(false));
+
+#[macro_export]
+macro_rules! color_enabled {
+    () => {
+        *$crate::COLOR_SUPPORT.read().unwrap()
+    };
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitStatus {
