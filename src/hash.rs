@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     hash::Hasher,
-    io::{BufReader, Read},
+    io::{BufReader, Read, Write},
     path::Path,
 };
 
@@ -10,6 +10,40 @@ use twox_hash::XxHash64;
 
 const SEED: u64 = 0;
 const CHUNK_SIZE: usize = 64 * 1024;
+
+/// An [`std::io::Write`] adapter that hashes every accepted byte while
+/// forwarding it, producing the same digest as [`hash_bytes`] for the same
+/// byte stream.
+pub(crate) struct HashWriter<W> {
+    inner: W,
+    hasher: XxHash64,
+}
+
+impl<W> HashWriter<W> {
+    pub(crate) fn new(inner: W) -> Self {
+        Self {
+            inner,
+            hasher: XxHash64::with_seed(SEED),
+        }
+    }
+
+    /// Consumes the adapter, returning the hex digest of everything written.
+    pub(crate) fn into_digest(self) -> String {
+        format!("{:016x}", self.hasher.finish())
+    }
+}
+
+impl<W: Write> Write for HashWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.hasher.write(&buf[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
 
 pub fn hash_bytes(bytes: &[u8]) -> String {
     let mut hasher = XxHash64::with_seed(SEED);
@@ -70,5 +104,27 @@ mod tests {
     fn hash_file_errs_on_missing_path() {
         let dir = tempdir().expect("cannot create temp dir");
         assert!(hash_file(&dir.path().join("missing")).is_err());
+    }
+
+    #[test]
+    fn hash_writer_digests_empty_stream_like_hash_bytes() {
+        let writer = HashWriter::new(Vec::<u8>::new());
+        assert_eq!(writer.into_digest(), hash_bytes(&[]));
+    }
+
+    #[test]
+    fn hash_writer_digests_text_like_hash_bytes() {
+        let mut writer = HashWriter::new(Vec::new());
+        writer.write_all(b"hello").expect("cannot write");
+        assert_eq!(writer.into_digest(), hash_bytes(b"hello"));
+    }
+
+    #[test]
+    fn hash_writer_digests_chunked_stream_like_hash_bytes() {
+        let mut writer = HashWriter::new(Vec::new());
+        for chunk in [b"foo".as_slice(), b"bar", b"baz"] {
+            writer.write_all(chunk).expect("cannot write");
+        }
+        assert_eq!(writer.into_digest(), hash_bytes(b"foobarbaz"));
     }
 }

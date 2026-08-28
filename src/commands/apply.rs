@@ -1,11 +1,11 @@
-// TODO optimize template rendering & hash calculating once only for each file
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::Write,
+    io::{self, BufWriter, Write},
     os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use crossterm::style::Color;
@@ -275,21 +275,12 @@ fn deploy_entry(
             }
         }
         DeployType::Copy | DeployType::Template => {
-            let bytes = if entry.deploy_type == DeployType::Template {
-                template::render_template(&entry.source_path, context)?
-            } else {
-                fs::read(&entry.source_path)
-                    .map_err(|error| miette!(error))
-                    .wrap_err("cannot read copy source")?
-            };
-            fs::write(&entry.target_path, &bytes)
-                .map_err(|error| miette!(error))
-                .wrap_err("cannot write target file")?;
+            let content_hash = write_deployed_file(entry, context)?;
             StateRecord {
                 target_path: entry.target_path.clone(),
                 source_path: entry.source_path.clone(),
                 kind: Kind::File,
-                content_hash: Some(hash::hash_bytes(&bytes)),
+                content_hash: Some(content_hash),
             }
         }
     };
@@ -304,6 +295,43 @@ fn deploy_entry(
     } else {
         EntryResult::Deployed
     })
+}
+
+/// Writes a copy or template entry straight to its target file, returning the
+/// digest of the deployed bytes.
+///
+/// The file is created before writing, so a failed render or write leaves a
+/// partial target behind; it is removed to keep the failure contract that the
+/// target is absent after a failed deploy action.
+fn write_deployed_file(
+    entry: &config::DeploymentEntry,
+    context: &HashMap<String, Value>,
+) -> Result<String> {
+    let file = fs::File::create(&entry.target_path)
+        .map_err(|error| miette!(error))
+        .wrap_err("cannot write target file")?;
+    let mut writer = hash::HashWriter::new(BufWriter::new(file));
+    let outcome = match entry.deploy_type {
+        DeployType::Template => {
+            template::render_template_to(&entry.source_path, context, &mut writer)
+        }
+        DeployType::Copy => {
+            let mut source = fs::File::open(&entry.source_path)
+                .map_err(|error| miette!(error))
+                .wrap_err("cannot read copy source")?;
+            io::copy(&mut source, &mut writer)
+                .map_err(|error| miette!(error))
+                .wrap_err("cannot write target file")?;
+            Ok(())
+        }
+        DeployType::Symlink => Err(miette!("symlink entries do not deploy as files")),
+    };
+    let content_hash = writer.into_digest();
+    if let Err(error) = outcome {
+        let _ = fs::remove_file(&entry.target_path);
+        return Err(error);
+    }
+    Ok(content_hash)
 }
 
 fn report_dry_run_entry(
@@ -610,8 +638,7 @@ fn view_diff(
     context: &HashMap<String, Value>,
 ) -> Result<()> {
     let rendered = if entry.deploy_type == DeployType::Template {
-        let rendered = template::render_template(&entry.source_path, context)?;
-        Some(render_to_temp(&rendered)?)
+        Some(render_template_to_temp(&entry.source_path, context)?)
     } else {
         None
     };
@@ -674,41 +701,41 @@ fn view_diff(
 
 const RENDER_TEMP_DIR: &str = "dotrift-render";
 
-fn render_to_temp(rendered: &[u8]) -> Result<PathBuf> {
+/// Renders a template entry into a fresh temp file for diffing.
+///
+/// A failed render removes the partial temp file before propagating the error.
+fn render_template_to_temp(source: &Path, context: &HashMap<String, Value>) -> Result<PathBuf> {
     let dir = std::env::temp_dir().join(RENDER_TEMP_DIR);
     fs::create_dir_all(&dir)
         .map_err(|error| miette!(error))
         .wrap_err("cannot create diff temp directory")?;
-    for _ in 0..3 {
-        let name = random_hash()?;
-        let path = dir.join(format!("dotrift-{name}.tmp"));
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&path)
-        {
-            Ok(mut file) => {
-                file.write_all(rendered)
-                    .map_err(|error| miette!(error))
-                    .wrap_err("cannot write diff temp file")?;
-                return Ok(path);
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(miette!(error).wrap_err("cannot create diff temp file")),
-        }
-    }
-    Err(miette!("cannot create a unique diff temp file"))
-}
 
-fn random_hash() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    // SAFETY: the buffer is writable and its length matches the request.
-    let written = unsafe { libc::getrandom(bytes.as_mut_ptr().cast(), bytes.len(), 0) };
-    if written != bytes.len() as isize {
-        return Err(miette!("cannot read random bytes for diff temp file"));
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| miette!(error))
+        .wrap_err("system clock is before the Unix epoch")?
+        .as_millis();
+    let path = dir.join(format!("{ts}.tmp"));
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+    {
+        Ok(file) => {
+            let mut writer = BufWriter::new(file);
+            let outcome = template::render_template_to(source, context, &mut writer);
+            drop(writer);
+            match outcome {
+                Ok(()) => Ok(path),
+                Err(error) => {
+                    let _ = fs::remove_file(&path);
+                    Err(error)
+                }
+            }
+        }
+        Err(error) => Err(miette!(error).wrap_err("cannot create diff temp file")),
     }
-    Ok(hash::hash_bytes(&bytes))
 }
 
 fn run_diff_into<W: Write>(
