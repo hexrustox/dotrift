@@ -1,224 +1,79 @@
 # dotrift
 
-A declarative, template-aware dotfile manager written in Rust. dotrift maps files from a single source directory to a target directory (typically `$HOME`) using a plain `dotrift.toml` — symlinking some files, copying others, and rendering templates for the rest with a custom-built templating language and a dedicated templater workspace crate. A SQLite-backed state database tracks what dotrift manages, detects external modifications, and surfaces conflicts interactively in a TUI pager before overwriting anything. A profile system layers environment-specific variables over a base `dotrift_data.toml` so the same config can produce different outputs across machines without forking the repo.
+> [!WARNING]
+> dotrift is a work in progress. The CLI, configuration format, and behavior may change.
 
-## Features
+Declarative, template-aware dotfile management in Rust. dotrift projects files
+from a source directory into a target directory, typically your home directory,
+using `dotrift.toml`. Each file can be deployed as a symlink, copied, or
+rendered as a template.
 
-- **Declarative configuration** — Plain TOML defines source-to-target mappings with glob patterns
-- **Three deploy types** — Symlink, copy, or template rendering per file or pattern
-- **Template engine** — Custom templating language with conditionals, loops, functions, and whitespace control
-- **Profile system** — Layer environment-specific variables (work vs personal, Linux vs macOS) over base config
-- **State tracking** — SQLite database tracks managed files, detects external modifications, prevents accidental overwrites
-- **Interactive conflict resolution** — TUI pager with side-by-side diffs, directory explorer, and file viewer
-- **Collision detection** — Halts with clear error when multiple sources map to the same target
-- **Dry-run mode** — Preview planned operations before touching the filesystem
+## Overview
 
-## Installation
+```mermaid
+flowchart LR
+    S[Source directory] --> C[dotrift.toml]
+    S --> D[dotrift_data.toml]
+    S --> I[.dotriftignore]
 
-Build from source:
+    C --> R[Resolve portals and rules]
+    D --> T[Resolve variables and profiles]
+    I --> R
+    T --> R
 
-```bash
-git clone <repo-url>
-cd dotrift
-cargo build --release
+    R --> A[dotrift apply]
+    A -->|symlink / copy / template| H[Target directory]
+    A <--> DB[(SQLite management state)]
+
+    DB --> ST[dotrift status]
 ```
 
-The binary will be at `target/release/dotrift`. Move it to a directory in your `$PATH`.
+The source directory contains the files to manage and the control files that
+describe how they should be deployed. `apply` resolves that desired deployment,
+checks the target against dotrift's management state, and reconciles the target
+directory without silently replacing obstructions.
 
-**Requirements:** Rust 1.95 or later (Edition 2024).
+## Template Render Demo
 
-## Quick Start
+Given this source template, `shell.tmpl`:
 
-Initialize the source directory:
-
-```bash
-dotrift init
+```text
+# Generated shell configuration
+editor = "{{ editor }}"
+hostname = "{{ hostname }}"
 ```
 
-This creates `~/.local/share/dotrift/dotrift.toml` (or `$XDG_DATA_HOME/dotrift/dotrift.toml`).
-
-Edit the config to define your mappings:
-
-```toml
-# Map entire source root to home directory
-"**" = "."
-
-# Or map specific files
-"bashrc" = ".bashrc"
-"config/git" = ".config/git"
-```
-
-Apply the configuration:
-
-```bash
-dotrift apply
-```
-
-Files are now symlinked, copied, or rendered to your home directory.
-
-## Usage
-
-| Command | Description |
-|---------|-------------|
-| `init` | Initialize source directory with default `dotrift.toml` |
-| `apply` | Evaluate config and deploy files to target directory |
-| `unapply` | Remove all managed files from target directory |
-| `add <path> [dest]` | Add existing file to source directory and update config |
-| `diff <path>` | Show side-by-side diff between managed file and source |
-| `status list [file]` | List managed files or check specific file status |
-| `status clear [file]` | Clear status from database (files remain on disk) |
-| `profile list` | Show all profiles, mark active ones |
-| `profile activate <name>` | Activate a profile (updates timestamp) |
-| `profile deactivate <name>` | Deactivate a profile |
-| `profile show` | Print resolved variable context |
-| `templater` | Evaluate template standalone (see `dotrift templater --help`) |
-
-**Global options:**
-
-- `-s, --source <dir>` — Override source directory (default: `$XDG_DATA_HOME/dotrift`)
-- `-t, --target <dir>` — Override target directory (default: `$HOME`)
-- `-c, --config <file>` — Override config file path
-- `-v, --verbose` — Enable verbose logging
-
-See `dotrift <command> --help` for command-specific options.
-
-## Configuration
-
-`dotrift.toml` defines file mappings and deployment rules. Before parsing, it's evaluated as a template (see [Template Syntax](#template-syntax)).
-
-### Mapping with `[portal]`
-
-Maps source files to target paths using glob patterns:
-
-```toml
-[portal]
-# Literal file mapping
-"bashrc" = ".bashrc"
-
-# Literal directory (recursive)
-"config/git" = ".config/git"
-
-# Glob pattern (maps entire subtree)
-"config/**" = ".config"
-
-# Map source root to target root
-"**" = "."
-```
-
-**Path stripping:** For glob keys, the prefix up to the first wildcard component is stripped from matched paths. Example: `"src/**/*.rs" = "dist"` maps `src/foo/bar.rs` to `dist/foo/bar.rs`.
-
-### Deployment rules with `[rule]`
-
-Controls deploy type and file permissions:
-
-```toml
-[rule]
-# Render as template
-"*.tmpl" = { type = "tmpl" }
-
-# Copy with specific permissions
-"scripts/*" = { type = "copy", mode = "755" }
-
-# Symlink (default if no rule matches)
-"config/**" = { type = "symlink" }
-```
-
-**Deploy types:**
-- `symlink` — Create symbolic link to source file (default)
-- `copy` — Copy file content
-- `tmpl` — Render source as template, write output
-
-### Excluding files with `ignore`
-
-Gitignore-style patterns to exclude files from deployment:
-
-```toml
-ignore = ["*.tmp", "secrets/**", "!secrets/allowed.txt"]
-```
-
-### Other options
-
-```toml
-# Override target directory (default: $HOME)
-target-directory = "/home/user"
-```
-
-See `spec/dotrift-toml.md` for the configuration reference, and `spec/commands/` for subcommands.
-
-## Template Data & Profiles
-
-`dotrift_data.toml` (in source directory) provides variables for template evaluation:
+And this `dotrift_data.toml`:
 
 ```toml
 [variable]
-hostname = "laptop"
 editor = "nvim"
-work_email = "user@company.com"
-
-[profile.work]
 hostname = "workstation"
-email = "user@company.com"
-
-[profile.personal]
-email = "user@personal.com"
 ```
 
-**Resolution order:**
-1. Base `[variable]` section
-2. Active profiles in activation order (last activated wins on conflict)
+The rendered target contains:
 
-**Managing profiles:**
-
-```bash
-dotrift profile activate work
-dotrift profile activate personal  # Now has highest precedence
-dotrift profile show               # See resolved variables
-dotrift profile list               # See which are active
+```text
+# Generated shell configuration
+editor = "nvim"
+hostname = "workstation"
 ```
 
-Profiles active in the database but missing from `dotrift_data.toml` are silently ignored.
+Templates support `{{ ... }}` interpolations, `{% if %}` conditionals, and
+`{% for %}` loops. Profiles can overlay the base variables for different
+machines or environments.
 
-## Template Syntax
+## Current Features
 
-Templates use `{{ }}` for interpolation, `{% %}` for statements, and `{# #}` for comments.
-
-### Example
-
-```
-{# Conditional block #}
-{% if eq(hostname, "work") %}
-export EMAIL="{{ work_email }}"
-{% else %}
-export EMAIL="{{ personal_email }}"
-{% end %}
-
-{# Loop over list #}
-{% for pkg in packages %}
-alias {{ pkg }}="~/.local/bin/{{ pkg }}"
-{% end %}
-
-{# Function calls #}
-export PATH="{{ join(":", home(), ".local/bin", "$PATH") }}"
-```
-
-### Key features
-
-- **Literals:** Strings (`"..."`), integers, booleans, lists
-- **Dot access:** `obj.field`, `list.0`
-- **Functions:** `eq(a, b)`, `and(...)`, `join(...)`, etc.
-- **Control flow:** `{% if %}`, `{% elif %}`, `{% else %}`, `{% for %}`
-- **Whitespace control:** `{{-` / `-}}` trims spaces, `{{=` / `=}}` eats entire line
-
-See `spec/templater.md` for complete syntax reference.
-
-## TUI Pager
-
-Interactive terminal UI invoked during conflict resolution (`[d]iff` prompt). Three modes:
-
-- **View** — Single file viewer with scrolling (used when file blocks directory creation)
-- **Diff** — Side-by-side line diff with scroll sync (used for file conflicts)
-- **Explorer** — Directory browser with file preview (used when directory blocks file creation)
-
-**Navigation:** Vim-style keys (`j`/`k`, `Ctrl+D`/`Ctrl+U`, `g`/`G`), arrow keys, Page Up/Down. Press `h` for help.
-
-The pager automatically selects the appropriate mode based on the paths involved.
+- Declarative TOML portals mapping literal or glob source paths to target paths
+- Three deploy types: `symlink`, `copy`, and `template`
+- Template variables from `dotrift_data.toml`
+- Activatable profiles for environment-specific variable overlays
+- Gitignore-style `.dotriftignore` filtering
+- SQLite management state and managed-path checks
+- Interactive obstruction handling before replacing existing paths
+- Collision and structural-conflict validation before filesystem changes
+- Dry runs with `dotrift apply --dry-run`
+- Stale-path cleanup with `--clean-up` and optional empty-directory pruning
+- Management reporting with `dotrift status`
+- Profile management with `dotrift profile list`, `activate`, `deactivate`, and `show`

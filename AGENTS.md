@@ -38,20 +38,9 @@ live in `spec/`.
   `templater/benches/`.
 - Extra binaries go in `<crate>/src/bin/` (e.g., `demo/src/bin/prompt.rs`).
 
-## Toolchain
-
-- Rust **1.95**, edition 2024, workspace resolver 3.
-- `.cargo/config.toml` forces `clang` + `mold` linker on
-  `x86_64-unknown-linux-gnu` — both must be available or builds fail.
-- `rusqlite` uses the `bundled` feature; no system SQLite needed.
-
 ## Commands
 
 - Build / check / run: `cargo build`, `cargo check`, `cargo run -- <args>`
 - Tests: `cargo test` (all workspace); `cargo test -p templater` or `-p tui`
   for a single crate; `cargo test --test apply` for one integration file.
 - Lint/format: `cargo fmt`, `cargo clippy`
-- Unused deps: `cargo machete` · Supply chain: `cargo deny check` · TOML
-  formatting: `taplo format`
-
-There is no required order beyond `fmt` before commit; no CI, no git hooks.
