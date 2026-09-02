@@ -31,8 +31,8 @@ flowchart LR
         direction LR
         f["One folder with<br>all your settings"] --> d["Dotrift"] --> k["New computer<br>ready in one step"]
     end
-    style s1 fill:#e6f4ea,stroke:#34a853,stroke-width:2px
-    style s2 fill:#fce8e6,stroke:#ea4335,stroke-width:2px
+    style s1 fill:#e6f4ea,stroke:#34a853,stroke-width:2px,color:#34a853
+    style s2 fill:#fce8e6,stroke:#ea4335,stroke-width:2px,color:#ea4335
 ```
 
 ## What Dotrift does
