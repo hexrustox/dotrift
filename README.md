@@ -1,79 +1,62 @@
+<div align="center">
+
 # dotrift
 
-> [!WARNING]
-> dotrift is a work in progress. The CLI, configuration format, and behavior may change.
+*All your settings in one folder. One command to put them in place.*
 
-Declarative, template-aware dotfile management in Rust. dotrift projects files
-from a source directory into a target directory, typically your home directory,
-using `dotrift.toml`. Each file can be deployed as a symlink, copied, or
-rendered as a template.
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.txt)
 
-## Overview
+</div>
+
+dotrift is for anyone who has set up a computer and thought: *"I know I fixed this last time… where was it?"*
+
+## The problem
+
+Your computer keeps the settings that make it feel like yours — how your text editor looks, what your terminal does, the small preferences you've tuned over years — tucked away in hidden corners of the system. Moving to a new computer means hunting them down and copying them over by hand: slow, fiddly, and easy to get wrong.
+
+dotrift turns that around. You keep every setting in one ordinary folder, and dotrift places them where your computer expects to find them.
 
 ```mermaid
 flowchart LR
-    S[Source directory] --> C[dotrift.toml]
-    S --> D[dotrift_data.toml]
-    S --> I[.dotriftignore]
-
-    C --> R[Resolve portals and rules]
-    D --> T[Resolve variables and profiles]
-    I --> R
-    T --> R
-
-    R --> A[dotrift apply]
-    A -->|symlink / copy / template| H[Target directory]
-    A <--> DB[(SQLite management state)]
-
-    DB --> ST[dotrift status]
+    subgraph s1["Without dotrift"]
+        direction LR
+        a["Settings hidden<br>in one corner"]
+        b["Settings hidden<br>in another"]
+        c["Settings hidden<br>in a third place"]
+        a -.->|"copy each one<br>by hand"| h["New computer<br>set up slowly,<br>from memory"]
+        b -.-> h
+        c -.-> h
+    end
+    subgraph s2["With dotrift"]
+        direction LR
+        f["One folder with<br>all your settings"] --> d["dotrift"] --> k["New computer<br>ready in one step"]
+    end
 ```
 
-The source directory contains the files to manage and the control files that
-describe how they should be deployed. `apply` resolves that desired deployment,
-checks the target against dotrift's management state, and reconciles the target
-directory without silently replacing obstructions.
+## What dotrift does
 
-## Template Render Demo
+- **Keeps everything together** — one folder holds all your settings instead of them being scattered across hidden corners
+- **One step, every time** — each file lands exactly where your computer expects it
+- **Fills in the blanks** — the same setup can have small differences per machine, like work versus personal
+- **Asks first** — dotrift never replaces a file you've changed without checking with you
+- **Keeps track** — it remembers everything it placed, so it can tidy up when your setup moves on
 
-Given this source template, `shell.tmpl`:
+> [!TIP]
+> Change a setting once in your folder, and every machine that uses it can pick up the change.
 
-```text
-# Generated shell configuration
-editor = "{{ editor }}"
-hostname = "{{ hostname }}"
+## How it works, in one picture
+
+Every file in your folder travels one of three ways onto your computer:
+
+```mermaid
+flowchart LR
+    f["One folder with<br>all your settings"] --> d["dotrift"]
+    d -->|"linked"| l["Stays connected<br>to your folder"]
+    d -->|"copied"| c["A straight duplicate<br>lands in place"]
+    d -->|"filled in"| t["Blank spots completed<br>with your answers"]
+    l --> h["Exactly where your<br>computer expects it"]
+    c --> h
+    t --> h
 ```
 
-And this `dotrift_data.toml`:
-
-```toml
-[variable]
-editor = "nvim"
-hostname = "workstation"
-```
-
-The rendered target contains:
-
-```text
-# Generated shell configuration
-editor = "nvim"
-hostname = "workstation"
-```
-
-Templates support `{{ ... }}` interpolations, `{% if %}` conditionals, and
-`{% for %}` loops. Profiles can overlay the base variables for different
-machines or environments.
-
-## Current Features
-
-- Declarative TOML portals mapping literal or glob source paths to target paths
-- Three deploy types: `symlink`, `copy`, and `template`
-- Template variables from `dotrift_data.toml`
-- Activatable profiles for environment-specific variable overlays
-- Gitignore-style `.dotriftignore` filtering
-- SQLite management state and managed-path checks
-- Interactive obstruction handling before replacing existing paths
-- Collision and structural-conflict validation before filesystem changes
-- Dry runs with `dotrift apply --dry-run`
-- Stale-path cleanup with `--clean-up` and optional empty-directory pruning
-- Management reporting with `dotrift status`
-- Profile management with `dotrift profile list`, `activate`, `deactivate`, and `show`
+Set it up once, and every computer you use feels like *yours*.
