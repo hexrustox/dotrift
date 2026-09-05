@@ -20,19 +20,19 @@ Dotrift turns that around. You keep every setting in one ordinary folder, and Do
 flowchart LR
     subgraph s1["Without Dotrift"]
         direction LR
-        a["Settings hidden<br>in one corner"]
-        b["Settings hidden<br>in another"]
+        a["Settings hidden<br>in one place"]
+        b["Settings hidden<br>in another place"]
         c["Settings hidden<br>in a third place"]
         a -.->|"copy each one<br>by hand"| h["New computer<br>set up slowly,<br>from memory"]
-        b -.-> h
-        c -.-> h
+        b -.->|"copy each one<br>by hand"| h
+        c -.->|"copy each one<br>by hand"| h
     end
     subgraph s2["With Dotrift"]
         direction LR
         f["One folder with<br>all your settings"] --> d["Dotrift"] --> k["New computer<br>ready in one step"]
     end
-    style s1 fill:#e6f4ea,stroke:#34a853,stroke-width:2px,color:#34a853
-    style s2 fill:#fce8e6,stroke:#ea4335,stroke-width:2px,color:#ea4335
+    style s1 fill:#ea4335,stroke:#ea4335,stroke-width:2px,color:#ea4335,fill-opacity:0.1
+    style s2 fill:#34a853,stroke:#34a853,stroke-width:2px,color:#34a853,fill-opacity:0.1
 ```
 
 ## What Dotrift does
