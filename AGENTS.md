@@ -3,10 +3,19 @@
 Declarative, template-aware dotfile manager written in Rust. Maps files from a
 source directory to a target directory via `dotrift.toml`.
 
-## Documentation index
+## Agent skills
 
-- [Issue tracker](docs/agents/issue-tracker.md)
-- [Domain docs](docs/agents/domain.md)
+### Issue tracker
+
+Issues are tracked in GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage-role labels are used as-is. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Multi-context: root `CONTEXT-MAP.md` points at per-context `CONTEXT.md` files, with ADRs in `docs/adr/`. See `docs/agents/domain.md`.
 
 **Authoritative behavior contract:** `spec/*.md` (root) and `<workspace>/spec/*.md` (per workspace member). Consult them before changing CLI, config, DB schema, templater syntax, or pager behavior.
 
