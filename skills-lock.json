@@ -7,12 +7,6 @@
       "skillPath": "skills/engineering/ask-matt/SKILL.md",
       "computedHash": "0cd14026efa0330083cbc7adf590976c162b60e02f696a8dcce96f0b4dab8a72"
     },
-    "choosing-test-type": {
-      "source": "hexrustox/skills",
-      "sourceType": "github",
-      "skillPath": "skills/choosing-test-type/SKILL.md",
-      "computedHash": "bf95a4401ed4fb52944debda69241b063e8f8b06947e424e600ee9eb8cb200bd"
-    },
     "code-review": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -97,42 +91,6 @@
       "skillPath": "skills/rust-best-practices/SKILL.md",
       "computedHash": "0ac6606adb27e64a31bdc8c1ed34e446ae0c14bff1c7648867c46e106adc048f"
     },
-    "rust-code-style": {
-      "source": "hexrustox/skills",
-      "sourceType": "github",
-      "skillPath": "skills/rust/rust-code-style/SKILL.md",
-      "computedHash": "c12cf83b1b8920aa22b94e21c467964263f7010534f23142f416ecf01d69cc12"
-    },
-    "rust-dependencies": {
-      "source": "hexrustox/skills",
-      "sourceType": "github",
-      "skillPath": "skills/rust/rust-dependencies/SKILL.md",
-      "computedHash": "fb87659c12afbd5e8a4fdb9d691f7fc9bda28d30c92e3c6c0122215670ead898"
-    },
-    "rust-insta-crate": {
-      "source": "hexrustox/skills",
-      "sourceType": "github",
-      "skillPath": "skills/rust/rust-insta-crate/SKILL.md",
-      "computedHash": "4ff5bdb6c6dce36e1cde6537379cde28a079eb862e2d4f39f9536451209829ec"
-    },
-    "rust-miette-crate": {
-      "source": "hexrustox/skills",
-      "sourceType": "github",
-      "skillPath": "skills/rust/rust-miette-crate/SKILL.md",
-      "computedHash": "06f18909249edfeac49c768aae0157cfc58065edfde72337ce194a747bb2b9d5"
-    },
-    "rust-proptest-crate": {
-      "source": "hexrustox/skills",
-      "sourceType": "github",
-      "skillPath": "skills/rust/rust-proptest-crate/SKILL.md",
-      "computedHash": "539c4a3b1f2cfe18780234707da743a82933991c0ee3dd067b41b2658cec1f0b"
-    },
-    "rust-test-case-crate": {
-      "source": "hexrustox/skills",
-      "sourceType": "github",
-      "skillPath": "skills/rust/rust-test-case-crate/SKILL.md",
-      "computedHash": "3e0835fd3ae7120996a895f9a185b9d2d3d1d3e31b99b47fea158b48ef4fd33d"
-    },
     "setup-matt-pocock-skills": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -193,12 +151,6 @@
       "skillPath": "skills/engineering/wizard/SKILL.md",
       "computedHash": "dee7f1a523994a1e063c69fe09c2f5b4da97a41ad68107722664e6e472cb2423"
     },
-    "writing-error-messages": {
-      "source": "hexrustox/skills",
-      "sourceType": "github",
-      "skillPath": "skills/general/writing-error-messages/SKILL.md",
-      "computedHash": "9beb587b4f47f8ca49a74707fd8d53c4b5b93158618f893debd34d3d0711eff9"
-    },
     "writing-for-agents": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -211,11 +163,5 @@
       "skillPath": "skills/productivity/writing-great-skills/SKILL.md",
       "computedHash": "4deb21855fb4deeeb1b8217b041faff003fd0c915d24a22f636851c520bc9c5c"
     },
-    "writing-test-cases": {
-      "source": "hexrustox/skills",
-      "sourceType": "github",
-      "skillPath": "skills/general/writing-test-cases/SKILL.md",
-      "computedHash": "b55b06ed48d164de202713988b46e1dc0a9987a4278070a5f2b2d7ff96eeda7a"
-    }
   }
 }
