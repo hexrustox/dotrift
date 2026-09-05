@@ -4,7 +4,7 @@
 
 *All your settings in one folder. One command to put them in place.*
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.txt)
+[![Rust](https://img.shields.io/badge/Rust-2024%20edition-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
 
 </div>
 
