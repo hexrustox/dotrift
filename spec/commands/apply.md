@@ -107,8 +107,9 @@ The kind is reported from the path's own non-following metadata, one of
 `directory`, `file`, `symlink`, or `unknown`: a directory is `directory`, a
 regular file is `file`, a symlink is `symlink`, and any other filesystem
 object — a FIFO, socket, device, or otherwise unresolvable kind — is
-`unknown`. Paths are shown in absolute form. No size, modification time, link
-target, or entry count is shown.
+`unknown`. Paths are shown prettified per the path display convention (see
+`global.md` § Output conventions). No size, modification time, link target,
+or entry count is shown.
 
 An unmanaged obstruction offers:
 
@@ -126,8 +127,11 @@ files, nested directories, and special objects alike. Removal never follows
 symlinks: a symlink inside the subtree, or the obstruction itself when it is a
 symlink, is unlinked as a link and whatever it points at is left untouched.
 Deletion runs one entry at a time, deepest-first, and stops at the first error;
-state is updated after each completed deletion. There is no `abort` option; an
-external interrupt may terminate the process under normal OS signal handling.
+state is updated after each completed deletion. There is no `abort` option.
+Cancelling the prompt (the terminal's cancellation gesture during the
+interactive prompt) ends the run immediately: the cancelled entry is left
+untouched, no further entries are attempted, no summary is printed, and
+`--clean-up` does not run. State reflects only the actions already completed.
 
 The prompt choices are provided by the TUI/prompt API; `apply` consumes the
 API's result and does not implement terminal detection or a non-interactive
@@ -233,18 +237,45 @@ without prompting or changing the filesystem. Template entries are reported
 like copy entries, without rendering. Dry-run prints no summary, and it
 conflicts with both `--quiet` and `--verbose`.
 
+Each entry prints one line:
+
+```
+<action> <target-path> [<deploy-type>[ <mode>]]
+```
+
+* The action is `deployed` for a missing target, `replaced` for a clean
+  managed path, and `obstruction` for an unmanaged target or an obstructing
+  parent — the cases a real run would deploy, replace, or prompt about. The
+  action word is colored per the palette (`global.md` § Output conventions):
+  `deployed` green, `replaced` cyan, `obstruction` yellow.
+* The target path is displayed per the path display convention.
+* The bracket suffix shows the entry's effective deploy type — `symlink`,
+  `copy`, or `template` — plus the effective mode as a three-digit octal
+  number when a rule sets one: `[symlink]`, `[copy 600]`, `[template 644]`.
+
+Under `--clean-up`, dry-run additionally reports the stale-path removals the
+real run would perform, one `removed <path>` line per removal, and one
+`pruned <path>` line per directory `--prune-empty-dirs` would remove,
+following the same walk the real run performs. Relinquished records (missing
+or modified stale paths) are reported by neither the real run nor the
+dry-run.
+
 ## Output
 
 A real run prints the obstruction prompts as they occur, plus one summary line
 when the run's walk completes. Per-path detail is never printed by default.
 
 The summary counts `deployed N, replaced N, skipped N`; under `--clean-up` it
-also counts `removed N, pruned N`. There is no failure count — a hard failure
-stops the run before any summary — and relinquished records are never counted.
+also counts `removed N, pruned N`. The summary line is plain text, never
+colored. There is no failure count — a hard failure stops the run before any
+summary — and relinquished records are never counted.
 
-`--verbose` adds one line per acted-upon path as the walk proceeds (`deployed`,
-`replaced`, `skipped`); under `--clean-up` it also prints `removed` and `pruned`
-lines, leaving the default clean-up silence intact otherwise.
+`--verbose` adds one line per acted-upon path as the walk proceeds, in the
+form `<action> <path>` where the action word is colored per the palette
+(`deployed` green, `replaced` cyan, `skipped` dark grey) and the path is
+displayed per the path display convention (`global.md` § Output
+conventions); under `--clean-up` it also prints `removed` (red) and `pruned`
+(magenta) lines, leaving the default clean-up silence intact otherwise.
 
 `--quiet` suppresses the summary line. Prompts and errors are never suppressed.
 
@@ -278,8 +309,8 @@ file behind a symlink parent is unlinked. A stale path modified since the
 last apply is an obstruction and is never silently deleted: the file is left
 untouched and its record is relinquished, making it an ordinary untracked
 path. A record whose target no longer exists is relinquished as well, with
-nothing left on disk. Relinquishing neither fails the run nor is reported
-outside a dry-run.
+nothing left on disk. Relinquishing is never reported and never fails the
+run (see [Dry-run](#dry-run)).
 
 `--clean-up` is silent by default: a real run prints nothing per removed path,
 and its summary line still reports the removal and prune counts. `--verbose`
@@ -304,7 +335,16 @@ so pruning touches no state.
 
 ## Exit status
 
-The run is unsuccessful if preflight validation failed, or if any entry was
-skipped or failed; otherwise it succeeds. Under `--clean-up`, a removal or
-prune that fails at the filesystem level also makes the run unsuccessful.
-Relinquishing a stale path never makes the run unsuccessful.
+`apply` exits with a process exit code from three values:
+
+* **`0`** — success: the walk completed, no entry was skipped or failed, and
+  (under `--clean-up`) no removal or prune failed.
+* **`1`** — error or cancellation: preflight validation failed, a runtime
+  failure stopped the run, or the user cancelled an obstruction prompt.
+* **`2`** — completed with skips: the walk finished but at least one entry
+  was skipped.
+
+The command-level notion of an "unsuccessful" run covers both `1` and `2`:
+under `--clean-up`, a removal or prune that fails at the filesystem level also
+makes the run unsuccessful. Relinquishing a stale path never makes the run
+unsuccessful.

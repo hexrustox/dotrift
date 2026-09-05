@@ -63,3 +63,46 @@ of the override.
 
 A command that reads the control files (`dotrift.toml`, `dotrift_data.toml`,
 `.dotriftignore`) errors if the resolved source directory does not exist.
+
+## Output conventions
+
+Shared presentation rules for all command output. Subcommand specs reference
+this section rather than restating these rules.
+
+### Color support
+
+Color support is detected once, at startup, against standard output, using the
+standard `supports-color` conventions: colors are enabled when stdout is a
+terminal and not disabled by the standard environment variables (for example
+`NO_COLOR`); they are forced on by the standard force variables even when
+stdout is not a terminal. Every command gates all of its coloring on that
+single decision — there is no per-command or per-line opt-out, and no
+color-detection after startup.
+
+Coloring never changes text content or layout: with colors disabled, the
+output is byte-identical plain text with the same words in the same order.
+Only the presentation of individual words changes.
+
+The pinned palette:
+
+| Word | Color |
+|---|---|
+| `managed` | green |
+| `unmanaged` | red |
+| `deployed` | green |
+| `replaced` | cyan |
+| `skipped` | dark grey |
+| `removed` | red |
+| `pruned` | magenta |
+| `obstruction` | yellow |
+| `(active)` | green |
+
+### Path display
+
+Paths shown in output are prettified: a path under the user's home directory
+is displayed with a leading `~` replacing the home prefix (the bare home
+directory displays as `~`); any other path is displayed as its normalized
+absolute form. This applies to every path `status`, `apply`, and `profile`
+print — verbose lines, dry-run lines, clean-up lines, and obstruction prompts
+alike. Prettification is display-only; state records and comparisons always
+use the real absolute paths.

@@ -22,7 +22,8 @@ conventions are defined in `global.md`.
    state with no profiles.
 2. Query the `active_profiles` table.
 3. Print each defined profile name, sorted lexicographically. Profiles
-   present in the active set are annotated `(active)`.
+   present in the active set are annotated `(active)`, colored green (see
+   `global.md` § Output conventions).
 
 Stale active profiles — names present in `active_profiles` but absent from
 the current data file — are not shown. A defined profile that is active but

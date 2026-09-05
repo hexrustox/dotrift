@@ -33,13 +33,16 @@ managed    symlink  ~/.zshrc <- dotfiles/.zshrc
 unmanaged  file     ~/.config/nvim/init.lua <- dotfiles/config/nvim/init.lua
 ```
 
-- The verdict prefix is `[managed]` when the managed check passes and
-  `[unmanaged]` otherwise.
+- The verdict is `managed` when the managed check passes and `unmanaged`
+  otherwise; the verdict word is colored green or red respectively (see
+  `global.md` § Output conventions).
 - The kind is the *recorded* kind (`file` or `symlink`), even when the on-disk
   kind no longer matches.
-- The target path is the recorded absolute target path.
-- The source path is the recorded path the target maps from: the entry's path
-  inside the source directory, or the link destination for a symlink deploy.
+- The target path is the recorded target path, displayed per the path display
+  convention (`global.md` § Output conventions).
+- The source path is the recorded path the target maps from — the entry's path
+  inside the source directory, or the link destination for a symlink deploy —
+  displayed the same way.
 
 Lines are sorted lexicographically by target path. An empty database, or a
 database with no records, prints nothing.
