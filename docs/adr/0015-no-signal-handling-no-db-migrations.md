@@ -28,3 +28,14 @@ Both decisions share one principle: dotrift never silently reinterprets state
 it did not write. Interrupted runs leave verifiable residue; corrupt databases
 refuse to run. The next invocation either finds the world as the last completed
 step left it, or stops and says so.
+
+## Amendment (2026-09): partial schemas are completed on open
+
+The paragraph above says a database that "lacks the expected tables is a hard
+error". That letter is superseded: an existing database file missing one of the
+expected tables is completed on open (`CREATE TABLE IF NOT EXISTS`), not
+rejected. The hard-error rule now covers only files that cannot be opened or
+parsed as SQLite. Creating a missing table cannot reinterpret any record
+dotrift wrote; the data-loss risk this ADR guards against arises only when
+existing rows are reinterpreted or silently discarded, which schema completion
+never does. `spec/core.md § State database` carries the current contract.

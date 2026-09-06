@@ -7,4 +7,4 @@
 
 ## Relationships
 
-- **Dotrift → Templater**: Dotrift invokes Templater at apply time for entries whose deploy type is `tmpl`, passing template content and variables from `dotrift_data.toml`
+- **Dotrift → Templater**: Dotrift invokes Templater at apply time for entries whose deploy type is `template`, passing template content and variables from `dotrift_data.toml`
