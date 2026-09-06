@@ -6,7 +6,7 @@ use std::os::unix::fs::symlink;
 use dotrift::hash::hash_bytes;
 use dotrift::state::{Kind, StateRecord};
 
-use common::{TestEnv, snapshot_settings};
+use common::{TestEnv, pin_color_support, snapshot_settings};
 
 fn run_status_and_take() -> String {
     dotrift::capture::clear();
@@ -92,5 +92,62 @@ fn status_prints_sorted_lines_with_verdicts() {
     let captured = run_status_and_take();
     snapshot_settings(&env).bind(|| {
         insta::assert_snapshot!(captured);
+    });
+}
+
+#[test]
+fn status_layout_is_unchanged_with_color_forced() {
+    let env = TestEnv::new();
+    let database = env.database();
+
+    let managed_source = env.path("dotfiles/app.conf");
+    let managed_target = env.path("config/app.conf");
+    fs::create_dir_all(managed_target.parent().unwrap()).unwrap();
+    fs::write(&managed_target, b"key=value").unwrap();
+
+    let changed_source = env.path("dotfiles/zsh/zshrc");
+    let changed_target = env.path("zsh/zshrc");
+    fs::create_dir_all(changed_target.parent().unwrap()).unwrap();
+    fs::write(&changed_target, b"changed on disk").unwrap();
+
+    for (source_path, target_path, content_hash) in [
+        (
+            &managed_source,
+            &managed_target,
+            Some(hash_bytes(b"key=value")),
+        ),
+        (
+            &changed_source,
+            &changed_target,
+            Some(hash_bytes(b"original content")),
+        ),
+    ] {
+        database
+            .put(&StateRecord {
+                target_path: target_path.clone(),
+                source_path: source_path.clone(),
+                kind: Kind::File,
+                content_hash,
+            })
+            .unwrap();
+    }
+
+    // One self-check: the run must actually be colored, or the snapshot
+    // below would pass against colorless output.
+    let colored = {
+        let _color = pin_color_support(true);
+        run_status_and_take()
+    };
+    assert!(
+        colored.contains('\u{1b}'),
+        "color forcing must reach the output"
+    );
+
+    // The stored snapshot, escaped codes stripped, is the colorless layout:
+    // its column positions must match `status_prints_sorted_lines_with_verdicts`.
+    let mut settings = snapshot_settings(&env);
+    settings.set_strip_ansi_escape_codes(true);
+    settings.bind(|| {
+        insta::assert_snapshot!(colored);
     });
 }

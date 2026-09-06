@@ -9,7 +9,6 @@ pub fn run() -> Result<()> {
         return Ok(());
     };
     let mut records = database.managed_paths()?;
-    // TODO add sort options
     records.sort_by(|left, right| left.target_path.cmp(&right.target_path));
 
     for record in records {
@@ -19,9 +18,11 @@ pub fn run() -> Result<()> {
         } else {
             ("unmanaged", Color::Red)
         };
+        // Pad the plain verdict word first: a colored word carries escape
+        // bytes that defeat the field width and collapse the columns.
         println_capture!(
-            "{:<10} {:<8} {} <- {}",
-            apply_color(verdict, color, color_enabled!()),
+            "{} {:<8} {} <- {}",
+            apply_color(format!("{verdict:<10}"), color, color_enabled!()),
             record.kind.as_str(),
             prettify_path(&record.target_path).display(),
             prettify_path(&record.source_path).display()

@@ -1,0 +1,6 @@
+---
+source: tests/status.rs
+expression: colored
+---
+managed    file     <root>/config/app.conf <- <root>/dotfiles/app.conf
+unmanaged  file     <root>/zsh/zshrc <- <root>/dotfiles/zsh/zshrc
