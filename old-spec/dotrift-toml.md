@@ -4,6 +4,9 @@ Defines how files are projected from the source directory to the target
 directory. The file is discovered at the root of the already-resolved source
 directory; it cannot name its own source directory.
 
+The file is required: a missing `dotrift.toml` is a configuration error,
+unlike `dotrift_data.toml` and `.dotriftignore`, which are optional.
+
 Before parsing, the file is evaluated as a template (see the Templater
 context) using the same resolved variable context as deployed templates: base
 variables from `dotrift_data.toml` overlaid by active profiles in precedence
@@ -55,7 +58,12 @@ Maps source paths to target paths.
     is mapped like the directory it resolves to. Empty source directories
     produce no deployment entries.
 * **Glob keys** (containing wildcards) select matching source files. The
-  value is a destination directory.
+  value is a destination directory. A wildcard component matches a directory
+  name on the way through the tree — traversal follows it, including through
+  symlinked directories — but only regular files and symlinks to regular files
+  become deployment entries; a directory a glob matches is never itself
+  deployed. `*` and `?` match dotfiles like any other name: `config/*` matches
+  `config/.hidden`.
 
 ### Path stripping
 
@@ -91,7 +99,7 @@ specs reference it rather than restate it.
   file is a deployable entry like any regular file, and the deploy type
   controls what the target becomes:
   * `symlink` — the target path becomes a symlink pointing to the source path
-    itself.
+    itself; the link target is the absolute source path.
   * `copy` — the link is resolved and the resolved bytes are copied; the
     target is a regular file.
   * `template` — the link is resolved and the resolved bytes are rendered as
@@ -117,7 +125,10 @@ before any filesystem change.
 Selects deployment behavior for resolved target paths.
 
 * **Keys:** Target-relative patterns matched against the resolved target
-  path, relative to the target directory.
+  path, relative to the target directory. A key without wildcards is an exact
+  match: it matches exactly that target path and nothing beneath it. A key
+  with wildcards follows the same glob semantics as portal keys: `*` stops at
+  `/`, `**` crosses directory boundaries.
 * **Values:** Inline tables carrying `type` and/or `mode`.
 * **Scope:** File-only. A rule never configures directory permissions and
   never creates a directory deployment entry. Patterns may contain directory
@@ -147,7 +158,9 @@ A file at `config/secrets/x` resolves to `copy` with mode `600`.
   as `"600"` or `"755"`. Four-digit values such as `"0600"` are invalid.
   Constrained to `000` through `777`. Applies only when the effective deploy
   type is `copy` or `template`; combining `mode` with `type = "symlink"` is a
-  configuration error. Omitted means no explicit permission change.
+  configuration error. Omitted means no explicit permission change: the
+  created file and any created parent directories receive whatever permissions
+  the process umask yields for them.
 
 ## Path rules
 
@@ -161,8 +174,10 @@ Applies to portal keys and values and rule keys:
 * No path normalization is performed.
 * No `~` or environment-variable expansion.
 * Empty strings are invalid; `.` is the explicit root path.
-* Glob syntax supports `*`, `**`, `?`, and `[]`. Brace expansion (`{a,b}`) is
-  unsupported; unsupported pattern syntax is rejected, not treated literally.
+* Glob syntax supports `*`, `**`, `?`, and `[]`. Inside brackets, ranges
+  (`[a-z]`) and negation (`[!abc]`) are supported. Brace expansion (`{a,b}`) is
+  unsupported; a malformed bracket expression and any other unsupported pattern
+  syntax are rejected as configuration errors, not treated literally.
 
 ## Validation
 

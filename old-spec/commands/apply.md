@@ -128,14 +128,18 @@ symlinks: a symlink inside the subtree, or the obstruction itself when it is a
 symlink, is unlinked as a link and whatever it points at is left untouched.
 Deletion runs one entry at a time, deepest-first, and stops at the first error;
 state is updated after each completed deletion. There is no `abort` option.
-Cancelling the prompt (the terminal's cancellation gesture during the
-interactive prompt) ends the run immediately: the cancelled entry is left
+Cancelling the prompt (the prompt's cancel keys, `Esc` and `Ctrl+C`) ends the
+run immediately: the cancelled entry is left
 untouched, no further entries are attempted, no summary is printed, and
 `--clean-up` does not run. State reflects only the actions already completed.
 
 The prompt choices are provided by the TUI/prompt API; `apply` consumes the
 API's result and does not implement terminal detection or a non-interactive
-fallback.
+fallback. The API itself is non-interactive-safe: when stdin is not a
+terminal, the prompt returns its default immediately without rendering
+(`tui/spec/prompt.md` § Defaults). `apply` configures no default, so the
+first option — `skip` — is chosen automatically: a piped run completes with
+skips (exit `2`), and the `replace all` latch can never engage without a TTY.
 
 `view diff` is offered only when both paths resolve, after following
 symlinks, to regular files; it then shows a content diff of the two files.
@@ -153,7 +157,7 @@ non-zero exit status never fails the run.
 ### Parent directories
 
 Missing parent directories are created as needed and never recorded as
-managed. A symlink parent component that resolves to a directory is traversed:
+managed; they receive whatever permissions the process umask yields. A symlink parent component that resolves to a directory is traversed:
 the entry deploys through the link, and the write lands wherever the link
 resolves — possibly outside the target directory root or inside the source
 tree. Only the roots are overlap-checked, never a resolved parent. A required
@@ -188,8 +192,12 @@ entry's state is whatever the completed actions established.
 Directories are never recorded. State mirrors completed filesystem actions: a
 successful removal removes the corresponding record, and a successful write
 creates or updates the record. Skipped or failed entries retain their prior
-records. Comparing the recorded kind and fingerprint against the current
-target decides whether the path is still managed and can be auto-replaced;
+records. A record whose target no longer exists, and which is no longer part
+of the desired deployment, persists until `--clean-up` relinquishes it or a
+future deploy reuses the path; a run without `--clean-up` never removes
+records for paths outside the desired deployment (ADR-0013). Comparing the
+recorded kind and fingerprint against the current target decides whether the
+path is still managed and can be auto-replaced;
 permissions are not part of the comparison.
 
 ### State transitions on obstruction resolution
@@ -225,8 +233,10 @@ interleaving operations.
 
 A runtime failure (for example a source path disappearing after preflight)
 stops the run. Completed filesystem actions and state updates are preserved.
-`apply` does not roll back, retry, or re-plan. External interruption and
-state-write failures follow the same per-action handling.
+`apply` does not roll back, retry, or re-plan. State-write failures follow the
+same per-action handling. External interruption does not: there is no signal
+handling — SIGINT or SIGTERM kills the process at an arbitrary point, and the
+next run sees whatever the last completed step left behind (ADR-0015).
 
 ## Dry-run
 
@@ -235,7 +245,8 @@ reporting for each entry what a real run would do — deploy a new target,
 replace a clean managed path, or require a user choice for an obstruction —
 without prompting or changing the filesystem. Template entries are reported
 like copy entries, without rendering. Dry-run prints no summary, and it
-conflicts with both `--quiet` and `--verbose`.
+conflicts with both `--quiet` and `--verbose`. A dry-run acquires the state
+lock like a real run: it fails when another `apply` holds the lock.
 
 Each entry prints one line:
 
@@ -343,6 +354,9 @@ so pruning touches no state.
   failure stopped the run, or the user cancelled an obstruction prompt.
 * **`2`** — completed with skips: the walk finished but at least one entry
   was skipped.
+
+A completed `--dry-run` always exits `0`, whatever the desired deployment
+contains: it deploys nothing, skips nothing, and prompts for nothing.
 
 The command-level notion of an "unsuccessful" run covers both `1` and `2`:
 under `--clean-up`, a removal or prune that fails at the filesystem level also

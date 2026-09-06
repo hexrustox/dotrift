@@ -45,8 +45,12 @@ error; it is not treated literally.
 
 Ignore patterns match target paths, not source paths.
 
-* **Match subject:** each resolved portal entry's target path, relative to the
-  target directory, using `/` separators.
+* **Match subject:** each resolved portal entry's target path, relative to
+  the target directory, using `/` separators.
+* **Anchoring:** full gitignore semantics. A pattern containing no slash
+  matches the entry's basename at any depth — `foo` matches `a/foo` and
+  `a/b/foo`. A pattern containing a slash anywhere (leading or otherwise) is
+  anchored to the target-directory root.
 * **Case sensitivity:** matching is case-sensitive, regardless of the target
   filesystem's case behavior.
 * **Directories:** a trailing-`/` pattern matches the named directory and all
@@ -81,8 +85,13 @@ Because the file's patterns are evaluated after and the last match wins, a
 negation such as `!dotrift.toml` re-includes a control file.
 
 The implicit exclusion applies only to these three filenames at the source
-root. Files with the same names nested below the source root are ordinary
-source files and remain deployable.
+root mapped to the target-directory root. A portal that maps a control file
+to a nested target path — for example `"dotrift.toml" = "settings/dotrift.toml"`
+— deploys it: the implicit patterns are root-anchored target paths, not a
+general ban on deploying the control files. This is intentional.
+
+Files with the same names nested below the source root are ordinary source
+files and remain deployable.
 
 ## Validation
 

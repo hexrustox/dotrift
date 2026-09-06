@@ -44,8 +44,8 @@ unmanaged  file     ~/.config/nvim/init.lua <- dotfiles/config/nvim/init.lua
   inside the source directory, or the link destination for a symlink deploy —
   displayed the same way.
 
-Lines are sorted lexicographically by target path. An empty database, or a
-database with no records, prints nothing.
+Lines are sorted lexicographically by target path. A database with no records
+prints nothing.
 
 ## Global options
 

@@ -25,6 +25,11 @@ directory and the desired deployment drives `apply`'s decisions.
 * **Concurrency:** the database is mutated only while holding the state lock
   (see [State lock](#state-lock)). Read-only managed checks may occur without
   the lock, but all writes are serialised by it.
+* **Corruption:** a missing database is a valid empty state. A database that
+  cannot be opened, parsed as SQLite, or queried with the schema above is a
+  hard error in every command that touches it: no quarantine, no recreate, no
+  repair. There is no schema version and no migration path; the user deletes
+  the file by hand to start fresh (ADR-0015).
 
 ## `managed_paths` Table
 
@@ -84,10 +89,11 @@ CREATE TABLE active_profiles (
 
 * `name` — the profile name, matching a `[profile.<name>]` section in
   `dotrift_data.toml`. Unique: a profile is either active or not.
-* `activated_at` — a monotonic timestamp (milliseconds since the Unix epoch)
+* `activated_at` — a wall-clock timestamp (milliseconds since the Unix epoch)
   recording when the profile was last activated. Re-activating an already
   active profile updates the timestamp, moving it to the end of the
-  precedence order.
+  precedence order. Clock jumps can reorder this precedence; the
+  lexicographic tie-break in Profile Resolution exists because of it.
 
 Activation and deactivation are performed by the `profile` command (see
 `spec/commands/profile.md`). The variable-context precedence algorithm is

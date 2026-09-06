@@ -129,14 +129,17 @@ _Avoid_: leftover, orphan
 **Relinquish**:
 Drop a *state record* for a path dotrift no longer deploys, leaving the file
 itself untouched. Happens under `--clean-up` for stale obstructions (modified
-files) and for records whose target no longer exists.
+files) and for records whose target no longer exists. Without `--clean-up`,
+such records persist until a future deploy reuses the path.
 _Avoid_: forget, abandon
 
 **Control file**:
 One of the three root metadata files in the source directory — `dotrift.toml`,
 `dotrift_data.toml`, `.dotriftignore` — that configures dotrift rather than
-serving as a deployed dotfile. Implicitly excluded from deployment, but
-re-includable via a negated ignore pattern.
+serving as a deployed dotfile. Implicitly excluded from deployment when
+mapped to the target-directory root (the implicit ignore patterns are
+root-anchored target paths); a portal may still deploy one to a nested target
+path. Re-includable at the root via a negated ignore pattern.
 _Avoid_: (none)
 
 **Ignore file**:
@@ -174,10 +177,10 @@ winning, with lexicographic profile-name tie-breaking.
 _Avoid_: scope, environment (overloaded terms in the templater spec)
 
 **State lock**:
-Exclusive lock held by any command that reads or mutates the *state database*
-— `apply`, `profile activate`, `profile deactivate` — serialising concurrent
-invocations. `apply` holds it from reading the control files through
-filesystem actions, state updates, and exit; short-lived commands hold it for
-the duration of their state mutation. A second invocation that cannot acquire
-it fails rather than interleaving operations.
+Exclusive lock serialising mutations of the *state database* — held by `apply`
+for its entire lifecycle and by `profile activate`/`profile deactivate` for
+the duration of their state mutation. Read-only commands (`status`,
+`profile list`, `profile show`) read the database without the lock. A second
+mutation-holding invocation that cannot acquire it fails rather than
+interleaving operations.
 _Avoid_: apply lock (apply is one consumer, not the owner)

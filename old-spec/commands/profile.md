@@ -26,9 +26,8 @@ conventions are defined in `global.md`.
    `global.md` § Output conventions).
 
 Stale active profiles — names present in `active_profiles` but absent from
-the current data file — are not shown. A defined profile that is active but
-whose definition has since been removed is likewise invisible to `list`; it
-remains removable via `deactivate`.
+the current data file — are not shown; they remain removable via
+`deactivate`.
 
 ## `activate <name>`
 
@@ -65,3 +64,10 @@ deactivated.
    render in the templater's canonical form (see `templater/spec/syntax.md`
    § Interpolation Output).
 4. An empty context prints nothing.
+
+## Exit status
+
+`profile` subcommands exit `0` on success and `1` on error: an undefined
+profile name in `activate`, an inactive profile in `deactivate`, an unreadable
+or malformed data file, or a state-lock or database failure. `list` and `show`
+always succeed: they report state, they do not check it.

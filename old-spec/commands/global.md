@@ -29,7 +29,16 @@ Subcommand specs reference this file rather than restating these rules.
   resolves to a directory; one that resolves to a non-directory or dangles is
   an error at preflight (see `apply.md`).
 
-No other global options are defined.
+No other global options are defined. There is no `--version`.
+
+## CLI conventions
+
+With no subcommand, an unknown subcommand, or an invalid flag combination, the
+CLI prints usage to standard error and exits `2`. `--help` prints usage to
+standard output and exits `0`. Subcommand-specific usage errors (for example
+`--prune-empty-dirs` without `--clean-up`) follow the same rule: usage on
+standard error, exit `2` (see `apply.md` Exit status for the deploy-time
+codes).
 
 ## Path resolution
 
@@ -68,6 +77,12 @@ A command that reads the control files (`dotrift.toml`, `dotrift_data.toml`,
 
 Shared presentation rules for all command output. Subcommand specs reference
 this section rather than restating these rules.
+
+### Streams
+
+Reports, prompts, diffs, and all path-bearing output print to standard output.
+Only errors print to standard error. Coloring decisions apply to standard
+output alone; standard error is never colored.
 
 ### Color support
 
