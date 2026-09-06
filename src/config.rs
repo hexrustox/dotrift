@@ -368,7 +368,14 @@ fn resolve_portals(
                 return Err(miette!("literal portal source `{key}` does not exist"));
             }
             match resolve_kind(&path)? {
-                ResolvedKind::File => push_deployable(&mut result, &path, Path::new(value))?,
+                ResolvedKind::File => {
+                    if value == "." {
+                        return Err(miette!(
+                            "literal file `{key}` cannot target `.`: the target would be the target-directory root"
+                        ));
+                    }
+                    push_deployable(&mut result, &path, Path::new(value))?
+                }
                 ResolvedKind::Directory => {
                     let mut stack = Vec::new();
                     walk_following_links(&path, &mut stack, &mut |child, kind| match kind {
@@ -448,9 +455,19 @@ fn push_deployable(result: &mut Vec<ResolvedPortal>, source: &Path, target: &Pat
     }
     result.push(ResolvedPortal {
         source: source.to_path_buf(),
-        target: target.to_path_buf(),
+        target: normalized_target(target),
     });
     Ok(())
+}
+
+// Target-path equality is component-wise (`./x` and `x` are the same target
+// path); dropping the cosmetic leading `.` component up front makes the
+// plain component comparison in `validate_targets` component-wise too.
+fn normalized_target(target: &Path) -> PathBuf {
+    target
+        .components()
+        .filter(|component| !matches!(component, Component::CurDir))
+        .collect()
 }
 
 fn contains_wildcard(value: &str) -> bool {
@@ -606,10 +623,13 @@ fn validate_relative(value: &str, what: &str) -> Result<()> {
     if value.is_empty() || Path::new(value).is_absolute() {
         return Err(miette!("invalid {what} path `{value}`"));
     }
-    for (index, component) in Path::new(value).components().enumerate() {
-        if matches!(component, Component::CurDir | Component::ParentDir)
-            && !(index == 0 && component == Component::CurDir)
-        {
+    for (index, component) in value.split('/').enumerate() {
+        let valid = match component {
+            "" | ".." => false,
+            "." => index == 0,
+            _ => true,
+        };
+        if !valid {
             return Err(miette!("invalid {what} path `{value}`"));
         }
     }
@@ -886,8 +906,34 @@ mod tests {
         } => resolved_list!("link.lnk" => ".dots/link.lnk");
         "symlink_file_matched_by_wildcard"
     )]
+    #[test_case(
+        |t| {
+            fs::write(t.join("a.conf"), b"a").unwrap();
+            portal_map!("*.conf" => ".")
+        } => resolved_list!("a.conf" => "a.conf");
+        "glob_root_destination_normalizes_to_plain_target"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("dir")).unwrap();
+            fs::write(t.join("dir/a"), b"a").unwrap();
+            portal_map!("dir" => ".")
+        } => resolved_list!("dir/a" => "a");
+        "literal_directory_root_destination_normalizes_to_plain_target"
+    )]
+    #[test_case(
+        |t| {
+            fs::write(t.join("a.txt"), b"a").unwrap();
+            portal_map!("a.txt" => ".")
+        } => panics "cannot target `.`";
+        "literal_file_root_destination_is_rejected"
+    )]
     #[test_case(|_t| portal_map!("" => ".vimrc") => panics "invalid portal source path"; "empty_source_is_rejected")]
     #[test_case(|_t| portal_map!("vimrc" => "/home/.vimrc") => panics "invalid portal target path"; "absolute_target_is_rejected")]
+    #[test_case(|_t| portal_map!("a//b" => ".a") => panics "invalid portal source path"; "double_slash_in_source_is_rejected")]
+    #[test_case(|_t| portal_map!("sub/" => ".sub") => panics "invalid portal source path"; "trailing_slash_in_source_is_rejected")]
+    #[test_case(|_t| portal_map!("a" => ".b//c") => panics "invalid portal target path"; "double_slash_in_target_is_rejected")]
+    #[test_case(|_t| portal_map!("a" => ".sub/") => panics "invalid portal target path"; "trailing_slash_in_target_is_rejected")]
     #[test_case(|_t| portal_map!("a/../vimrc" => ".vimrc") => panics "a/../vimrc"; "parent_component_in_source_is_rejected")]
     #[test_case(|_t| portal_map!("{a,b}" => ".a") => panics "in portal source"; "brace_expansion_in_source_is_rejected")]
     #[test_case(|_t| portal_map!("a" => ".{a,b}") => panics "in portal target"; "brace_expansion_in_target_is_rejected")]

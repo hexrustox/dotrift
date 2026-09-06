@@ -175,6 +175,52 @@ fn missing_template_variable_fails_before_parsing() {
     "unknown_root_key_is_rejected"
 )]
 #[test_case(
+    |env| env.write_config("[rule]\n\"a//b\" = { type = \"copy\" }\n"),
+    &["invalid rule path"] ;
+    "rule_key_with_double_slash_is_rejected"
+)]
+#[test_case(
+    |env| env.write_config("[rule]\n\"foo/\" = { type = \"copy\" }\n"),
+    &["invalid rule path"] ;
+    "rule_key_with_trailing_slash_is_rejected"
+)]
+#[test_case(
+    |env| {
+        fs::write(env.source_dir().join("a.txt"), b"a").unwrap();
+        env.write_config("[portal]\n\"a.txt\" = \".\"\n");
+    },
+    &["target-directory root"] ;
+    "literal_file_portal_to_root_destination_is_rejected"
+)]
+#[test_case(
+    |env| {
+        fs::write(env.source_dir().join("a.conf"), b"a").unwrap();
+        fs::write(env.source_dir().join("b.txt"), b"b").unwrap();
+        env.write_config("[portal]\n\"*.conf\" = \".\"\n\"b.txt\" = \"a.conf\"\n");
+    },
+    &["collision at"] ;
+    "glob_root_destination_collides_with_literal_target"
+)]
+#[test_case(
+    |env| {
+        fs::write(env.source_dir().join("a.txt"), b"a").unwrap();
+        fs::write(env.source_dir().join("b.txt"), b"b").unwrap();
+        env.write_config("[portal]\n\"a.txt\" = \"x\"\n\"b.txt\" = \"./x\"\n");
+    },
+    &["collision at"] ;
+    "dot_slash_prefixed_portal_value_collides_with_plain_target"
+)]
+#[test_case(
+    |env| {
+        fs::create_dir_all(env.source_dir().join("config")).unwrap();
+        fs::write(env.source_dir().join("config/x.toml"), b"x").unwrap();
+        fs::write(env.source_dir().join("other.txt"), b"o").unwrap();
+        env.write_config("[portal]\n\"**\" = \".\"\n\"other.txt\" = \"config\"\n");
+    },
+    &["structural conflict"] ;
+    "glob_root_destination_structurally_conflicts_with_ancestor_target"
+)]
+#[test_case(
     |env| {
         fs::write(env.source_dir().join("a.txt"), b"a").unwrap();
         fs::write(env.source_dir().join("b.txt"), b"b").unwrap();
