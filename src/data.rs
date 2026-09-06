@@ -25,9 +25,7 @@ impl DataFile {
                     .wrap_err_with(|| format!("cannot read `{}`", path.display()));
             }
         };
-        toml::from_str(&text)
-            .map_err(|error| miette!(error))
-            .wrap_err_with(|| format!("cannot parse `{}`", path.display()))
+        parse_data_file(&text).wrap_err_with(|| format!("cannot parse `{}`", path.display()))
     }
 
     pub(crate) fn context(&self, active: &[(String, i64)]) -> BTreeMap<String, Value> {
@@ -41,6 +39,25 @@ impl DataFile {
         }
         context
     }
+}
+
+fn parse_data_file(text: &str) -> Result<DataFile> {
+    let data: DataFile = toml::from_str(text).map_err(|error| miette!(error))?;
+    ensure_no_empty_keys(&data.variable, "[variable]")?;
+    for (name, bindings) in &data.profile {
+        if name.is_empty() {
+            return Err(miette!("empty profile name"));
+        }
+        ensure_no_empty_keys(bindings, &format!("[profile.{name}]"))?;
+    }
+    Ok(data)
+}
+
+fn ensure_no_empty_keys(bindings: &BTreeMap<String, Value>, table: &str) -> Result<()> {
+    if bindings.keys().any(|key| key.is_empty()) {
+        return Err(miette!("empty key in `{table}`"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -114,6 +131,62 @@ mod tests {
                 .chain()
                 .any(|cause| cause.to_string().contains("dotrift_data.toml")),
             "expected an error mentioning the data file but got: {error:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_empty_variable_key() {
+        let dir = tempdir().expect("cannot create temp dir");
+        write_data_file(dir.path(), "[variable]\n\"\" = \"x\"\n");
+        let error = DataFile::read(dir.path()).expect_err("empty variable key must fail");
+        assert!(
+            error
+                .chain()
+                .any(|cause| cause.to_string().contains("empty key in `[variable]`")),
+            "expected an error naming the empty key but got: {error:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_empty_profile_binding_key() {
+        let dir = tempdir().expect("cannot create temp dir");
+        write_data_file(dir.path(), "[profile.work]\n\"\" = \"x\"\n");
+        let error = DataFile::read(dir.path()).expect_err("empty profile key must fail");
+        assert!(
+            error
+                .chain()
+                .any(|cause| cause.to_string().contains("empty key in `[profile.work]`")),
+            "expected an error naming the empty key but got: {error:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_empty_profile_name() {
+        let dir = tempdir().expect("cannot create temp dir");
+        write_data_file(dir.path(), "[profile.\"\"]\neditor = \"nvim\"\n");
+        let error = DataFile::read(dir.path()).expect_err("empty profile name must fail");
+        assert!(
+            error
+                .chain()
+                .any(|cause| cause.to_string().contains("empty profile name")),
+            "expected an error naming the empty profile name but got: {error:?}"
+        );
+    }
+
+    #[test]
+    fn accepts_keys_outside_templater_variable_syntax() {
+        let dir = tempdir().expect("cannot create temp dir");
+        write_data_file(
+            dir.path(),
+            "[variable]\n\"a-b\" = \"x\"\n\n[profile.work]\n\"a-b\" = \"y\"\n",
+        );
+        let data = DataFile::read(dir.path()).expect("non-bare keys must remain valid");
+        assert_eq!(data.variable.get("a-b"), Some(&Value::Str("x".into())));
+        assert_eq!(
+            data.profile
+                .get("work")
+                .and_then(|bindings| bindings.get("a-b")),
+            Some(&Value::Str("y".into()))
         );
     }
 

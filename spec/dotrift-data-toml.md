@@ -95,6 +95,8 @@ Errors halt execution before any filesystem change.
 * **Malformed TOML:** a parse error halts execution.
 * **Unsupported value:** a float, date, datetime, or time value is a
   configuration error.
+* **Empty key:** an empty key under `[variable]` or `[profile.<name>]`, or an
+  empty profile name, is a configuration error.
 * **Unknown structure:** any root table or key other than `[variable]` and
   `[profile.<name>]` is rejected. Typos such as `[variables]` or `[profiles]`
   fail rather than silently changing the variable context.

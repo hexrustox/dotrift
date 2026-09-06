@@ -160,6 +160,30 @@ fn missing_template_variable_fails_before_parsing() {
     "float_variable_value_is_a_configuration_error"
 )]
 #[test_case(
+    |env| {
+        env.write_config("");
+        env.write_data_file("[variable]\n\"\" = \"x\"\n");
+    },
+    &["empty key in `[variable]`", "dotrift_data.toml"] ;
+    "empty_variable_key_is_a_configuration_error"
+)]
+#[test_case(
+    |env| {
+        env.write_config("");
+        env.write_data_file("[profile.work]\n\"\" = \"x\"\n");
+    },
+    &["empty key in `[profile.work]`", "dotrift_data.toml"] ;
+    "empty_profile_binding_key_is_a_configuration_error"
+)]
+#[test_case(
+    |env| {
+        env.write_config("");
+        env.write_data_file("[profile.\"\"]\neditor = \"nvim\"\n");
+    },
+    &["empty profile name", "dotrift_data.toml"] ;
+    "empty_profile_name_is_a_configuration_error"
+)]
+#[test_case(
     |_env| {},
     &["dotrift.toml"] ;
     "missing_dotrift_toml_names_path_in_chain"

@@ -1075,6 +1075,27 @@ fn dry_run_preservation_behaviors(
 #[test_case(
     |source: &Path, _target: &Path| {
         fs::write(source.join("good.txt"), b"G").unwrap();
+        "[portal]\n\"good.txt\" = \"good-target.txt\"\n"
+    },
+    |scenario: &ApplyScenario| {
+        scenario.env.write_data_file("[variable]\n\"\" = \"x\"\n");
+    },
+    "empty key in `[variable]`",
+    |_source: &Path, target: &Path| {
+        assert!(fs::symlink_metadata(target.join("good-target.txt")).is_err());
+        assert!(
+            StateDatabase::open()
+                .unwrap()
+                .managed_paths()
+                .unwrap()
+                .is_empty()
+        );
+    }
+    ; "empty_variable_key_fails_before_any_change"
+)]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("good.txt"), b"G").unwrap();
         "[portal]\n\"good.txt\" = \"good-target.txt\"\n\"missing.txt\" = \"x.txt\"\n"
     },
     |_scenario: &ApplyScenario| {},
