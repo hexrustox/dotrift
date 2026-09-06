@@ -31,8 +31,10 @@ The standard gitignore pattern forms are supported:
 * `**` — matches any number of directories, including none.
 * `[abc]` / `[!abc]` — character classes.
 * Leading `/` — anchors the pattern to the target-directory root.
-* Trailing `/` — directory-only pattern; matches that directory and all its
-  descendants.
+* Trailing `/` — recognized as a directory-only pattern in gitignore syntax,
+  but inert: dotrift matches only resolved file entries (§ Matching), so such
+  a pattern matches nothing. To exclude a directory's contents, use `dir/**`
+  (or `**/dir/**` to match at any depth).
 * Leading `!` — negation; re-includes a target path previously ignored by an
   earlier pattern.
 * A slash anywhere else in the pattern anchors it relative to the
@@ -56,9 +58,11 @@ Ignore patterns match target paths, not source paths (ADR-0002).
   anchored to the target-directory root.
 * **Case sensitivity:** matching is case-sensitive, regardless of the target
   filesystem's case behavior.
-* **Directories:** a trailing-`/` pattern matches the named directory and all
-  deployed files beneath it. Directories are not deployment entries; only
-  resolved files are tested.
+* **Directories:** only resolved files are tested; directories are not
+  deployment entries. A trailing-`/` pattern therefore never matches a target
+  path — it excludes neither the named directory nor the files beneath it.
+  This is accepted behavior: a directory-only pattern is silently inert. Use
+  `dir/**` to exclude a directory's contents.
 * **Order:** patterns are evaluated in file order. When several patterns
   match, the last matching pattern decides whether the target path is ignored.
   A later `!` pattern re-includes paths matched by earlier patterns.

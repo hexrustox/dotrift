@@ -385,109 +385,20 @@ fn home_fallback_when_no_override_and_no_configured_target() {
         env.write_data_file("");
         env.write_config("[portal]\n\"**\" = \".\"\n");
         fs::write(env.source_dir().join(".dotriftignore"), "config/\n").unwrap();
-        vec![deploy_entry!(
-            env.source_dir().join("other.toml"),
-            env.target_dir().join("other.toml"),
-            Symlink
-        )]
+        vec![
+            deploy_entry!(
+                env.source_dir().join("config/editor/x.toml"),
+                env.target_dir().join("config/editor/x.toml"),
+                Symlink
+            ),
+            deploy_entry!(
+                env.source_dir().join("other.toml"),
+                env.target_dir().join("other.toml"),
+                Symlink
+            ),
+        ]
     } ;
-    "directory_only_pattern_excludes_entries_beneath_directory"
-)]
-#[test_case(
-    |env| {
-        fs::create_dir_all(env.source_dir().join("config")).unwrap();
-        fs::write(env.source_dir().join("config/keep.conf"), b"keep").unwrap();
-        fs::write(env.source_dir().join("config/skip.conf"), b"skip").unwrap();
-        env.write_data_file("");
-        env.write_config("[portal]\n\"**\" = \".\"\n");
-        fs::write(
-            env.source_dir().join(".dotriftignore"),
-            "config/\n!config/keep.conf\n",
-        )
-        .unwrap();
-        vec![deploy_entry!(
-            env.source_dir().join("config/keep.conf"),
-            env.target_dir().join("config/keep.conf"),
-            Symlink
-        )]
-    } ;
-    "negation_reincludes_beneath_directory_only_ignore"
-)]
-#[test_case(
-    |env| {
-        fs::create_dir_all(env.source_dir().join("config")).unwrap();
-        fs::write(env.source_dir().join("config/keep.conf"), b"keep").unwrap();
-        env.write_data_file("");
-        env.write_config("[portal]\n\"**\" = \".\"\n");
-        fs::write(
-            env.source_dir().join(".dotriftignore"),
-            "!config/keep.conf\nconfig/\n",
-        )
-        .unwrap();
-        vec![]
-    } ;
-    "directory_only_ignore_after_negation_reignores"
-)]
-#[test_case(
-    |env| {
-        fs::create_dir_all(env.source_dir().join("local/bin")).unwrap();
-        fs::write(env.source_dir().join("local/bin/tool.sh"), b"tool").unwrap();
-        fs::write(env.source_dir().join("other.toml"), b"other").unwrap();
-        env.write_data_file("");
-        env.write_config("[portal]\n\"**\" = \".\"\n");
-        fs::write(env.source_dir().join(".dotriftignore"), "bin/\n").unwrap();
-        vec![deploy_entry!(
-            env.source_dir().join("other.toml"),
-            env.target_dir().join("other.toml"),
-            Symlink
-        )]
-    } ;
-    "directory_only_pattern_without_inner_slash_matches_at_any_depth"
-)]
-#[test_case(
-    |env| {
-        fs::create_dir_all(env.source_dir().join("bin")).unwrap();
-        fs::write(env.source_dir().join("bin/keep.conf"), b"keep").unwrap();
-        fs::write(env.source_dir().join("bin/skip.conf"), b"skip").unwrap();
-        env.write_data_file("");
-        env.write_config("[portal]\n\"**\" = \".\"\n");
-        fs::write(
-            env.source_dir().join(".dotriftignore"),
-            "bin/\n!bin/keep.conf\n",
-        )
-        .unwrap();
-        vec![deploy_entry!(
-            env.source_dir().join("bin/keep.conf"),
-            env.target_dir().join("bin/keep.conf"),
-            Symlink
-        )]
-    } ;
-    "negation_reincludes_beneath_unanchored_directory_only_ignore"
-)]
-#[test_case(
-    |env| {
-        fs::create_dir_all(env.source_dir().join("local/bin")).unwrap();
-        fs::write(env.source_dir().join("local/bin/tool.sh"), b"tool").unwrap();
-        env.write_data_file("");
-        env.write_config("[portal]\n\"**\" = \".\"\n");
-        fs::write(env.source_dir().join(".dotriftignore"), "bin/\n!bin/\n").unwrap();
-        vec![deploy_entry!(
-            env.source_dir().join("local/bin/tool.sh"),
-            env.target_dir().join("local/bin/tool.sh"),
-            Symlink
-        )]
-    } ;
-    "negated_directory_only_pattern_reincludes_at_any_depth"
-)]
-#[test_case(
-    |env| {
-        fs::write(env.source_dir().join("a.txt"), b"a").unwrap();
-        fs::write(env.source_dir().join("b.txt"), b"b").unwrap();
-        env.write_config("[portal]\n\"a.txt\" = \"config/shared\"\n\"b.txt\" = \"config/shared\"\n");
-        fs::write(env.source_dir().join(".dotriftignore"), "config/\n").unwrap();
-        vec![]
-    } ;
-    "directory_only_ignore_prevents_collision_validation"
+    "directory_only_pattern_is_inert"
 )]
 fn portal_mapping_yields_expected_entries(setup: impl FnOnce(&TestEnv) -> Vec<DeploymentEntry>) {
     let env = TestEnv::new();

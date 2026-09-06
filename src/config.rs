@@ -201,63 +201,12 @@ fn read_ignore(source: &Path) -> Result<Gitignore> {
         .map_err(|error| miette!(error))?;
     let path = source.join(".dotriftignore");
     if path.exists() {
-        let contents = fs::read_to_string(&path)
-            .map_err(|error| miette!(error))
-            .wrap_err_with(|| format!("cannot read `{}`", path.display()))?;
-        for (index, line) in contents.lines().enumerate() {
-            let line = if index == 0 {
-                line.strip_prefix('\u{feff}').unwrap_or(line)
-            } else {
-                line
-            };
-            let line = if line.ends_with("\\ ") {
-                line
-            } else {
-                line.trim_end()
-            };
-            let line = expand_directory_only(line);
-            builder
-                .add_line(None, &line)
-                .map_err(|error| miette!(error))
-                .wrap_err_with(|| format!("cannot parse `{}`", path.display()))?;
+        match builder.add(path) {
+            None => {}
+            Some(error) => return Err(miette!(error)),
         }
     }
     builder.build().map_err(|error| miette!(error))
-}
-
-fn expand_directory_only(line: &str) -> String {
-    let (escaped, mut rest) = if line.starts_with("\\!") || line.starts_with("\\#") {
-        (true, &line[1..])
-    } else {
-        (false, line)
-    };
-    let negated = !escaped && rest.starts_with('!');
-    if negated {
-        rest = &rest[1..];
-    }
-    let anchored = !escaped && rest.starts_with('/');
-    if anchored {
-        rest = &rest[1..];
-    }
-    let Some(body) = rest.strip_suffix('/') else {
-        return line.to_string();
-    };
-    let body = body.strip_suffix('\\').unwrap_or(body);
-    if body.is_empty() {
-        return line.to_string();
-    }
-    let mut expanded = if !anchored && !body.contains('/') {
-        format!("**/{body}/**/*")
-    } else {
-        format!("{body}/**/*")
-    };
-    if expanded.starts_with(['!', '#']) {
-        expanded.insert(0, '\\');
-    }
-    if negated {
-        expanded.insert(0, '!');
-    }
-    expanded
 }
 
 fn validate_overlap(source: &Path, target: &Path) -> Result<()> {
