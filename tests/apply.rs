@@ -1122,6 +1122,38 @@ fn dry_run_preservation_behaviors(
     }
     ; "deleting_source_between_runs_fails_preflight"
 )]
+#[test_case(
+    |source: &Path, _target: &Path| {
+        fs::write(source.join("file.txt"), b"hello").unwrap();
+        "[portal]\n\"file.txt\" = \"target.txt\"\n"
+    },
+    |scenario: &ApplyScenario| {
+        fs::remove_dir(&scenario.target).unwrap();
+        symlink("does-not-exist", &scenario.target).unwrap();
+    },
+    "is not a directory",
+    |_source: &Path, target: &Path| {
+        assert!(fs::symlink_metadata(target).unwrap().file_type().is_symlink());
+        assert!(fs::symlink_metadata(target.join("target.txt")).is_err());
+        assert!(StateDatabase::open().unwrap().managed_paths().unwrap().is_empty());
+    }
+    ; "dangling_symlink_target_root_is_rejected_before_deployment"
+)]
+#[test_case(
+    |_source: &Path, _target: &Path| {
+        ""
+    },
+    |scenario: &ApplyScenario| {
+        fs::remove_dir(&scenario.target).unwrap();
+        symlink("does-not-exist", &scenario.target).unwrap();
+    },
+    "is not a directory",
+    |_source: &Path, target: &Path| {
+        assert!(fs::symlink_metadata(target).unwrap().file_type().is_symlink());
+        assert!(StateDatabase::open().unwrap().managed_paths().unwrap().is_empty());
+    }
+    ; "dangling_symlink_target_root_with_empty_deployment_is_rejected"
+)]
 fn failing_apply_behaviors(
     setup: impl Fn(&Path, &Path) -> &'static str,
     prepare: impl Fn(&ApplyScenario),

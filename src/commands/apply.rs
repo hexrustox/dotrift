@@ -48,7 +48,9 @@ pub fn run_with_options(
     let deployment = config::read(source, target_override)?;
     let target = &deployment.target_directory;
 
-    if fs::metadata(target).is_ok_and(|metadata| !metadata.is_dir()) {
+    if fs::symlink_metadata(target).is_ok()
+        && !fs::metadata(target).is_ok_and(|metadata| metadata.is_dir())
+    {
         return Err(miette!(
             "target directory `{}` is not a directory",
             target.display()
