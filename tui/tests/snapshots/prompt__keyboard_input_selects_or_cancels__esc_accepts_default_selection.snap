@@ -4,7 +4,7 @@ expression: "String::from_utf8_lossy(&bytes)"
 ---
 Pick an option
   ○ [b] bike
-  ● [m] metro
+  ● metro
   ○ [t] tram
 
   ↑/↓ navigate  Enter select  A-Z jump  Esc cancel

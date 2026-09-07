@@ -3,7 +3,7 @@ source: tui/tests/prompt.rs
 expression: "String::from_utf8_lossy(&bytes)"
 ---
 Pick an option
-  ● [w] two wheeler
+  ● two wheeler
   ○ [s] streetcar
   ○ [z] shared ride
 
@@ -11,7 +11,7 @@ Pick an option
 Pick an option
   ○ [w] two wheeler
   ○ [s] streetcar
-  ● [z] shared ride
+  ● shared ride
 
   ↑/↓ navigate  Enter select  A-Z jump  Esc cancel
 Pick an option (shared ride) ✓

@@ -3,15 +3,15 @@ source: tui/tests/prompt.rs
 expression: "String::from_utf8_lossy(&bytes)"
 ---
 Pick an option
-  ● [b] bike
+  ● bike
 
   ↑/↓ navigate  Enter select  A-Z jump  Esc cancel
 Pick an option
-  ● [c] carpool
+  ● carpool
 
   ↑/↓ navigate  Enter select  A-Z jump  Esc cancel
 Pick an option
-  ● [e] ev scooter
+  ● ev scooter
 
   ↑/↓ navigate  Enter select  A-Z jump  Esc cancel
 Pick an option (ev scooter) ✓

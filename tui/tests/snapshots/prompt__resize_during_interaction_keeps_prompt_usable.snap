@@ -3,7 +3,7 @@ source: tui/tests/prompt.rs
 expression: "String::from_utf8_lossy(&bytes)"
 ---
 Pick an option
-  ● [b] bike
+  ● bike
   ○ [m] metro
   ○ [t] tram
 
