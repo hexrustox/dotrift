@@ -19,7 +19,10 @@ stale entries are removed only under `--clean-up` (see
 4. Apply the ignore file's filtering stage (see
    `spec/dotriftignore.md § Filtering stage`).
 5. Validate collisions and structural conflicts.
-6. Resolve rules and compute the desired deployment.
+6. Resolve rules and compute the desired deployment. When the effective
+   deploy type is `symlink` and matching rules contributed a `mode`, the mode
+   is dropped and a warning naming the target path is printed to stderr, one
+   line per affected target (ADR-0016).
 
 The target directory is determined by CLI `--target` over `target-directory`
 in `dotrift.toml`, defaulting to the home directory (see

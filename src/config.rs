@@ -110,7 +110,6 @@ struct FileConfig {
 #[derive(Debug, Clone, Copy)]
 struct RuleConfig {
     deploy_type: Option<DeployType>,
-    // TODO allow unset
     mode: Option<DeployMode>,
 }
 
@@ -554,11 +553,14 @@ fn apply_rules(
             }
         }
     }
-    if mode.is_some() && deploy_type == DeployType::Symlink {
-        return Err(miette!(
-            "conflicting rules for `{}`: `mode` is set but the effective `type` is `symlink`",
-            entry.target.display()
-        ));
+    if deploy_type == DeployType::Symlink {
+        if mode.is_some() {
+            eprintln!(
+                "ignoring `mode` for `{}`: effective `type` is `symlink`",
+                entry.target.display()
+            );
+        }
+        mode = None;
     }
     Ok(DeploymentEntry {
         source_path: entry.source,
@@ -1039,8 +1041,8 @@ mod tests {
     )]
     #[test_case(
         resolved!("vimrc", ".vimrc"), rule_map!("*" => rule_config!(Copy, 0o644), "*.vimrc" => rule_config!(Symlink))
-        => panics "conflicting rules";
-        "mode_with_effective_symlink_is_rejected"
+        => deploy_entry!("vimrc", ".vimrc", Symlink);
+        "mode_with_effective_symlink_is_dropped"
     )]
     #[test_case(
         resolved!("src", "a/b"), rule_map!("a/b" => rule_config!(Copy))

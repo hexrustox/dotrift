@@ -191,11 +191,12 @@ A file at `config/secrets/x` resolves to `copy` with mode `600`.
 
   Constrained to `000` through `777` in either form. Applies only when the
   effective deploy type is `copy` or `template`. Combining `mode` with an
-  explicit `type = "symlink"` in one rule is a configuration error, and so is
-  the effective combination: a `mode`-only rule followed by a later rule that
-  sets `type = "symlink"` for the same target is a configuration error for
-  that target. Omitted means no explicit permission change: the created file
-  and any created parent directories receive whatever permissions the process
+  explicit `type = "symlink"` in one rule is a configuration error (ADR-0016).
+  The effective combination across rules is not an error: when the effective
+  deploy type is `symlink`, any mode contributed by matching rules is ignored
+  — no permission change is made, and a warning naming the target path is
+  printed. Omitted means no explicit permission change: the created file and
+  any created parent directories receive whatever permissions the process
   umask yields for them.
 
 ## Path rules
@@ -238,6 +239,6 @@ literal values, with no template-specific exceptions.
   does not exist.
 * **Unknown fields:** unknown top-level keys, unknown sections, or unknown
   rule properties.
-* **Contradictory rule:** `mode` combined with `type = "symlink"`, explicitly
-  in one rule or effectively across rules.
+* **Contradictory rule:** `mode` combined with an explicit `type = "symlink"`
+  in one rule.
 * **Invalid mode:** neither allowed form, or outside `000`–`777`.

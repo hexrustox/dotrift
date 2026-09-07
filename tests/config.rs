@@ -66,6 +66,34 @@ fn read_assembles_desired_deployment_from_config_and_data() {
 }
 
 #[test]
+fn effective_symlink_drops_mode_from_earlier_rule() {
+    let env = TestEnv::new();
+    let source = env.source_dir();
+    let target = env.target_dir();
+    fs::write(source.join("a.txt"), b"a").unwrap();
+    env.write_config(
+        "[portal]\n\
+         \"a.txt\" = \"a.txt\"\n\
+         \n\
+         [rule]\n\
+         \"*\" = { mode = \"600\" }\n\
+         \"a.txt\" = { type = \"symlink\" }\n",
+    );
+
+    let deployment =
+        config::read(&source, Some(target.clone())).expect("cannot read configuration");
+
+    assert_eq!(
+        deployment.entries,
+        vec![deploy_entry!(
+            source.join("a.txt"),
+            target.join("a.txt"),
+            Symlink
+        )]
+    );
+}
+
+#[test]
 fn active_profile_overrides_base_variable_in_rendered_config_and_context() {
     let env = TestEnv::new();
     let source = env.source_dir();
