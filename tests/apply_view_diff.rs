@@ -4,16 +4,56 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use common::{ApplyScenario, EnvVarGuard, TestEnv, snapshot_settings, test_name};
+use common::{
+    ApplyScenario, EnvVarGuard, TestEnv, global_config_with, snapshot_settings, test_name,
+};
 use dotrift::commands::apply::{ObstructionChoice, test_hooks::set_prompt_choices};
 use test_case::test_case;
 
-fn capture_script(env: &TestEnv) -> (PathBuf, PathBuf) {
-    let output = env.path("viewdiff.txt");
-    let script = env.path("capture-pager.sh");
+fn capture_script_named(env: &TestEnv, name: &str) -> (PathBuf, PathBuf) {
+    let output = env.path(format!("{name}.txt"));
+    let script = env.path(format!("capture-{name}.sh"));
     fs::write(&script, format!("#!/bin/sh\ncat > {}\n", output.display())).unwrap();
     fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
     (script, output)
+}
+
+fn capture_script(env: &TestEnv) -> (PathBuf, PathBuf) {
+    capture_script_named(env, "pager")
+}
+
+/// A pager capture script that also records its arguments, one per line,
+/// before the diff.
+fn argv_capture_script(env: &TestEnv) -> (PathBuf, PathBuf) {
+    let output = env.path("pager-argv.txt");
+    let script = env.path("capture-argv-pager.sh");
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nfor arg in \"$@\"; do printf '%s\\n' \"$arg\" >> {}; done\ncat >> {}\n",
+            output.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    (script, output)
+}
+
+fn config_pager_toml(command: &Path, args: &[&str]) -> String {
+    let args = args
+        .iter()
+        .map(|arg| format!("'{arg}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if args.is_empty() {
+        format!("[pager]\ncommand = '{}'\n", command.display())
+    } else {
+        format!(
+            "[pager]\ncommand = '{}'\nargs = [{args}]\n",
+            command.display()
+        )
+    }
 }
 
 fn copy_diff_setup(source: &Path, target: &Path) -> &'static str {
@@ -102,4 +142,114 @@ fn failing_dotrift_pager_raises_error() {
     let error = scenario.try_run().unwrap_err();
     let rendered = format!("{error}");
     assert!(rendered.contains("cannot run DOTRIFT_PAGER"), "{rendered}");
+}
+
+#[test]
+fn config_pager_used_when_dotrift_pager_unset() {
+    let scenario = ApplyScenario::new(copy_diff_setup);
+    let (config_script, config_output) = argv_capture_script(&scenario.env);
+    let (env_pager_script, env_pager_output) = capture_script(&scenario.env);
+    let _guard = global_config_with(
+        &scenario.env,
+        &config_pager_toml(&config_script, &[]),
+        [("PAGER", Some(env_pager_script.to_str().unwrap()))],
+    );
+    set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+
+    scenario.run();
+
+    let diff = fs::read_to_string(&config_output).unwrap();
+    assert!(
+        diff.contains("-old content") && diff.contains("+new content"),
+        "{diff}"
+    );
+    assert!(!env_pager_output.exists());
+}
+
+#[test]
+fn dotrift_pager_overrides_config_pager() {
+    let scenario = ApplyScenario::new(copy_diff_setup);
+    let (config_script, config_output) = capture_script_named(&scenario.env, "config-pager");
+    let (env_pager_script, env_pager_output) = capture_script_named(&scenario.env, "env-pager");
+    let _guard = global_config_with(
+        &scenario.env,
+        &config_pager_toml(&config_script, &[]),
+        [
+            ("DOTRIFT_PAGER", Some(env_pager_script.to_str().unwrap())),
+            ("PAGER", None),
+        ],
+    );
+    set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+
+    scenario.run();
+
+    let diff = fs::read_to_string(&env_pager_output).unwrap();
+    assert!(
+        diff.contains("-old content") && diff.contains("+new content"),
+        "{diff}"
+    );
+    assert!(!config_output.exists());
+}
+
+#[test]
+fn empty_config_command_falls_through_to_pager() {
+    let scenario = ApplyScenario::new(copy_diff_setup);
+    let (env_pager_script, env_pager_output) = capture_script(&scenario.env);
+    let config_output = scenario.env.path("unused-config-out.txt");
+    let _guard = global_config_with(
+        &scenario.env,
+        "[pager]\ncommand = ''\n",
+        [("PAGER", Some(env_pager_script.to_str().unwrap()))],
+    );
+    set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+
+    scenario.run();
+
+    let diff = fs::read_to_string(&env_pager_output).unwrap();
+    assert!(
+        diff.contains("-old content") && diff.contains("+new content"),
+        "{diff}"
+    );
+    assert!(!config_output.exists());
+}
+
+#[test]
+fn config_pager_args_are_literal() {
+    let scenario = ApplyScenario::new(copy_diff_setup);
+    let (script, output) = argv_capture_script(&scenario.env);
+    let _guard = global_config_with(
+        &scenario.env,
+        &config_pager_toml(&script, &["one two", "three", "-R"]),
+        [("PAGER", None)],
+    );
+    set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+
+    scenario.run();
+
+    let captured = fs::read_to_string(&output).unwrap();
+    let lines = captured.lines().collect::<Vec<_>>();
+    assert_eq!(&lines[..3], &["one two", "three", "-R"], "{captured}");
+    assert!(captured.contains("-old content") && captured.contains("+new content"));
+}
+
+#[test]
+fn failing_config_pager_fails_the_run_without_falling_back() {
+    let scenario = ApplyScenario::new(copy_diff_setup);
+    let missing = scenario.env.path("no-such-pager");
+    let (env_pager_script, env_pager_output) = capture_script(&scenario.env);
+    let _guard = global_config_with(
+        &scenario.env,
+        &config_pager_toml(&missing, &[]),
+        [("PAGER", Some(env_pager_script.to_str().unwrap()))],
+    );
+    set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+
+    let error = scenario.try_run().unwrap_err();
+
+    let rendered = format!("{error}");
+    assert!(
+        rendered.contains("cannot run the configured pager"),
+        "{rendered}"
+    );
+    assert!(!env_pager_output.exists());
 }

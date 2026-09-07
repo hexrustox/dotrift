@@ -84,6 +84,13 @@ pub struct EnvVarGuard {
 
 impl EnvVarGuard {
     pub fn set<'a>(vars: impl IntoIterator<Item = (&'static str, Option<&'a str>)>) -> Self {
+        Self::set_owned(
+            vars.into_iter()
+                .map(|(name, value)| (name, value.map(str::to_owned))),
+        )
+    }
+
+    fn set_owned(vars: impl IntoIterator<Item = (&'static str, Option<String>)>) -> Self {
         let _guard = ENV_LOCK.lock().expect("env lock poisoned");
         let previous = vars
             .into_iter()
@@ -113,6 +120,51 @@ impl Drop for EnvVarGuard {
             }
         }
     }
+}
+
+/// Writes the global config at `<root>/config-home/dotrift/config.toml` and
+/// pins `XDG_CONFIG_HOME` to `<root>/config-home` for the guard's lifetime.
+pub fn global_config(env: &TestEnv, contents: &str) -> EnvVarGuard {
+    global_config_with(env, contents, [])
+}
+
+/// Like [`global_config`], additionally pinning extra environment variables
+/// under the same guard.
+pub fn global_config_with<'a>(
+    env: &TestEnv,
+    contents: &str,
+    extra: impl IntoIterator<Item = (&'static str, Option<&'a str>)>,
+) -> EnvVarGuard {
+    let home = env.path("config-home");
+    fs::create_dir_all(home.join("dotrift")).unwrap();
+    fs::write(home.join("dotrift/config.toml"), contents).unwrap();
+    let config_home = home.to_str().unwrap().to_owned();
+    let mut vars: Vec<(&'static str, Option<String>)> =
+        vec![("XDG_CONFIG_HOME", Some(config_home))];
+    vars.extend(
+        extra
+            .into_iter()
+            .map(|(name, value)| (name, value.map(str::to_owned))),
+    );
+    EnvVarGuard::set_owned(vars)
+}
+
+/// The path the [`global_config`] guard's `XDG_CONFIG_HOME` points at.
+pub fn global_config_home(env: &TestEnv) -> PathBuf {
+    env.path("config-home")
+}
+
+/// Writes the global config at `<root>/home/.config/dotrift/config.toml` and
+/// pins `HOME` to `<root>/home` with `XDG_CONFIG_HOME` unset, for the guard's
+/// lifetime.
+pub fn home_fallback_global_config(env: &TestEnv, contents: &str) -> EnvVarGuard {
+    let home = env.path("home");
+    fs::create_dir_all(home.join(".config/dotrift")).unwrap();
+    fs::write(home.join(".config/dotrift/config.toml"), contents).unwrap();
+    EnvVarGuard::set([
+        ("XDG_CONFIG_HOME", None),
+        ("HOME", Some(home.to_str().unwrap())),
+    ])
 }
 
 /// Pins `COLOR_SUPPORT` to `enabled` for the guard's lifetime, then restores

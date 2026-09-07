@@ -3,6 +3,7 @@ pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod data;
+pub mod global_config;
 pub mod hash;
 pub mod managed;
 pub mod render_registry;

@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    ffi::OsStr,
     fs,
     io::{self, BufWriter, Write},
     os::unix::fs::{PermissionsExt, symlink},
@@ -19,6 +20,7 @@ use tui::{
 use crate::{
     ExitStatus, color_enabled,
     config::{self, DeployType},
+    global_config::{GlobalConfig, PagerCommand},
     hash, managed, prettify_path, println_capture,
     render_registry::RenderRegistry,
     state::{Kind, StateDatabase, StateLock, StateRecord},
@@ -45,6 +47,7 @@ pub fn run_with_options(
     options: ApplyOptions,
 ) -> Result<ExitStatus> {
     let _lock = StateLock::acquire()?;
+    let global_config = GlobalConfig::load()?;
     let mut registry = RenderRegistry::acquire(options.dry_run);
     let deployment = config::read(source, target_override)?;
     let target = &deployment.target_directory;
@@ -71,7 +74,14 @@ pub fn run_with_options(
     let mut replaced = 0;
     for entry in entries {
         if options.dry_run {
-            report_dry_run_entry(&database, target, &entry)?;
+            report_dry_run_entry(
+                &database,
+                target,
+                &entry,
+                &deployment.variable_context,
+                &mut registry,
+                &global_config,
+            )?;
             continue;
         }
         match deploy_entry(
@@ -81,6 +91,7 @@ pub fn run_with_options(
             &deployment.variable_context,
             &mut registry,
             &mut replace_all,
+            &global_config,
         )? {
             EntryResult::Deployed => {
                 deployed += 1;
@@ -166,6 +177,7 @@ fn deploy_entry(
     context: &HashMap<String, Value>,
     registry: &mut RenderRegistry,
     replace_all: &mut bool,
+    global_config: &GlobalConfig,
 ) -> Result<EntryResult> {
     if !fs::metadata(&entry.source_path)
         .map_err(|error| miette!(error))?
@@ -199,7 +211,7 @@ fn deploy_entry(
                 match prompt_for_obstruction(entry, &obstruction) {
                     Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
                     Ok(ObstructionChoice::ViewDiff) => {
-                        view_diff(entry, &obstruction, context, registry)?
+                        view_diff(entry, &obstruction, context, registry, global_config)?
                     }
                     Ok(ObstructionChoice::Replace) => {
                         remove_path(database, &obstruction)?;
@@ -229,15 +241,19 @@ fn deploy_entry(
             .map(managed::is_managed)
             .transpose()?
             .unwrap_or(false);
-        if managed {
+        let auto_replace = managed
+            || *replace_all
+            || (global_config.replace_identical()
+                && is_identical_obstruction(entry, context, registry));
+        if auto_replace {
             remove_path(database, &entry.target_path)?;
             replaced = true;
-        } else if !*replace_all {
+        } else {
             loop {
                 match prompt_for_obstruction(entry, &entry.target_path) {
                     Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
                     Ok(ObstructionChoice::ViewDiff) => {
-                        view_diff(entry, &entry.target_path, context, registry)?
+                        view_diff(entry, &entry.target_path, context, registry, global_config)?
                     }
                     Ok(ObstructionChoice::Replace) => {
                         remove_path(database, &entry.target_path)?;
@@ -256,9 +272,6 @@ fn deploy_entry(
                     }
                 }
             }
-        } else {
-            remove_path(database, &entry.target_path)?;
-            replaced = true;
         }
     }
     let parent = entry
@@ -365,17 +378,64 @@ fn write_deployed_file(
     Ok(content_hash)
 }
 
+/// Whether the entry's own target path is an *identical obstruction*: for a
+/// symlink deploy, a symlink whose link target equals the source path; for a
+/// file deploy, a path resolving to a regular file whose content fingerprint
+/// equals the fingerprint of the bytes that would be deployed. Any failure to
+/// read a path or obtain the rendered bytes means the check cannot establish
+/// identity and the obstruction is treated as not identical.
+fn is_identical_obstruction(
+    entry: &config::DeploymentEntry,
+    context: &HashMap<String, Value>,
+    registry: &mut RenderRegistry,
+) -> bool {
+    match entry.deploy_type {
+        DeployType::Symlink => {
+            fs::read_link(&entry.target_path).is_ok_and(|link| link == entry.source_path)
+        }
+        DeployType::Copy => file_matches(&entry.target_path, &entry.source_path),
+        DeployType::Template => {
+            let Ok(Some(rendered)) = registry.ensure_rendered(&entry.source_path, context) else {
+                return false;
+            };
+            file_matches_digest(&entry.target_path, &rendered.digest)
+        }
+    }
+}
+
+/// Whether `path` resolves, following symlinks, to a regular file holding the
+/// same bytes as `source`. File mode is not part of the comparison.
+fn file_matches(path: &Path, source: &Path) -> bool {
+    hash::hash_file(source).is_ok_and(|source_hash| file_matches_digest(path, &source_hash))
+}
+
+/// Whether `path` resolves, following symlinks, to a regular file whose
+/// content fingerprint equals `digest`.
+fn file_matches_digest(path: &Path, digest: &str) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+        && hash::hash_file(path).is_ok_and(|hash| hash == digest)
+}
+
 fn report_dry_run_entry(
     database: &StateDatabase,
     target_root: &Path,
     entry: &config::DeploymentEntry,
+    context: &HashMap<String, Value>,
+    registry: &mut RenderRegistry,
+    global_config: &GlobalConfig,
 ) -> Result<()> {
     let obstruction = parent_obstruction(target_root, &entry.target_path)?;
     let target_exists = fs::symlink_metadata(&entry.target_path).is_ok();
-    let (action, color) = if obstruction.is_some()
-        || (target_exists && !is_target_managed(database, &entry.target_path)?)
-    {
+    let (action, color) = if obstruction.is_some() {
         ("obstruction", Color::Yellow)
+    } else if target_exists && !is_target_managed(database, &entry.target_path)? {
+        let would_replace =
+            global_config.replace_identical() && is_identical_obstruction(entry, context, registry);
+        if would_replace {
+            ("replaced", Color::Cyan)
+        } else {
+            ("obstruction", Color::Yellow)
+        }
     } else if target_exists {
         ("replaced", Color::Cyan)
     } else {
@@ -668,6 +728,7 @@ fn view_diff(
     target: &Path,
     context: &HashMap<String, Value>,
     registry: &mut RenderRegistry,
+    global_config: &GlobalConfig,
 ) -> Result<()> {
     let rendered = if entry.deploy_type == DeployType::Template {
         Some(
@@ -685,55 +746,45 @@ fn view_diff(
 
     std::io::stdout().flush().map_err(|error| miette!(error))?;
 
-    enum PagerResolution<'a> {
-        DotriftPager(&'a str),
-        Pager(&'a str),
-        Stdout,
-    }
-
-    let dotrift_pager = std::env::var("DOTRIFT_PAGER").ok();
-    let pager = std::env::var("PAGER").ok();
-    let resolution = match dotrift_pager.as_deref() {
-        Some(command) if !command.trim().is_empty() => PagerResolution::DotriftPager(command),
-        _ => match pager.as_deref() {
-            Some(command) if !command.trim().is_empty() => PagerResolution::Pager(command),
-            _ => PagerResolution::Stdout,
-        },
+    let env_pager = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
     };
-    match resolution {
-        PagerResolution::DotriftPager(command) => {
-            let mut child = spawn_pager(command)
-                .map_err(|error| miette!(error).wrap_err("cannot run DOTRIFT_PAGER"))?;
-            let mut stdin = child
-                .stdin
-                .take()
-                .ok_or_else(|| miette!("pager stdin is unavailable"))?;
-            run_diff_into(target, &entry.source_path, source, &mut stdin)?;
-            drop(stdin);
-            child.wait().map_err(|error| miette!(error))?;
-            Ok(())
-        }
-        PagerResolution::Pager(command) => match spawn_pager(command) {
-            Ok(mut child) => {
-                let mut stdin = child
-                    .stdin
-                    .take()
-                    .ok_or_else(|| miette!("pager stdin is unavailable"))?;
-                run_diff_into(target, &entry.source_path, source, &mut stdin)?;
-                drop(stdin);
-                child.wait().map_err(|error| miette!(error))?;
-                Ok(())
-            }
-            Err(_) => {
-                let mut output = diff_output();
-                run_diff_into(target, &entry.source_path, source, &mut output)
-            }
-        },
-        PagerResolution::Stdout => {
-            let mut output = diff_output();
-            run_diff_into(target, &entry.source_path, source, &mut output)
-        }
+
+    if let Some(command) = env_pager("DOTRIFT_PAGER") {
+        let child = spawn_pager(&command)
+            .map_err(|error| miette!(error).wrap_err("cannot run DOTRIFT_PAGER"))?;
+        return diff_through(child, target, &entry.source_path, source);
     }
+    if let Some(pager) = global_config.pager() {
+        let child = spawn_config_pager(pager)
+            .map_err(|error| miette!(error).wrap_err("cannot run the configured pager"))?;
+        return diff_through(child, target, &entry.source_path, source);
+    }
+    if let Some(command) = env_pager("PAGER")
+        && let Ok(child) = spawn_pager(&command)
+    {
+        return diff_through(child, target, &entry.source_path, source);
+    }
+    let mut output = diff_output();
+    run_diff_into(target, &entry.source_path, source, &mut output)
+}
+
+fn diff_through(
+    mut child: std::process::Child,
+    target: &Path,
+    source_label: &Path,
+    source: &Path,
+) -> Result<()> {
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| miette!("pager stdin is unavailable"))?;
+    run_diff_into(target, source_label, source, &mut stdin)?;
+    drop(stdin);
+    child.wait().map_err(|error| miette!(error))?;
+    Ok(())
 }
 
 fn run_diff_into<W: Write>(
@@ -782,8 +833,20 @@ fn spawn_pager(command: &str) -> std::io::Result<std::process::Child> {
             "pager command is empty",
         ));
     };
+    spawn_pager_program(program, parts)
+}
+
+fn spawn_config_pager(pager: &PagerCommand) -> std::io::Result<std::process::Child> {
+    spawn_pager_program(&pager.command, &pager.args)
+}
+
+fn spawn_pager_program<I, S>(program: &str, args: I) -> std::io::Result<std::process::Child>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     Command::new(program)
-        .args(parts)
+        .args(args)
         .stdin(Stdio::piped())
         .spawn()
 }
