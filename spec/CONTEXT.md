@@ -178,6 +178,19 @@ winning, with lexicographic profile-name tie-breaking. Resolved once per run;
 the same context.
 _Avoid_: scope, environment (overloaded terms in the templater spec)
 
+**Template hash**:
+The digest of a template's source bytes, computed before render and following
+symlinks. Keys the *template render registry* and the run's in-memory memo of
+rendered-output digests. Distinct from *fingerprint* (the hash of deployed
+bytes).
+_Avoid_: pre-render hash, source hash
+
+**Template render registry**:
+The per-run store of rendered template output, keyed by *template hash*,
+consulted by template deploys and template diffs before rendering. Not part
+of the *state database*.
+_Avoid_: render cache, cache (generic)
+
 **State lock**:
 Exclusive lock serialising mutations of the *state database* — held by `apply`
 for its entire run and by `profile activate`/`profile deactivate` for the

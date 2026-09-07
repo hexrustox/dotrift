@@ -5,6 +5,7 @@ pub mod config;
 pub mod data;
 pub mod hash;
 pub mod managed;
+pub mod render_registry;
 pub mod state;
 pub mod template;
 

@@ -86,10 +86,11 @@ is unchanged.
 
 Each deploy action runs in a fixed, non-atomic order (ADR-0010):
 
-1. Write the file bytes or create the symlink. A template entry is rendered
-   as the target is written: the target file is created and the rendered
-   bytes are streamed into it (see
-   [Template rendering](#template-rendering)).
+1. Obtain the file bytes or create the symlink. A template entry obtains its
+   rendered bytes from the template render registry (see
+   [Template rendering](#template-rendering)) — rendering into it first if
+   this run has not yet rendered this template — then creates the target file
+   and copies the rendered bytes into it.
 2. Update the management state for the target.
 3. Apply the configured mode, if the effective deploy type is `copy` or
    `template`.
@@ -97,9 +98,11 @@ Each deploy action runs in a fixed, non-atomic order (ADR-0010):
 A failure at any step returns an error and exits. Completed steps remain: a
 state-write failure leaves the filesystem change in place, and a
 mode-application failure leaves the new content and state in place with the
-mode not applied. A render or write failure removes the partial target file
-best-effort; a removal that itself fails leaves a partial file, which the
-next run surfaces as an ordinary untracked obstruction.
+mode not applied. A render failure happens before the target file is created
+and leaves the target absent; a copy or write failure removes the partial
+target file best-effort — as can the direct-render fallback — and a removal
+that itself fails leaves a partial file, which the next run surfaces as an
+ordinary untracked obstruction.
 
 ### Obstruction prompts
 
@@ -154,8 +157,11 @@ skips (exit `2`), and the `replace all` latch can never engage without a TTY.
 
 `view diff` is offered only when both paths resolve, after following
 symlinks, to regular files; it then shows a content diff of the two files.
-For a template entry, the rendered output is diffed against the target; a
-render failure shows the error and exits. For mixed file/directory kinds,
+For a template entry, the rendered output is diffed against the target,
+taken from the template render registry — rendering into it first when this
+run has not yet rendered the template. A render failure shows the error and
+exits, and so does a registry failure: view diff has no direct-render
+fallback. For mixed file/directory kinds,
 symlinks resolving to directories, or special objects, `view diff` is omitted
 because no further useful information can be shown.
 
@@ -193,6 +199,38 @@ completed filesystem actions, a render failure after an obstruction was
 already removed leaves the target absent with its state removed. A render
 error fails the run: completed actions remain, and the entry's state is
 whatever the completed actions established.
+
+### Template render registry
+
+A real run stores rendered template output in the *template render registry*:
+a per-run directory under the system temporary directory
+(`dotrift-render/registry`), named by each entry's *template hash* — the
+xxHash64 (seed 0) digest of the template's source bytes, computed before
+render and following symlinks. Template deploys and template view diffs
+consult the registry before rendering: the first need for a template in a run
+renders it into a registry entry created with mode `0600`; every later need
+copies from that entry instead of rendering again. The rendered-output digest
+is memoized in memory for the run, and a registry hit reuses the memoized
+digest as the deployed-content fingerprint without re-hashing the copied
+bytes.
+
+The registry is valid only for the run that filled it: rendering is a pure
+function of the template bytes and the run's variable context (the
+templater's function registry is always empty, and no environment is
+injected), so identical inputs cannot produce different output within a run —
+but a variable-context change between runs can. A real run therefore empties
+the registry directory after acquiring the state lock, before reading the
+control files, and empties it again best-effort before exiting, whatever the
+exit path (success, skips, cancellation, error). A killed run cannot empty
+it; the next real run's start-of-run emptying disposes of its leftovers.
+`--dry-run` neither creates nor empties the registry.
+
+Registry infrastructure failures — the directory cannot be created or
+written — are silent for template deploys, which render directly into their
+targets. Template view diffs have no such fallback: a registry failure fails
+the view diff like a render failure. Template-engine errors and
+target-write errors keep the semantics above; for deploys, the registry
+never changes what fails a run, only where bytes are rendered first.
 
 `dotrift.toml` is unaffected: it is rendered eagerly before parsing
 (ADR-0001).

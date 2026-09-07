@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use dotrift::commands::apply::ApplyOptions;
+use dotrift::render_registry::test_hooks::TEST_REGISTRY_ROOT;
 use dotrift::state::{StateDatabase, test_hooks::TEST_STATE_ROOT};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,7 @@ impl TestEnv {
     pub fn new() -> Self {
         let root = TempDir::new().expect("cannot create temp dir");
         TEST_STATE_ROOT.with_borrow_mut(|r| *r = Some(root.path().join("state")));
+        TEST_REGISTRY_ROOT.with_borrow_mut(|r| *r = Some(root.path().join("render-registry")));
         Self { root }
     }
 
