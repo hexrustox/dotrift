@@ -6,6 +6,7 @@ pub mod data;
 pub mod global_config;
 pub mod hash;
 pub mod managed;
+mod reconcile;
 pub mod render_registry;
 pub mod state;
 pub mod template;

@@ -22,6 +22,7 @@ use crate::{
     config::{self, DeployType},
     global_config::{GlobalConfig, PagerCommand},
     hash, managed, prettify_path, println_capture,
+    reconcile::{Decision, decide},
     render_registry::RenderRegistry,
     state::{Kind, StateDatabase, StateLock, StateRecord},
     template,
@@ -189,90 +190,44 @@ fn deploy_entry(
         ));
     }
 
-    let obstruction = parent_obstruction(target_root, &entry.target_path)?;
-    let existed = if obstruction.is_some() {
-        false
-    } else {
-        match fs::symlink_metadata(&entry.target_path) {
-            Ok(_) => true,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-            Err(error) => {
-                return Err(miette!(error).wrap_err(format!(
-                    "cannot inspect target `{}`",
-                    entry.target_path.display()
-                )));
-            }
-        }
-    };
     let mut replaced = false;
-    if let Some(obstruction) = obstruction {
-        if !*replace_all {
-            loop {
-                match prompt_for_obstruction(entry, &obstruction) {
-                    Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
-                    Ok(ObstructionChoice::ViewDiff) => {
-                        view_diff(entry, &obstruction, context, registry, global_config)?
-                    }
-                    Ok(ObstructionChoice::Replace) => {
-                        remove_path(database, &obstruction)?;
-                        replaced = true;
-                        break;
-                    }
-                    Ok(ObstructionChoice::ReplaceAll) => {
-                        *replace_all = true;
-                        remove_path(database, &obstruction)?;
-                        replaced = true;
-                        break;
-                    }
-                    Err(PromptError::Cancelled) => return Ok(EntryResult::Cancelled),
-                    Err(error) => {
-                        return Err(miette!(error).wrap_err("cannot display obstruction prompt"));
-                    }
-                }
-            }
-        } else {
-            remove_path(database, &obstruction)?;
+    match decide(
+        database,
+        target_root,
+        entry,
+        context,
+        registry,
+        *replace_all,
+        global_config.replace_identical(),
+    )? {
+        Decision::Deployed => {}
+        Decision::Replaced { remove } => {
+            remove_path(database, &remove)?;
             replaced = true;
         }
-    } else if existed {
-        let old_record = database.record(&entry.target_path)?;
-        let managed = old_record
-            .as_ref()
-            .map(managed::is_managed)
-            .transpose()?
-            .unwrap_or(false);
-        let auto_replace = managed
-            || *replace_all
-            || (global_config.replace_identical()
-                && is_identical_obstruction(entry, context, registry));
-        if auto_replace {
-            remove_path(database, &entry.target_path)?;
-            replaced = true;
-        } else {
-            loop {
-                match prompt_for_obstruction(entry, &entry.target_path) {
-                    Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
-                    Ok(ObstructionChoice::ViewDiff) => {
-                        view_diff(entry, &entry.target_path, context, registry, global_config)?
-                    }
-                    Ok(ObstructionChoice::Replace) => {
-                        remove_path(database, &entry.target_path)?;
-                        replaced = true;
-                        break;
-                    }
-                    Ok(ObstructionChoice::ReplaceAll) => {
-                        *replace_all = true;
-                        remove_path(database, &entry.target_path)?;
-                        replaced = true;
-                        break;
-                    }
-                    Err(PromptError::Cancelled) => return Ok(EntryResult::Cancelled),
-                    Err(error) => {
-                        return Err(miette!(error).wrap_err("cannot display obstruction prompt"));
-                    }
+        Decision::Prompt(obstruction) => loop {
+            match prompt_for_obstruction(entry, &obstruction) {
+                Ok(ObstructionChoice::Skip) => return Ok(EntryResult::Skipped),
+                Ok(ObstructionChoice::ViewDiff) => {
+                    view_diff(entry, &obstruction, context, registry, global_config)?
+                }
+                Ok(ObstructionChoice::Replace) => {
+                    remove_path(database, &obstruction)?;
+                    replaced = true;
+                    break;
+                }
+                Ok(ObstructionChoice::ReplaceAll) => {
+                    *replace_all = true;
+                    remove_path(database, &obstruction)?;
+                    replaced = true;
+                    break;
+                }
+                Err(PromptError::Cancelled) => return Ok(EntryResult::Cancelled),
+                Err(error) => {
+                    return Err(miette!(error).wrap_err("cannot display obstruction prompt"));
                 }
             }
-        }
+        },
     }
     let parent = entry
         .target_path
@@ -310,7 +265,7 @@ fn deploy_entry(
             .map_err(|error| miette!(error))
             .wrap_err("cannot apply target mode")?;
     }
-    Ok(if existed || replaced {
+    Ok(if replaced {
         EntryResult::Replaced
     } else {
         EntryResult::Deployed
@@ -378,44 +333,6 @@ fn write_deployed_file(
     Ok(content_hash)
 }
 
-/// Whether the entry's own target path is an *identical obstruction*: for a
-/// symlink deploy, a symlink whose link target equals the source path; for a
-/// file deploy, a path resolving to a regular file whose content fingerprint
-/// equals the fingerprint of the bytes that would be deployed. Any failure to
-/// read a path or obtain the rendered bytes means the check cannot establish
-/// identity and the obstruction is treated as not identical.
-fn is_identical_obstruction(
-    entry: &config::DeploymentEntry,
-    context: &HashMap<String, Value>,
-    registry: &mut RenderRegistry,
-) -> bool {
-    match entry.deploy_type {
-        DeployType::Symlink => {
-            fs::read_link(&entry.target_path).is_ok_and(|link| link == entry.source_path)
-        }
-        DeployType::Copy => file_matches(&entry.target_path, &entry.source_path),
-        DeployType::Template => {
-            let Ok(Some(rendered)) = registry.ensure_rendered(&entry.source_path, context) else {
-                return false;
-            };
-            file_matches_digest(&entry.target_path, &rendered.digest)
-        }
-    }
-}
-
-/// Whether `path` resolves, following symlinks, to a regular file holding the
-/// same bytes as `source`. File mode is not part of the comparison.
-fn file_matches(path: &Path, source: &Path) -> bool {
-    hash::hash_file(source).is_ok_and(|source_hash| file_matches_digest(path, &source_hash))
-}
-
-/// Whether `path` resolves, following symlinks, to a regular file whose
-/// content fingerprint equals `digest`.
-fn file_matches_digest(path: &Path, digest: &str) -> bool {
-    fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
-        && hash::hash_file(path).is_ok_and(|hash| hash == digest)
-}
-
 fn report_dry_run_entry(
     database: &StateDatabase,
     target_root: &Path,
@@ -424,22 +341,18 @@ fn report_dry_run_entry(
     registry: &mut RenderRegistry,
     global_config: &GlobalConfig,
 ) -> Result<()> {
-    let obstruction = parent_obstruction(target_root, &entry.target_path)?;
-    let target_exists = fs::symlink_metadata(&entry.target_path).is_ok();
-    let (action, color) = if obstruction.is_some() {
-        ("obstruction", Color::Yellow)
-    } else if target_exists && !is_target_managed(database, &entry.target_path)? {
-        let would_replace =
-            global_config.replace_identical() && is_identical_obstruction(entry, context, registry);
-        if would_replace {
-            ("replaced", Color::Cyan)
-        } else {
-            ("obstruction", Color::Yellow)
-        }
-    } else if target_exists {
-        ("replaced", Color::Cyan)
-    } else {
-        ("deployed", Color::Green)
+    let (action, color) = match decide(
+        database,
+        target_root,
+        entry,
+        context,
+        registry,
+        false,
+        global_config.replace_identical(),
+    )? {
+        Decision::Deployed => ("deployed", Color::Green),
+        Decision::Replaced { .. } => ("replaced", Color::Cyan),
+        Decision::Prompt(_) => ("obstruction", Color::Yellow),
     };
     let deploy_type = match entry.deploy_type {
         DeployType::Symlink => "symlink",
@@ -456,13 +369,6 @@ fn report_dry_run_entry(
         prettify_path(&entry.target_path).display()
     );
     Ok(())
-}
-
-fn is_target_managed(database: &StateDatabase, path: &Path) -> Result<bool> {
-    match database.record(path)? {
-        Some(record) => managed::is_managed(&record),
-        None => Ok(false),
-    }
 }
 
 fn cleanup(
@@ -874,98 +780,11 @@ fn remove_path(database: &StateDatabase, path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn parent_obstruction(target_root: &Path, target_path: &Path) -> Result<Option<PathBuf>> {
-    let parent = target_path
-        .parent()
-        .ok_or_else(|| miette!("target path has no parent"))?;
-    let relative = parent
-        .strip_prefix(target_root)
-        .map_err(|_| miette!("target path is outside target directory"))?;
-    let mut current = target_root.to_path_buf();
-    for component in relative.components() {
-        current.push(component);
-        match fs::metadata(&current) {
-            Ok(metadata) if metadata.is_dir() => {}
-            Ok(_) => return Ok(Some(current)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if fs::symlink_metadata(&current).is_ok() {
-                    return Ok(Some(current));
-                }
-                return Ok(None);
-            }
-            Err(error) => {
-                return Err(miette!(error).wrap_err(format!(
-                    "cannot inspect target parent `{}`",
-                    current.display()
-                )));
-            }
-        }
-    }
-    Ok(None)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
     use test_case::test_case;
-
-    #[test_case(|t| t.join("file") => None ; "target_directly_below_root_reports_no_obstruction")]
-    #[test_case(
-        |t| {
-            fs::create_dir_all(t.join("a/b")).unwrap();
-            t.join("a/b/file")
-        } => None;
-        "directory_parents_report_no_obstruction"
-    )]
-    #[test_case(
-        |t| {
-            fs::create_dir_all(t.join("a")).unwrap();
-            t.join("a/b/file")
-        } => None;
-        "missing_parent_component_reports_no_obstruction"
-    )]
-    #[test_case(
-        |t| {
-            fs::create_dir_all(t.join("a")).unwrap();
-            fs::write(t.join("a/b"), "occupied").unwrap();
-            t.join("a/b/file")
-        } => Some(PathBuf::from("a/b"));
-        "file_parent_reported_as_obstruction"
-    )]
-    #[test_case(
-        |t| {
-            fs::create_dir_all(t.join("a/b")).unwrap();
-            fs::write(t.join("a/b/f"), "content").unwrap();
-            std::os::unix::fs::symlink(t.join("a/b/f"), t.join("a/b/link")).unwrap();
-            t.join("a/b/link/file")
-        } => Some(PathBuf::from("a/b/link"));
-        "symlink_to_file_parent_reported_as_obstruction"
-    )]
-    #[test_case(
-        |t| {
-            fs::create_dir_all(t.join("a/real")).unwrap();
-            std::os::unix::fs::symlink(t.join("a/real"), t.join("a/dirlink")).unwrap();
-            t.join("a/dirlink/file")
-        } => None;
-        "symlink_to_directory_parent_reports_no_obstruction"
-    )]
-    #[test_case(
-        |t| {
-            fs::create_dir_all(t.join("a")).unwrap();
-            std::os::unix::fs::symlink(t.join("a/nowhere"), t.join("a/broken")).unwrap();
-            t.join("a/broken/file")
-        } => Some(PathBuf::from("a/broken"));
-        "dangling_symlink_parent_reported_as_obstruction"
-    )]
-    #[test_case(|_t| PathBuf::from("/unrelated/nested/target") => panics "outside target directory" ; "target_outside_target_root_is_rejected")]
-    #[test_case(|_t| PathBuf::from("/") => panics "no parent" ; "target_without_parent_is_rejected")]
-    fn reports_parent_obstruction_for(setup: impl Fn(&Path) -> PathBuf) -> Option<PathBuf> {
-        let dir = tempdir().expect("cannot create temp dir");
-        parent_obstruction(dir.path(), &setup(dir.path()))
-            .unwrap_or_else(|error| panic!("{error}"))
-            .map(|path| path.strip_prefix(dir.path()).unwrap().to_path_buf())
-    }
 
     #[test_case(|_t| vec![] => true ; "empty_directory_reports_empty")]
     #[test_case(|t| {

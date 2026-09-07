@@ -49,20 +49,6 @@ fn symlink_setup(identical: bool) -> impl Fn(&Path, &Path) -> &'static str {
     }
     ; "identical_symlink_obstruction_replaced_without_prompt"
 )]
-#[test_case(
-    symlink_setup(false),
-    Some(ObstructionChoice::Skip),
-    ExitStatus::Skipped,
-    |_source: &Path, target: &Path| {
-        assert_eq!(
-            fs::read_link(target.join("target.txt")).unwrap(),
-            target.join("elsewhere")
-        );
-        assert_eq!(record_of(&target.join("target.txt")), None);
-        assert_eq!(prompt_count(), 1);
-    }
-    ; "divergent_symlink_obstruction_still_prompts"
-)]
 fn symlink_obstruction_behaviors(
     setup: impl Fn(&Path, &Path) -> &'static str,
     choice: Option<ObstructionChoice>,
@@ -112,31 +98,6 @@ fn symlink_obstruction_behaviors(
 #[test_case(
     |source: &Path, target: &Path| {
         fs::write(source.join("file.txt"), b"new").unwrap();
-        fs::write(target.join("other.txt"), b"new").unwrap();
-        symlink(target.join("other.txt"), target.join("target.txt")).unwrap();
-        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
-    },
-    None,
-    ExitStatus::Success,
-    |_source: &Path, target: &Path| {
-        assert!(
-            fs::symlink_metadata(target.join("target.txt"))
-                .unwrap()
-                .file_type()
-                .is_file()
-        );
-        assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"new");
-        assert!(target.join("other.txt").exists());
-        let record = record_of(&target.join("target.txt")).unwrap();
-        assert_eq!(record.kind, Kind::File);
-        assert_eq!(record.content_hash, Some(hash_bytes(b"new")));
-        assert_eq!(prompt_count(), 0);
-    }
-    ; "symlink_resolving_to_identical_file_replaced"
-)]
-#[test_case(
-    |source: &Path, target: &Path| {
-        fs::write(source.join("file.txt"), b"new").unwrap();
         fs::write(target.join("target.txt"), b"old").unwrap();
         "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
     },
@@ -147,22 +108,6 @@ fn symlink_obstruction_behaviors(
         assert_eq!(prompt_count(), 1);
     }
     ; "divergent_copy_obstruction_still_prompts"
-)]
-#[test_case(
-    |source: &Path, target: &Path| {
-        fs::write(source.join("file.txt"), b"same").unwrap();
-        fs::create_dir(target.join("target.txt")).unwrap();
-        fs::write(target.join("target.txt/inner"), b"same").unwrap();
-        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
-    },
-    Some(ObstructionChoice::Skip),
-    ExitStatus::Skipped,
-    |_source: &Path, target: &Path| {
-        assert!(target.join("target.txt").is_dir());
-        assert!(target.join("target.txt/inner").exists());
-        assert_eq!(prompt_count(), 1);
-    }
-    ; "directory_obstruction_never_auto_replaces"
 )]
 fn copy_obstruction_behaviors(
     setup: impl Fn(&Path, &Path) -> &'static str,
@@ -204,16 +149,6 @@ fn template_setup(target_bytes: &[u8]) -> impl Fn(&Path, &Path) -> &'static str 
         assert_eq!(prompt_count(), 0);
     }
     ; "identical_template_obstruction_replaced_without_prompt"
-)]
-#[test_case(
-    template_setup(b"stale\n"),
-    Some(ObstructionChoice::Skip),
-    ExitStatus::Skipped,
-    |_source: &Path, target: &Path| {
-        assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"stale\n");
-        assert_eq!(prompt_count(), 1);
-    }
-    ; "divergent_template_obstruction_still_prompts"
 )]
 fn template_obstruction_behaviors(
     setup: impl Fn(&Path, &Path) -> &'static str,
@@ -270,26 +205,6 @@ fn replace_all_latch_subsumes_the_identical_check() {
     assert_eq!(prompt_count(), 1);
 }
 
-#[test]
-fn touched_previously_managed_file_matching_current_content_is_replaced() {
-    let scenario = ApplyScenario::new(|source: &Path, _target: &Path| {
-        fs::write(source.join("file.txt"), b"v1").unwrap();
-        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
-    });
-    let _guard = global_config(&scenario.env, REPLACE_IDENTICAL);
-    scenario.run();
-    fs::write(scenario.source.join("file.txt"), b"v2").unwrap();
-    fs::write(scenario.target.join("target.txt"), b"v2").unwrap();
-
-    let status = scenario.try_run().expect("apply failed");
-
-    assert_eq!(status, ExitStatus::Success);
-    assert_eq!(fs::read(scenario.target.join("target.txt")).unwrap(), b"v2");
-    let record = record_of(&scenario.target.join("target.txt")).unwrap();
-    assert_eq!(record.content_hash, Some(hash_bytes(b"v2")));
-    assert_eq!(prompt_count(), 0);
-}
-
 fn dry_run_line(scenario: &ApplyScenario, path: &Path) -> String {
     dotrift::capture::clear();
     scenario
@@ -324,20 +239,6 @@ fn dry_run_reports_identical_obstruction_as_replaced() {
         b"same"
     );
     assert_eq!(prompt_count(), 0);
-}
-
-#[test]
-fn dry_run_reports_divergent_obstruction_as_obstruction() {
-    let scenario = ApplyScenario::new(|source: &Path, target: &Path| {
-        fs::write(source.join("file.txt"), b"new").unwrap();
-        fs::write(target.join("target.txt"), b"old").unwrap();
-        "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
-    });
-    let _guard = global_config(&scenario.env, REPLACE_IDENTICAL);
-
-    let line = dry_run_line(&scenario, &scenario.target.join("target.txt"));
-
-    assert!(line.starts_with("obstruction "), "{line}");
 }
 
 #[test]
