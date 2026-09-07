@@ -85,6 +85,12 @@ A command that reads the control files (`dotrift.toml`, `dotrift_data.toml`,
 `.dotriftignore`) errors if the resolved source directory does not exist.
 Which commands those are is pinned in [Per-command use](#per-command-use).
 
+## Global config file
+
+Beyond the CLI surface, dotrift reads an optional per-user config file. Its
+location, schema, strictness, and failure semantics are specified in
+`spec/global-config.md`. It is currently consumed by `apply` only.
+
 ## Output conventions
 
 Shared presentation rules for all command output. Subcommand specs reference

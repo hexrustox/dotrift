@@ -120,6 +120,14 @@ deployment of a resolved entry. Unlike a *collision* — a config-time error —
 an obstruction is a runtime condition resolved interactively during `apply`.
 _Avoid_: conflict, clash
 
+**Identical obstruction**:
+An *obstruction* whose on-disk content equals what would be deployed for the
+entry: for a file deploy, a path that resolves to a regular file whose
+content fingerprint equals the fingerprint of the bytes that would be
+deployed; for a symlink deploy, a symlink whose link target equals the source
+path. File mode is not part of the comparison.
+_Avoid_: identical file, matching target
+
 **Stale path**:
 A *managed path* in the target directory that is not part of the *desired
 deployment* for the current run: the candidate set for `--clean-up`. Paths
@@ -141,6 +149,13 @@ to the target-directory root (the implicit ignore patterns are root-anchored
 target paths); a portal may still deploy one to a nested target path.
 Re-includable at the root via a negated ignore pattern.
 _Avoid_: (none)
+
+**Global config**:
+The optional per-user TOML file that configures dotrift across all source
+directories, at `$XDG_CONFIG_HOME/dotrift/config.toml` (falling back to
+`$HOME/.config/dotrift/config.toml`). Distinct from the *control files*,
+which configure a single source directory.
+_Avoid_: user config, dotriftrc, config file (generic)
 
 **Ignore file**:
 The optional `.dotriftignore` at the root of the source directory listing

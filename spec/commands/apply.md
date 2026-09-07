@@ -9,17 +9,21 @@ stale entries are removed only under `--clean-up` (see
 ## Pipeline
 
 1. Acquire the state lock (see `spec/core.md § State lock`).
-2. Resolve the source directory and read the control files:
+2. Read the global config (see `spec/global-config.md § Consumption`): a
+   missing file contributes the defaults; any discovery or validation error
+   fails the run.
+3. Resolve the source directory and read the control files:
    - `dotrift.toml`, rendered as a template and parsed (see
      `spec/dotrift-toml.md § Rendering before parsing`, ADR-0001).
    - `dotrift_data.toml`, parsed as plain TOML (see
      `spec/dotrift-data-toml.md`).
-   - `.dotriftignore`, parsed as plain text (see `spec/dotriftignore.md`).
-3. Resolve the portal entries.
-4. Apply the ignore file's filtering stage (see
+   - `.dotriftignore`, parsed as plain text (see
+     `spec/dotriftignore.md`).
+4. Resolve the portal entries.
+5. Apply the ignore file's filtering stage (see
    `spec/dotriftignore.md § Filtering stage`).
-5. Validate collisions and structural conflicts.
-6. Resolve rules and compute the desired deployment. When the effective
+6. Validate collisions and structural conflicts.
+7. Resolve rules and compute the desired deployment. When the effective
    deploy type is `symlink` and matching rules contributed a `mode`, the mode
    is dropped and a warning naming the target path is printed to stderr, one
    line per affected target (ADR-0016).
@@ -147,13 +151,51 @@ run immediately: the cancelled entry is left untouched, no further entries are
 attempted, no summary is printed, and `--clean-up` does not run. State
 reflects only the actions already completed.
 
+### Identical obstructions
+
+When the global config's `replace-identical` is enabled (see
+`spec/global-config.md § [apply]`; ADR-0019), an *identical obstruction* (see
+`spec/CONTEXT.md`) is replaced without prompting: it is removed exactly as a
+`replace` decision would remove it, and the entry deploys. The check runs
+wherever a prompt would otherwise be raised for the entry's own target path —
+never for a parent obstruction (see
+[Parent directories](#parent-directories)) — and before the prompt, so it
+applies equally to interactive and non-interactive runs: a piped run replaces
+identical obstructions instead of skipping them, while non-identical
+obstructions still take the prompt's non-interactive default (`skip`).
+
+An obstruction is identical when it is:
+
+- a symlink whose link target equals the entry's source path, for a
+  `symlink` deploy; or
+- a path that resolves, following symlinks, to a regular file whose content
+  fingerprint equals the fingerprint of the bytes that would be deployed
+  (see `spec/core.md § Fingerprint`): the source file's bytes for a `copy`
+  deploy, the rendered output for a `template` deploy, obtained from the
+  template render registry — rendering into it first when this run has not
+  yet rendered the template.
+
+Anything else is not identical: a directory, a special object, or a mixed
+kind never auto-replaces. File mode is not part of the comparison — a file
+with identical bytes and a different mode is identical, and the replacement
+re-applies the rule's mode. A failure to read the obstruction, or a render
+or registry failure while obtaining the rendered bytes, means the check
+cannot establish identity: the obstruction is treated as not identical and
+the normal prompt is raised.
+
+The `replace all` latch subsumes the check: once latched, obstructions are
+replaced without prompting whether identical or not. An auto-replaced entry
+counts as `replaced` in the summary, exactly like a user-confirmed replace.
+
 The prompt choices are provided by the TUI/prompt API; `apply` consumes the
 API's result and does not implement terminal detection or a non-interactive
 fallback. The API itself is non-interactive-safe: when stdin is not a
 terminal, the prompt returns its default immediately without rendering
 (`tui/spec/prompt.md § Defaults`). `apply` configures no default, so the
 first option — `skip` — is chosen automatically: a piped run completes with
-skips (exit `2`), and the `replace all` latch can never engage without a TTY.
+skips (exit `2`) except where an identical obstruction is replaced first
+(see [Identical obstructions](#identical-obstructions)), and the
+`replace all` latch can never engage without a TTY.
 
 `view diff` is offered only when both paths resolve, after following
 symlinks, to regular files; it then shows a content diff of the two files.
@@ -168,13 +210,17 @@ because no further useful information can be shown.
 The diff is produced by the external `diff -u` command, with the raw
 (unprettified) target and source paths as the diff labels. A `diff` exit
 status of 1 — differences found — is normal; exit status 2 fails the run;
-failure to start `diff` fails the run. The diff is displayed through the pager
-named by `$DOTRIFT_PAGER` when set, otherwise `$PAGER`, otherwise printed to
-standard output. An empty or whitespace-only value counts as unset, and the
-value is split on whitespace into a program and its arguments (so
-`less -R` works). A `$DOTRIFT_PAGER` that cannot be started fails the run; a
-`$PAGER` that cannot be started falls back to standard output. A pager's
-non-zero exit status never fails the run.
+failure to start `diff` fails the run. The diff is displayed through the
+pager named by `$DOTRIFT_PAGER` when set, otherwise the pager configured in
+the global config (see `spec/global-config.md § [pager]`), otherwise `$PAGER`,
+otherwise printed to standard output. An empty or whitespace-only environment
+value counts as unset, and the value is split on whitespace into a program
+and its arguments (so `less -R` works); the config pager's `command` is used
+verbatim with its `args` appended as literal arguments, and an unset or
+empty-by-`command` config pager counts as unset. A `$DOTRIFT_PAGER` or a
+config pager that cannot be started fails the run; a `$PAGER` that cannot be
+started falls back to standard output. A pager's non-zero exit status never
+fails the run.
 
 ### Parent directories
 
@@ -301,8 +347,9 @@ point, and the next run sees whatever the last completed step left behind
 
 `--dry-run` performs the full preflight and walks the desired deployment,
 reporting for each entry what a real run would do — deploy a new target,
-replace a clean managed path, or require a user choice for an obstruction —
-without prompting or changing anything under the target directory. Template
+replace a clean managed path, replace an identical obstruction without
+prompting, or require a user choice for any other obstruction — without
+prompting or changing anything under the target directory. Template
 entries are reported like copy entries, without rendering. Dry-run prints no
 summary, and it conflicts with both `--quiet` and `--verbose`. A dry-run
 acquires the state lock like a real run: it fails when another `apply` holds
@@ -317,10 +364,12 @@ Each entry prints one line:
 ```
 
 * The action is `deployed` for a missing target, `replaced` for a clean
-  managed path, and `obstruction` for an unmanaged target or an obstructing
-  parent — the cases a real run would deploy, replace, or prompt about. The
-  action word is colored per the palette (`spec/commands/global.md § Output
-  conventions`): `deployed` green, `replaced` cyan, `obstruction` yellow.
+  managed path or for an obstruction the real run would replace without
+  prompting under the global config (see
+  [Identical obstructions](#identical-obstructions)), and `obstruction` for
+  any other unmanaged target or an obstructing parent — the cases a real run
+  would deploy, replace, or prompt about. The action word is colored per the
+  palette (`spec/commands/global.md § Output conventions`): `deployed` green, `replaced` cyan, `obstruction` yellow.
 * The target path is displayed per the path display convention.
 * The bracket suffix shows the entry's effective deploy type — `symlink`,
   `copy`, or `template` — plus the effective mode as a three-digit octal
