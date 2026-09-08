@@ -1,0 +1,323 @@
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs,
+    path::{Path, PathBuf},
+};
+
+use glob::MatchOptions;
+use miette::{Result, WrapErr, miette};
+use serde::Deserialize;
+use templater::value::Value;
+
+use crate::data::DataFile;
+
+mod ignore;
+mod portals;
+mod rules;
+mod targets;
+
+const GLOB_MATCH_OPTIONS: MatchOptions = MatchOptions {
+    case_sensitive: true,
+    require_literal_separator: true,
+    require_literal_leading_dot: false,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeployType {
+    Symlink,
+    Copy,
+    Template,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "DeployModeRepr")]
+pub struct DeployMode(pub u32);
+
+impl From<DeployMode> for u32 {
+    fn from(value: DeployMode) -> Self {
+        value.0
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum DeployModeRepr {
+    Str(String),
+    Uint(u32),
+}
+
+impl TryFrom<DeployModeRepr> for DeployMode {
+    type Error = miette::Report;
+
+    fn try_from(value: DeployModeRepr) -> Result<Self, Self::Error> {
+        match value {
+            DeployModeRepr::Str(value) => Self::try_from(value),
+            DeployModeRepr::Uint(value) => Self::try_from(value),
+        }
+    }
+}
+
+impl TryFrom<String> for DeployMode {
+    type Error = miette::Report;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.len() != 3 || !value.bytes().all(|byte| (b'0'..=b'7').contains(&byte)) {
+            return Err(miette!("invalid mode `{value}`"));
+        }
+        let mode = value
+            .bytes()
+            .fold(0u32, |mode, byte| (mode << 3) | u32::from(byte - b'0'));
+        Ok(Self(mode))
+    }
+}
+
+impl TryFrom<u32> for DeployMode {
+    type Error = miette::Report;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        if value > 0o777 {
+            return Err(miette!("invalid mode `{value:o}`"));
+        }
+        Ok(Self(value))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeploymentEntry {
+    pub source_path: PathBuf,
+    pub target_path: PathBuf,
+    pub deploy_type: DeployType,
+    pub mode: Option<DeployMode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesiredDeployment {
+    pub target_directory: PathBuf,
+    pub entries: Vec<DeploymentEntry>,
+    pub variable_context: HashMap<String, Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileConfig {
+    #[serde(rename = "target-directory")]
+    target_directory: Option<String>,
+    #[serde(default)]
+    portal: BTreeMap<String, String>,
+    #[serde(default)]
+    rule: indexmap::IndexMap<String, rules::RuleConfig>,
+}
+
+pub fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDeployment> {
+    crate::ensure_source_dir(source)?;
+    let data = DataFile::read(source)?;
+    // The variable context is resolved once per run (`spec/CONTEXT.md`); a
+    // missing state database contributes no active profiles (`spec/core.md §
+    // State database`).
+    let active = crate::state::load_active_profiles()?;
+    let context = data.context(&active).into_iter().collect::<HashMap<_, _>>();
+    let config_path = source.join("dotrift.toml");
+    let rendered = render_config(&config_path, &context)?;
+    let config = toml::from_str::<FileConfig>(&rendered)
+        .map_err(|error| miette!(error))
+        .wrap_err_with(|| format!("cannot parse `{}`", config_path.display()))?;
+    let target = target_override
+        .or_else(|| config.target_directory.map(PathBuf::from))
+        .or_else(dirs::home_dir)
+        .ok_or_else(|| miette!("`HOME` is unset or empty"))?;
+    if !target.is_absolute() {
+        return Err(miette!("target directory must be an absolute path"));
+    }
+    validate_overlap(source, &target)?;
+    let portals = portals::resolve_portals(source, &config.portal)?;
+    // Ignore patterns match target paths, after portal resolution and before
+    // collision validation (`spec/dotriftignore.md § Filtering stage`,
+    // ADR-0002); an ignored entry never causes a collision.
+    let ignore = ignore::read_ignore(source)?;
+    let portals = portals
+        .into_iter()
+        .filter(|entry| !ignore.matched(&entry.target, false).is_ignore())
+        .collect::<Vec<_>>();
+    targets::validate_targets(&portals)?;
+    let rules = rules::compile_rules(&config.rule)?;
+    let entries = portals
+        .into_iter()
+        .map(|entry| rules::apply_rules(entry, &rules, &target))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(DesiredDeployment {
+        target_directory: target,
+        entries,
+        variable_context: context,
+    })
+}
+
+fn render_config(path: &Path, context: &HashMap<String, Value>) -> Result<String> {
+    String::from_utf8(crate::template::render_template(path, context)?)
+        .map_err(|error| miette!(error))
+        .wrap_err("rendered configuration is not `UTF-8`")
+}
+
+fn validate_overlap(source: &Path, target: &Path) -> Result<()> {
+    let source = resolve_for_comparison(source)?;
+    let target = resolve_for_comparison(target)?;
+    if source == target || target.starts_with(&source) {
+        return Err(miette!("source and target directories overlap"));
+    }
+    Ok(())
+}
+
+fn resolve_for_comparison(path: &Path) -> Result<PathBuf> {
+    if path.exists() {
+        return fs::canonicalize(path).map_err(|error| miette!(error));
+    }
+    let mut missing = Vec::new();
+    let mut existing = path.to_path_buf();
+    while !existing.exists() {
+        missing.push(
+            existing
+                .file_name()
+                .ok_or_else(|| miette!("cannot resolve path `{}`", path.display()))?
+                .to_owned(),
+        );
+        existing.pop();
+    }
+    let mut resolved = fs::canonicalize(existing).map_err(|error| miette!(error))?;
+    for component in missing.iter().rev() {
+        resolved.push(component);
+    }
+    Ok(resolved)
+}
+
+#[cfg(any(test, feature = "testing"))]
+#[macro_export]
+macro_rules! deploy_entry {
+    ($source:expr, $target:expr, $deploy:ident) => {
+        $crate::config::DeploymentEntry {
+            source_path: std::path::PathBuf::from($source),
+            target_path: std::path::PathBuf::from($target),
+            deploy_type: $crate::config::DeployType::$deploy,
+            mode: None,
+        }
+    };
+    ($source:expr, $target:expr, $deploy:ident, $mode:expr) => {
+        $crate::config::DeploymentEntry {
+            source_path: std::path::PathBuf::from($source),
+            target_path: std::path::PathBuf::from($target),
+            deploy_type: $crate::config::DeployType::$deploy,
+            mode: Some($crate::config::DeployMode($mode)),
+        }
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+    use tempfile::tempdir;
+    use test_case::test_case;
+
+    use super::*;
+
+    #[test_case("000" => 0)]
+    #[test_case("100" => 64)]
+    #[test_case("017" => 15)]
+    #[test_case("770" => 504)]
+    #[test_case("777" => 511)]
+    fn parses_three_octal_digits_to_their_value(s: &str) -> u32 {
+        u32::from(DeployMode::try_from(s.to_string()).expect("valid octal mode string"))
+    }
+
+    #[test_case("" => matches Err(_) ; "empty_rejected")]
+    #[test_case("7" => matches Err(_) ; "single_digit_rejected")]
+    #[test_case("77" => matches Err(_) ; "two_digits_rejected")]
+    #[test_case("7777" => matches Err(_) ; "four_digits_rejected")]
+    #[test_case("a77" => matches Err(_) ; "non_octal_first_byte_rejected")]
+    #[test_case("7a7" => matches Err(_) ; "non_octal_middle_byte_rejected")]
+    #[test_case("77a" => matches Err(_) ; "non_octal_last_byte_rejected")]
+    #[test_case("779" => matches Err(_) ; "digit_nine_rejected")]
+    #[test_case("888" => matches Err(_) ; "digit_eight_rejected")]
+    fn string_not_of_three_octal_digits_is_rejected(s: &str) -> Result<DeployMode, miette::Report> {
+        DeployMode::try_from(s.to_string())
+    }
+
+    #[test_case(0 => 0 ; "zero")]
+    #[test_case(0o100 => 64 ; "middle_value")]
+    #[test_case(0o777 => 511 ; "max_allowed")]
+    fn u32_in_octal_range_converts_to_its_value(value: u32) -> u32 {
+        u32::from(DeployMode::try_from(value).expect("valid octal mode value"))
+    }
+
+    #[test_case(0o1000 => matches Err(_) ; "just_above_max_rejected")]
+    #[test_case(u32::MAX => matches Err(_) ; "max_u32_rejected")]
+    fn u32_out_of_octal_range_is_rejected(value: u32) -> Result<DeployMode, miette::Report> {
+        DeployMode::try_from(value)
+    }
+
+    proptest! {
+        #[test]
+        fn parses_exactly_when_string_is_three_octal_digits(s in "[0-9a-zA-Z]{0,6}") {
+            let is_three_octal = s.len() == 3 && s.bytes().all(|b| (b'0'..=b'7').contains(&b));
+            let expected = is_three_octal.then(|| u32::from_str_radix(&s, 8).unwrap());
+            let actual = DeployMode::try_from(s).ok().map(u32::from);
+            prop_assert_eq!(actual, expected);
+        }
+    }
+
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("a")).expect("cannot create temp dir");
+            fs::create_dir(t.join("b")).expect("cannot create temp dir");
+            (t.join("a"), t.join("b"))
+        } => true;
+        "disjoint_sibling_roots_do_not_overlap"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("target/source")).expect("cannot create temp dirs");
+            (t.join("target/source"), t.join("target"))
+        } => true;
+        "source_nested_inside_target_does_not_overlap"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("root")).expect("cannot create temp dir");
+            (t.join("root"), t.join("root"))
+        } => false;
+        "equal_roots_overlap"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("root/target")).expect("cannot create temp dirs");
+            (t.join("root"), t.join("root/target"))
+        } => false;
+        "target_inside_source_overlaps"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("root/x/y/z")).expect("cannot create temp dirs");
+            (t.join("root"), t.join("root/x/y/z"))
+        } => false;
+        "deeply_nested_target_inside_source_overlaps"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir(t.join("real")).expect("cannot create temp dir");
+            std::os::unix::fs::symlink(t.join("real"), t.join("link")).expect("cannot create symlink");
+            (t.join("real"), t.join("link"))
+        } => false;
+        "target_symlinked_onto_source_overlaps"
+    )]
+    #[test_case(
+        |t| {
+            fs::create_dir_all(t.join("real/nested")).expect("cannot create temp dirs");
+            std::os::unix::fs::symlink(t.join("real/nested"), t.join("link")).expect("cannot create symlink");
+            (t.join("real"), t.join("link"))
+        } => false;
+        "target_symlink_pointing_into_source_overlaps"
+    )]
+    fn roots_satisfy_overlap_rule(setup: impl Fn(&Path) -> (PathBuf, PathBuf)) -> bool {
+        let dir = tempdir().expect("cannot create temp dir");
+        let (source, target) = setup(dir.path());
+        validate_overlap(&source, &target).is_ok()
+    }
+}

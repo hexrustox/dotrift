@@ -30,8 +30,7 @@ pub fn run(source: Option<&Path>, command: ProfileCommand) -> Result<()> {
 
 fn list(source: &Path) -> Result<()> {
     let data = DataFile::read(source)?;
-    let active = StateDatabase::open_read_only()?
-        .map_or_else(|| Ok(Vec::new()), |db| db.active_profiles())?;
+    let active = crate::state::load_active_profiles()?;
     for name in data.profile.keys() {
         if active.iter().any(|(active_name, _)| active_name == name) {
             println_capture!(
@@ -72,8 +71,7 @@ fn deactivate(name: &str) -> Result<()> {
 
 fn show(source: &Path) -> Result<()> {
     let data = DataFile::read(source)?;
-    let active = StateDatabase::open_read_only()?
-        .map_or_else(|| Ok(Vec::new()), |db| db.active_profiles())?;
+    let active = crate::state::load_active_profiles()?;
     let context = data.context(&active);
     let max = context.keys().map(|s| s.len()).max().unwrap_or(0);
     for (key, value) in context {

@@ -306,6 +306,12 @@ impl StateDatabase {
     }
 }
 
+/// Active-profile selectors, or an empty list when no state database exists
+/// yet (`spec/core.md § State database`).
+pub fn load_active_profiles() -> Result<Vec<(String, i64)>> {
+    StateDatabase::open_read_only()?.map_or_else(|| Ok(Vec::new()), |db| db.active_profiles())
+}
+
 pub(crate) struct StateLock {
     file: File,
 }
