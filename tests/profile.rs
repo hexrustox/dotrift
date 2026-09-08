@@ -7,14 +7,14 @@ use test_case::test_case;
 
 use common::TestEnv;
 
-fn run_and_take(source: Option<&Path>, command: ProfileCommand) -> String {
+fn run_and_take(env: &TestEnv, source: Option<&Path>, command: ProfileCommand) -> String {
     dotrift::report::clear();
-    dotrift::commands::profile::run(source, command).unwrap();
+    dotrift::commands::profile::run(source, command, env.env()).unwrap();
     dotrift::report::take_output()
 }
 
-fn run_expects_error(source: Option<&Path>, command: ProfileCommand, needle: &str) {
-    let error = dotrift::commands::profile::run(source, command).unwrap_err();
+fn run_expects_error(env: &TestEnv, source: Option<&Path>, command: ProfileCommand, needle: &str) {
+    let error = dotrift::commands::profile::run(source, command, env.env()).unwrap_err();
     common::assert_error_chain(&error, needle);
 }
 
@@ -60,13 +60,14 @@ fn list_and_show_output(data: Option<&str>, active: &[&str], command: ProfileCom
     for name in active {
         env.database().activate_profile(name).unwrap();
     }
-    run_and_take(Some(&source), command)
+    run_and_take(&env, Some(&source), command)
 }
 
 #[test]
 fn list_with_nonexistent_source_directory_errors() {
     let env = TestEnv::new();
     run_expects_error(
+        &env,
         Some(&env.path("missing_source")),
         ProfileCommand::List,
         "does not exist",
@@ -80,6 +81,7 @@ fn activating_defined_profile_confirms_and_activates() {
     env.write_data_file("[profile.work]\n");
     assert_eq!(
         run_and_take(
+            &env,
             Some(&source),
             ProfileCommand::Activate {
                 name: "work".into()
@@ -98,6 +100,7 @@ fn activating_undefined_profile_errors_and_activates_none() {
     let source = env.source_dir();
     env.write_data_file("[profile.other]\n");
     run_expects_error(
+        &env,
         Some(&source),
         ProfileCommand::Activate {
             name: "work".into(),
@@ -116,7 +119,11 @@ fn reactivating_profile_moves_it_to_precedence_end() {
     database.activate_profile("a").unwrap();
     database.activate_profile("b").unwrap();
     assert_eq!(
-        run_and_take(Some(&source), ProfileCommand::Activate { name: "a".into() }),
+        run_and_take(
+            &env,
+            Some(&source),
+            ProfileCommand::Activate { name: "a".into() }
+        ),
         "profile `a` activated\n"
     );
     let names: Vec<String> = database
@@ -132,8 +139,8 @@ fn reactivating_profile_moves_it_to_precedence_end() {
 #[test_case(ProfileCommand::Activate { name: "work".into() }; "activate_errors_without_source_directory")]
 #[test_case(ProfileCommand::Show; "show_errors_without_source_directory")]
 fn profile_subcommands_without_source_directory(command: ProfileCommand) {
-    let _env = TestEnv::new();
-    run_expects_error(None, command, "source directory is required");
+    let env = TestEnv::new();
+    run_expects_error(&env, None, command, "source directory is required");
 }
 
 #[test]
@@ -142,6 +149,7 @@ fn deactivating_active_profile_confirms_and_clears() {
     env.database().activate_profile("work").unwrap();
     assert_eq!(
         run_and_take(
+            &env,
             None,
             ProfileCommand::Deactivate {
                 name: "work".into()
@@ -157,6 +165,7 @@ fn deactivating_inactive_profile_errors() {
     let env = TestEnv::new();
     let _database = env.database();
     run_expects_error(
+        &env,
         None,
         ProfileCommand::Deactivate {
             name: "work".into(),
@@ -170,6 +179,7 @@ fn deactivating_stale_profile_clears_it_without_definition() {
     let env = TestEnv::new();
     env.database().activate_profile("gone").unwrap();
     run_and_take(
+        &env,
         None,
         ProfileCommand::Deactivate {
             name: "gone".into(),
@@ -185,7 +195,7 @@ fn show_formats_all_base_variable_types() {
     env.write_data_file(
         "[variable]\neditor = \"vim\"\ntheme = \"dark\"\ncount = 42\nenabled = true\ntags = [\"a\", \"b\"]\nsettings = { lang = \"rust\", indent = 2 }\n",
     );
-    insta::assert_snapshot!(run_and_take(Some(&source), ProfileCommand::Show));
+    insta::assert_snapshot!(run_and_take(&env, Some(&source), ProfileCommand::Show));
 }
 
 #[test]
@@ -199,12 +209,12 @@ fn show_prioritizes_most_recently_activated_profile() {
     database.activate_profile("p1").unwrap();
     database.activate_profile("p2").unwrap();
     assert_eq!(
-        run_and_take(Some(&source), ProfileCommand::Show),
+        run_and_take(&env, Some(&source), ProfileCommand::Show),
         "v   second\n"
     );
     database.activate_profile("p1").unwrap();
     assert_eq!(
-        run_and_take(Some(&source), ProfileCommand::Show),
+        run_and_take(&env, Some(&source), ProfileCommand::Show),
         "v   first\n"
     );
 }
@@ -221,7 +231,7 @@ fn show_unions_variables_across_active_profiles() {
     database.activate_profile("b").unwrap();
     database.activate_profile("c").unwrap();
     assert_eq!(
-        run_and_take(Some(&source), ProfileCommand::Show),
+        run_and_take(&env, Some(&source), ProfileCommand::Show),
         "base     c\nfrom_a   A\nfrom_b   B\nfrom_c   C\n"
     );
 }
@@ -234,11 +244,12 @@ fn activate_then_deactivate_round_trips_output() {
     let database = env.database();
     database.activate_profile("work").unwrap();
     assert_eq!(
-        run_and_take(Some(&source), ProfileCommand::Show),
+        run_and_take(&env, Some(&source), ProfileCommand::Show),
         "v   over\n"
     );
     assert_eq!(
         run_and_take(
+            &env,
             None,
             ProfileCommand::Deactivate {
                 name: "work".into()
@@ -247,7 +258,7 @@ fn activate_then_deactivate_round_trips_output() {
         "profile `work` deactivated\n"
     );
     assert_eq!(
-        run_and_take(Some(&source), ProfileCommand::Show),
+        run_and_take(&env, Some(&source), ProfileCommand::Show),
         "v   base\n"
     );
 }

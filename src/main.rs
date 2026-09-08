@@ -4,16 +4,18 @@ use miette::{Error, miette};
 use dotrift::{
     COLOR_SUPPORT, ExitStatus,
     cli::{Cli, Command},
+    environment::Environment,
 };
 
 fn main() -> Result<(), Error> {
     *COLOR_SUPPORT.write().unwrap() = tui::color_support();
 
+    let env = Environment::resolve();
     let cli = Cli::parse();
-    let (source, target, command) = cli.resolve()?;
+    let (source, target, command) = cli.resolve(&env)?;
     let mut status = ExitStatus::Success;
     match command {
-        Command::Status => dotrift::commands::status::run()?,
+        Command::Status => dotrift::commands::status::run(&env)?,
         Command::Apply {
             clean_up,
             prune_empty_dirs,
@@ -34,10 +36,11 @@ fn main() -> Result<(), Error> {
                     quiet,
                     verbose,
                 },
+                &env,
             )?
         }
         Command::Profile { command } => {
-            dotrift::commands::profile::run(source.as_deref(), command)?
+            dotrift::commands::profile::run(source.as_deref(), command, &env)?
         }
     }
     std::process::exit(status as i32);

@@ -10,14 +10,11 @@ use common::{ApplyScenario, TestEnv, assert_error_chain, prompt_count};
 use dotrift::ExitStatus;
 use dotrift::commands::apply::{ApplyOptions, ObstructionChoice, test_hooks::set_prompt_choice};
 use dotrift::hash::hash_bytes;
-use dotrift::state::{Kind, StateDatabase};
+use dotrift::state::Kind;
 use test_case::test_case;
 
-fn record_of(path: &Path) -> Option<dotrift::state::StateRecord> {
-    StateDatabase::open()
-        .expect("cannot open state database")
-        .record(path)
-        .unwrap()
+fn record_of(env: &TestEnv, path: &Path) -> Option<dotrift::state::StateRecord> {
+    env.database().record(path).unwrap()
 }
 
 #[test_case(
@@ -25,12 +22,12 @@ fn record_of(path: &Path) -> Option<dotrift::state::StateRecord> {
         fs::write(source.join("file.txt"), b"hello").unwrap();
         "[portal]\n\"file.txt\" = \"target.txt\"\n"
     },
-    |source: &Path, target: &Path| {
+    |ApplyScenario { source, target, env, .. }: &ApplyScenario| {
         let link = target.join("target.txt");
         assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
         assert_eq!(fs::read_link(&link).unwrap(), source.join("file.txt"));
         assert_eq!(fs::read(&link).unwrap(), b"hello");
-        let record = record_of(&link).unwrap();
+        let record = record_of(env, &link).unwrap();
         assert_eq!(record.kind, Kind::Symlink);
         assert_eq!(record.source_path, source.join("file.txt"));
     }
@@ -42,12 +39,12 @@ fn record_of(path: &Path) -> Option<dotrift::state::StateRecord> {
         symlink("real.txt", source.join("link.txt")).unwrap();
         "[portal]\n\"link.txt\" = \"target.txt\"\n"
     },
-    |source: &Path, target: &Path| {
+    |ApplyScenario { source, target, env, .. }: &ApplyScenario| {
         let link = target.join("target.txt");
         assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
         assert_eq!(fs::read_link(&link).unwrap(), source.join("link.txt"));
         assert_eq!(fs::read(&link).unwrap(), b"hello");
-        let record = record_of(&link).unwrap();
+        let record = record_of(env, &link).unwrap();
         assert_eq!(record.kind, Kind::Symlink);
         assert_eq!(record.source_path, source.join("link.txt"));
     }
@@ -59,11 +56,11 @@ fn record_of(path: &Path) -> Option<dotrift::state::StateRecord> {
         symlink("real.txt", source.join("link.txt")).unwrap();
         "[portal]\n\"link.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         let file = target.join("target.txt");
         assert!(fs::symlink_metadata(&file).unwrap().is_file());
         assert_eq!(fs::read(&file).unwrap(), b"copy me");
-        let record = record_of(&file).unwrap();
+        let record = record_of(env, &file).unwrap();
         assert_eq!(record.kind, Kind::File);
         assert_eq!(record.content_hash, Some(hash_bytes(b"copy me")));
     }
@@ -76,7 +73,7 @@ fn record_of(path: &Path) -> Option<dotrift::state::StateRecord> {
         fs::write(source.join("dir/sub/b.txt"), b"B").unwrap();
         "[portal]\n\"dir\" = \"dst\"\n"
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("dst/a.txt")).unwrap(), b"A");
         assert_eq!(fs::read(target.join("dst/sub/b.txt")).unwrap(), b"B");
     }
@@ -90,7 +87,7 @@ fn record_of(path: &Path) -> Option<dotrift::state::StateRecord> {
         symlink("real", source.join("dir-link")).unwrap();
         "[portal]\n\"dir-link\" = \"dst\"\n"
     },
-    |source: &Path, target: &Path| {
+    |ApplyScenario { source, target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("dst/a.txt")).unwrap(), b"A");
         assert_eq!(fs::read(target.join("dst/sub/b.txt")).unwrap(), b"B");
         let link = target.join("dst/sub/b.txt");
@@ -98,7 +95,7 @@ fn record_of(path: &Path) -> Option<dotrift::state::StateRecord> {
             fs::read_link(&link).unwrap(),
             source.join("dir-link/sub/b.txt")
         );
-        let record = record_of(&link).unwrap();
+        let record = record_of(env, &link).unwrap();
         assert_eq!(record.kind, Kind::Symlink);
         assert_eq!(record.source_path, source.join("dir-link/sub/b.txt"));
     }
@@ -109,11 +106,11 @@ fn record_of(path: &Path) -> Option<dotrift::state::StateRecord> {
         fs::write(source.join("file.txt"), b"copy me").unwrap();
         "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         let file = target.join("target.txt");
         assert!(fs::symlink_metadata(&file).unwrap().is_file());
         assert_eq!(fs::read(&file).unwrap(), b"copy me");
-        let record = record_of(&file).unwrap();
+        let record = record_of(env, &file).unwrap();
         assert_eq!(record.kind, Kind::File);
         assert_eq!(record.content_hash, Some(hash_bytes(b"copy me")));
     }
@@ -125,7 +122,7 @@ fn record_of(path: &Path) -> Option<dotrift::state::StateRecord> {
         fs::write(source.join("greeting.txt"), "{{ message }}").unwrap();
         "[portal]\n\"greeting.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"template\" }\n"
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"hi");
     }
     ; "template_rule_renders_variables_into_target"
@@ -135,7 +132,7 @@ fn record_of(path: &Path) -> Option<dotrift::state::StateRecord> {
         fs::write(source.join("script.sh"), b"#!/bin/sh\n").unwrap();
         "[portal]\n\"script.sh\" = \"target.sh\"\n[rule]\n\"target.sh\" = { type = \"copy\", mode = \"600\" }\n"
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, .. }: &ApplyScenario| {
         let mode = fs::metadata(target.join("target.sh")).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
@@ -147,7 +144,7 @@ fn record_of(path: &Path) -> Option<dotrift::state::StateRecord> {
         fs::write(source.join("hello.txt"), b"payload").unwrap();
         "[portal]\n\"{{ name }}.txt\" = \"target.txt\"\n"
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, .. }: &ApplyScenario| {
         let link = target.join("target.txt");
         assert!(link.is_symlink());
         assert_eq!(fs::read(&link).unwrap(), b"payload");
@@ -159,20 +156,20 @@ fn record_of(path: &Path) -> Option<dotrift::state::StateRecord> {
         fs::create_dir_all(source.join("empty")).unwrap();
         "[portal]\n\"empty\" = \"dst\"\n"
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("dst")).is_err());
-        assert!(StateDatabase::open().unwrap().managed_paths().unwrap().is_empty());
+        assert!(env.database().managed_paths().unwrap().is_empty());
     }
     ; "empty_directory_portal_deploys_nothing_successfully"
 )]
 fn first_apply_behaviors(
     setup: impl Fn(&Path, &Path) -> &'static str,
-    assert: impl Fn(&Path, &Path),
+    assert: impl Fn(&ApplyScenario),
 ) {
     let scenario = ApplyScenario::new(setup);
     let status = scenario.try_run().expect("apply failed");
     assert_eq!(status, ExitStatus::Success);
-    assert(&scenario.source, &scenario.target);
+    assert(&scenario);
 }
 
 #[test_case(
@@ -211,6 +208,7 @@ fn fresh_env_behaviors(setup: impl Fn(&TestEnv), options: ApplyOptions, assert: 
         &env.source_dir(),
         Some(env.path("target")),
         options,
+        env.env(),
     )
     .unwrap();
 
@@ -227,11 +225,11 @@ fn fresh_env_behaviors(setup: impl Fn(&TestEnv), options: ApplyOptions, assert: 
         fs::write(source.join("file.txt"), b"new").unwrap();
         None
     },
-    |source: &Path, target: &Path| {
+    |ApplyScenario { source, target, env, .. }: &ApplyScenario| {
         let link = target.join("target.txt");
         assert_eq!(fs::read_link(&link).unwrap(), source.join("file.txt"));
         assert_eq!(fs::read(&link).unwrap(), b"new");
-        assert_eq!(record_of(&link).unwrap().source_path, source.join("file.txt"));
+        assert_eq!(record_of(env, &link).unwrap().source_path, source.join("file.txt"));
         assert_eq!(prompt_count(), 0);
     }
     ; "symlink_source_change_rewires_without_prompt"
@@ -245,11 +243,11 @@ fn fresh_env_behaviors(setup: impl Fn(&TestEnv), options: ApplyOptions, assert: 
         fs::write(source.join("file.txt"), b"new").unwrap();
         None
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         let file = target.join("target.txt");
         assert_eq!(fs::read(&file).unwrap(), b"new");
         assert_eq!(
-            record_of(&file).unwrap().content_hash,
+            record_of(env, &file).unwrap().content_hash,
             Some(hash_bytes(b"new"))
         );
     }
@@ -266,29 +264,10 @@ fn fresh_env_behaviors(setup: impl Fn(&TestEnv), options: ApplyOptions, assert: 
         fs::write(source.join("dotrift_data.toml"), "[variable]\nmessage = \"bye\"\n").unwrap();
         None
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"bye");
     }
     ; "data_variable_change_rerenders_template"
-)]
-#[test_case(
-    |source: &Path, _target: &Path| {
-        fs::write(
-            source.join("dotrift_data.toml"),
-            "[variable]\nv = \"base\"\n[profile.work]\nv = \"over\"\n",
-        )
-        .unwrap();
-        fs::write(source.join("out.txt"), "{{ v }}").unwrap();
-        "[portal]\n\"out.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"template\" }\n"
-    },
-    |_source: &Path, _target: &Path| {
-        StateDatabase::open().unwrap().activate_profile("work").unwrap();
-        None
-    },
-    |_source: &Path, target: &Path| {
-        assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"over");
-    }
-    ; "profile_activation_between_runs_rerenders_override"
 )]
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -298,11 +277,11 @@ fn fresh_env_behaviors(setup: impl Fn(&TestEnv), options: ApplyOptions, assert: 
     |_source: &Path, _target: &Path| {
         Some("[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n")
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         let file = target.join("target.txt");
         assert!(fs::symlink_metadata(&file).unwrap().is_file());
         assert_eq!(fs::read(&file).unwrap(), b"content");
-        let record = record_of(&file).unwrap();
+        let record = record_of(env, &file).unwrap();
         assert_eq!(record.kind, Kind::File);
         assert_eq!(record.content_hash, Some(hash_bytes(b"content")));
     }
@@ -316,10 +295,10 @@ fn fresh_env_behaviors(setup: impl Fn(&TestEnv), options: ApplyOptions, assert: 
     |_source: &Path, _target: &Path| {
         Some("[portal]\n\"file.txt\" = \"target.txt\"\n")
     },
-    |source: &Path, target: &Path| {
+    |ApplyScenario { source, target, env, .. }: &ApplyScenario| {
         let link = target.join("target.txt");
         assert_eq!(fs::read_link(&link).unwrap(), source.join("file.txt"));
-        let record = record_of(&link).unwrap();
+        let record = record_of(env, &link).unwrap();
         assert_eq!(record.kind, Kind::Symlink);
         assert_eq!(record.source_path, source.join("file.txt"));
     }
@@ -333,7 +312,7 @@ fn fresh_env_behaviors(setup: impl Fn(&TestEnv), options: ApplyOptions, assert: 
     |_source: &Path, _target: &Path| {
         Some("[portal]\n\"script.sh\" = \"target.sh\"\n[rule]\n\"target.sh\" = { type = \"copy\", mode = \"644\" }\n")
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, .. }: &ApplyScenario| {
         let mode = fs::metadata(target.join("target.sh")).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o644);
     }
@@ -348,24 +327,44 @@ fn fresh_env_behaviors(setup: impl Fn(&TestEnv), options: ApplyOptions, assert: 
         fs::rename(source.join("old.txt"), source.join("new.txt")).unwrap();
         Some("[portal]\n\"new.txt\" = \"target.txt\"\n")
     },
-    |source: &Path, target: &Path| {
+    |ApplyScenario { source, target, env, .. }: &ApplyScenario| {
         let link = target.join("target.txt");
         assert_eq!(fs::read_link(&link).unwrap(), source.join("new.txt"));
         assert_eq!(fs::read(&link).unwrap(), b"hello");
-        assert_eq!(record_of(&link).unwrap().source_path, source.join("new.txt"));
+        assert_eq!(record_of(env, &link).unwrap().source_path, source.join("new.txt"));
     }
     ; "renamed_source_redirects_record_to_new_path"
 )]
 fn reapply_behaviors(
     setup: impl Fn(&Path, &Path) -> &'static str,
     modify: impl Fn(&Path, &Path) -> Option<&'static str>,
-    assert: impl Fn(&Path, &Path),
+    assert: impl Fn(&ApplyScenario),
 ) {
     let scenario = ApplyScenario::new(setup);
     scenario.run();
     scenario.rewrite(modify);
     scenario.run();
-    assert(&scenario.source, &scenario.target);
+    assert(&scenario);
+}
+
+#[test]
+fn profile_activation_between_runs_rerenders_override() {
+    let scenario = ApplyScenario::new(|source: &Path, _target: &Path| {
+        fs::write(
+            source.join("dotrift_data.toml"),
+            "[variable]\nv = \"base\"\n[profile.work]\nv = \"over\"\n",
+        )
+        .unwrap();
+        fs::write(source.join("out.txt"), "{{ v }}").unwrap();
+        "[portal]\n\"out.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"template\" }\n"
+    });
+    scenario.run();
+    scenario.env.database().activate_profile("work").unwrap();
+    scenario.run();
+    assert_eq!(
+        fs::read(scenario.target.join("target.txt")).unwrap(),
+        b"over"
+    );
 }
 
 #[test_case(
@@ -376,9 +375,9 @@ fn reapply_behaviors(
         "[portal]\n\"file.txt\" = \"target.txt\"\n"
     },
     ExitStatus::Skipped,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"old");
-        assert_eq!(record_of(&target.join("target.txt")), None);
+        assert_eq!(record_of(env, &target.join("target.txt")), None);
         assert_eq!(prompt_count(), 1);
     }
     ; "skipping_unmanaged_target_keeps_file_without_record_and_reports_skipped"
@@ -391,9 +390,9 @@ fn reapply_behaviors(
         "[portal]\n\"file.txt\" = \"target.txt\"\n"
     },
     ExitStatus::Success,
-    |source: &Path, target: &Path| {
+    |ApplyScenario { source, target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"new");
-        let record = record_of(&target.join("target.txt")).unwrap();
+        let record = record_of(env, &target.join("target.txt")).unwrap();
         assert_eq!(record.kind, Kind::Symlink);
         assert_eq!(record.source_path, source.join("file.txt"));
     }
@@ -409,7 +408,7 @@ fn reapply_behaviors(
         "[portal]\n\"a.txt\" = \"a.txt\"\n\"b.txt\" = \"b.txt\"\n"
     },
     ExitStatus::Success,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"new-a");
         assert_eq!(fs::read(target.join("b.txt")).unwrap(), b"new-b");
         assert_eq!(prompt_count(), 1);
@@ -425,11 +424,11 @@ fn reapply_behaviors(
         "[portal]\n\"a.txt\" = \"a.txt\"\n\"z.txt\" = \"z.txt\"\n"
     },
     ExitStatus::Cancelled,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"A");
-        assert!(record_of(&target.join("a.txt")).is_some());
+        assert!(record_of(env, &target.join("a.txt")).is_some());
         assert_eq!(fs::read(target.join("z.txt")).unwrap(), b"old");
-        assert_eq!(record_of(&target.join("z.txt")), None);
+        assert_eq!(record_of(env, &target.join("z.txt")), None);
         assert_eq!(prompt_count(), 1);
     }
     ; "cancelled_prompt_stops_run_preserving_completed_entries"
@@ -438,7 +437,7 @@ fn unmanaged_target_obstruction_behaviors(
     choice: Option<ObstructionChoice>,
     setup: impl Fn(&Path, &Path) -> &'static str,
     expected_status: ExitStatus,
-    assert: impl Fn(&Path, &Path),
+    assert: impl Fn(&ApplyScenario),
 ) {
     let scenario = ApplyScenario::new(setup);
     if let Some(choice) = choice {
@@ -448,7 +447,7 @@ fn unmanaged_target_obstruction_behaviors(
     let status = scenario.try_run().expect("apply failed");
 
     assert_eq!(status, expected_status);
-    assert(&scenario.source, &scenario.target);
+    assert(&scenario);
 }
 
 #[test_case(
@@ -461,10 +460,10 @@ fn unmanaged_target_obstruction_behaviors(
         fs::write(target.join("target.txt"), b"tampered").unwrap();
     },
     ExitStatus::Skipped,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"tampered");
         assert_eq!(
-            record_of(&target.join("target.txt"))
+            record_of(env, &target.join("target.txt"))
                 .unwrap()
                 .content_hash,
             Some(hash_bytes(b"original"))
@@ -483,10 +482,10 @@ fn unmanaged_target_obstruction_behaviors(
         fs::write(target.join("target.txt"), b"tampered").unwrap();
     },
     ExitStatus::Success,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"original");
         assert_eq!(
-            record_of(&target.join("target.txt"))
+            record_of(env, &target.join("target.txt"))
                 .unwrap()
                 .content_hash,
             Some(hash_bytes(b"original"))
@@ -506,7 +505,7 @@ fn unmanaged_target_obstruction_behaviors(
         fs::write(target.join("target.txt"), b"tampered").unwrap();
     },
     ExitStatus::Success,
-    |source: &Path, target: &Path| {
+    |ApplyScenario { source, target, env, .. }: &ApplyScenario| {
         let link = target.join("target.txt");
         assert!(
             fs::symlink_metadata(&link)
@@ -515,7 +514,7 @@ fn unmanaged_target_obstruction_behaviors(
                 .is_symlink()
         );
         assert_eq!(fs::read_link(&link).unwrap(), source.join("file.txt"));
-        assert_eq!(record_of(&link).unwrap().kind, Kind::Symlink);
+        assert_eq!(record_of(env, &link).unwrap().kind, Kind::Symlink);
         assert_eq!(prompt_count(), 1);
     }
     ; "replacing_tampered_managed_symlink_restores_link_and_kind"
@@ -525,7 +524,7 @@ fn tampered_managed_target_behaviors(
     setup: impl Fn(&Path, &Path) -> &'static str,
     tamper: impl Fn(&Path, &Path),
     expected_status: ExitStatus,
-    assert: impl Fn(&Path, &Path),
+    assert: impl Fn(&ApplyScenario),
 ) {
     let scenario = ApplyScenario::new(setup);
     scenario.run();
@@ -535,7 +534,7 @@ fn tampered_managed_target_behaviors(
     let status = scenario.try_run().expect("apply failed");
 
     assert_eq!(status, expected_status);
-    assert(&scenario.source, &scenario.target);
+    assert(&scenario);
 }
 
 #[test_case(
@@ -547,10 +546,10 @@ fn tampered_managed_target_behaviors(
         "[portal]\n\"file.txt\" = \"a/b/file.txt\"\n"
     },
     ExitStatus::Skipped,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("a/b")).unwrap(), b"block");
         assert!(fs::symlink_metadata(target.join("a/b/file.txt")).is_err());
-        assert_eq!(record_of(&target.join("a/b/file.txt")), None);
+        assert_eq!(record_of(env, &target.join("a/b/file.txt")), None);
     }
     ; "skipping_parent_obstruction_leaves_blocker_intact"
 )]
@@ -563,10 +562,10 @@ fn tampered_managed_target_behaviors(
         "[portal]\n\"file.txt\" = \"a/b/file.txt\"\n"
     },
     ExitStatus::Success,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::metadata(target.join("a/b")).unwrap().is_dir());
         assert_eq!(fs::read(target.join("a/b/file.txt")).unwrap(), b"new");
-        assert!(record_of(&target.join("a/b/file.txt")).is_some());
+        assert!(record_of(env, &target.join("a/b/file.txt")).is_some());
     }
     ; "replacing_parent_obstruction_deploys_nested_entry"
 )]
@@ -579,10 +578,10 @@ fn tampered_managed_target_behaviors(
         "[portal]\n\"file.txt\" = \"link/file.txt\"\n"
     },
     ExitStatus::Success,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("real/file.txt")).unwrap(), b"behind");
         assert_eq!(fs::read(target.join("link/file.txt")).unwrap(), b"behind");
-        assert!(record_of(&target.join("link/file.txt")).is_some());
+        assert!(record_of(env, &target.join("link/file.txt")).is_some());
         assert_eq!(prompt_count(), 0);
     }
     ; "directory_symlink_parent_is_traversed_for_deployment"
@@ -596,12 +595,12 @@ fn tampered_managed_target_behaviors(
         "[portal]\n\"file.txt\" = \"broken/file.txt\"\n"
     },
     ExitStatus::Success,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         let outside = target.parent().unwrap().join("outside.txt");
         assert_eq!(fs::read(outside).unwrap(), b"safe");
         assert!(fs::metadata(target.join("broken")).unwrap().is_dir());
         assert_eq!(fs::read(target.join("broken/file.txt")).unwrap(), b"new");
-        assert!(record_of(&target.join("broken/file.txt")).is_some());
+        assert!(record_of(env, &target.join("broken/file.txt")).is_some());
     }
     ; "dangling_parent_symlink_is_replaced_as_link_only"
 )]
@@ -609,7 +608,7 @@ fn obstructed_parent_path_behaviors(
     choice: Option<ObstructionChoice>,
     setup: impl Fn(&Path, &Path) -> &'static str,
     expected_status: ExitStatus,
-    assert: impl Fn(&Path, &Path),
+    assert: impl Fn(&ApplyScenario),
 ) {
     let scenario = ApplyScenario::new(setup);
     if let Some(choice) = choice {
@@ -619,7 +618,7 @@ fn obstructed_parent_path_behaviors(
     let status = scenario.try_run().expect("apply failed");
 
     assert_eq!(status, expected_status);
-    assert(&scenario.source, &scenario.target);
+    assert(&scenario);
 }
 
 #[test_case(
@@ -629,9 +628,9 @@ fn obstructed_parent_path_behaviors(
     },
     |_source: &Path, _target: &Path| Some("[portal]\n"),
     false,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("a.txt")).is_err());
-        assert_eq!(record_of(&target.join("a.txt")), None);
+        assert_eq!(record_of(env, &target.join("a.txt")), None);
     }
     ; "clean_up_removes_stale_symlink"
 )]
@@ -642,9 +641,9 @@ fn obstructed_parent_path_behaviors(
     },
     |_source: &Path, _target: &Path| Some("[portal]\n"),
     false,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("a.txt")).is_err());
-        assert_eq!(record_of(&target.join("a.txt")), None);
+        assert_eq!(record_of(env, &target.join("a.txt")), None);
     }
     ; "clean_up_removes_stale_copy"
 )]
@@ -656,9 +655,9 @@ fn obstructed_parent_path_behaviors(
     },
     |_source: &Path, _target: &Path| Some("[portal]\n"),
     false,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("a.txt")).is_err());
-        assert_eq!(record_of(&target.join("a.txt")), None);
+        assert_eq!(record_of(env, &target.join("a.txt")), None);
     }
     ; "clean_up_removes_stale_template"
 )]
@@ -671,11 +670,11 @@ fn obstructed_parent_path_behaviors(
     },
     |_source: &Path, _target: &Path| Some("[portal]\n"),
     false,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("dst/a.txt")).is_err());
         assert!(fs::symlink_metadata(target.join("dst/sub/b.txt")).is_err());
-        assert_eq!(record_of(&target.join("dst/a.txt")), None);
-        assert_eq!(record_of(&target.join("dst/sub/b.txt")), None);
+        assert_eq!(record_of(env, &target.join("dst/a.txt")), None);
+        assert_eq!(record_of(env, &target.join("dst/sub/b.txt")), None);
     }
     ; "clean_up_removes_every_file_under_removed_directory_portal"
 )]
@@ -687,10 +686,10 @@ fn obstructed_parent_path_behaviors(
     },
     |_source: &Path, _target: &Path| Some("[portal]\n\"keep.txt\" = \"keep.txt\"\n"),
     false,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("a.txt")).is_err());
         assert_eq!(fs::read(target.join("keep.txt")).unwrap(), b"K");
-        assert!(record_of(&target.join("keep.txt")).is_some());
+        assert!(record_of(env, &target.join("keep.txt")).is_some());
     }
     ; "clean_up_keeps_desired_target_and_removes_stale"
 )]
@@ -701,9 +700,9 @@ fn obstructed_parent_path_behaviors(
     },
     |_source: &Path, _target: &Path| None,
     false,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"A");
-        assert!(record_of(&target.join("a.txt")).is_some());
+        assert!(record_of(env, &target.join("a.txt")).is_some());
     }
     ; "clean_up_is_no_op_when_nothing_is_stale"
 )]
@@ -717,9 +716,9 @@ fn obstructed_parent_path_behaviors(
         Some("[portal]\n")
     },
     false,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("file.txt")).unwrap(), b"tampered");
-        assert_eq!(record_of(&target.join("file.txt")), None);
+        assert_eq!(record_of(env, &target.join("file.txt")), None);
     }
     ; "clean_up_relinquishes_tampered_stale_path"
 )]
@@ -733,9 +732,9 @@ fn obstructed_parent_path_behaviors(
         Some("[portal]\n")
     },
     false,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("file.txt")).is_err());
-        assert_eq!(record_of(&target.join("file.txt")), None);
+        assert_eq!(record_of(env, &target.join("file.txt")), None);
     }
     ; "clean_up_relinquishes_missing_target"
 )]
@@ -751,10 +750,10 @@ fn obstructed_parent_path_behaviors(
         Some("[portal]\n")
     },
     false,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("dst")).unwrap().is_file());
         assert_eq!(fs::read(target.join("dst")).unwrap(), b"replacement");
-        assert_eq!(record_of(&target.join("dst/a.txt")), None);
+        assert_eq!(record_of(env, &target.join("dst/a.txt")), None);
     }
     ; "deployed_dir_replaced_by_file_relinquishes_child_records_untouched"
 )]
@@ -769,9 +768,9 @@ fn obstructed_parent_path_behaviors(
         Some("[portal]\n")
     },
     false,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::metadata(target.join("target.txt")).unwrap().is_dir());
-        assert_eq!(record_of(&target.join("target.txt")), None);
+        assert_eq!(record_of(env, &target.join("target.txt")), None);
     }
     ; "deployed_file_replaced_by_directory_is_relinquished_not_deleted"
 )]
@@ -782,10 +781,10 @@ fn obstructed_parent_path_behaviors(
     },
     |_source: &Path, _target: &Path| Some("[portal]\n"),
     true,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("a")).is_err());
         assert!(fs::symlink_metadata(target.join("a/b")).is_err());
-        assert_eq!(record_of(&target.join("a/b/file.txt")), None);
+        assert_eq!(record_of(env, &target.join("a/b/file.txt")), None);
     }
     ; "prune_empty_dirs_removes_emptied_parent_chain_up_to_root"
 )]
@@ -796,7 +795,7 @@ fn obstructed_parent_path_behaviors(
     },
     |_source: &Path, _target: &Path| Some("[portal]\n"),
     false,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, .. }: &ApplyScenario| {
         assert!(fs::metadata(target.join("a/b")).unwrap().is_dir());
         assert!(fs::metadata(target.join("a")).unwrap().is_dir());
         assert!(fs::symlink_metadata(target.join("a/b/file.txt")).is_err());
@@ -811,11 +810,11 @@ fn obstructed_parent_path_behaviors(
     },
     |_source: &Path, _target: &Path| Some("[portal]\n\"keep.txt\" = \"a/keep.txt\"\n"),
     true,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("a/b")).is_err());
         assert!(fs::metadata(target.join("a")).unwrap().is_dir());
         assert_eq!(fs::read(target.join("a/keep.txt")).unwrap(), b"K");
-        assert!(record_of(&target.join("a/keep.txt")).is_some());
+        assert!(record_of(env, &target.join("a/keep.txt")).is_some());
     }
     ; "prune_stops_at_parent_holding_desired_target"
 )]
@@ -829,9 +828,9 @@ fn obstructed_parent_path_behaviors(
         Some("[portal]\n")
     },
     true,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("a/b/stale.txt")).is_err());
-        assert_eq!(record_of(&target.join("a/b/stale.txt")), None);
+        assert_eq!(record_of(env, &target.join("a/b/stale.txt")), None);
         assert!(fs::metadata(target.join("a/b/keep")).unwrap().is_dir());
         assert!(fs::metadata(target.join("a/b")).unwrap().is_dir());
         assert!(fs::metadata(target.join("a")).unwrap().is_dir());
@@ -852,9 +851,9 @@ fn obstructed_parent_path_behaviors(
         Some("[portal]\n")
     },
     true,
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("real/stale.txt")).is_err());
-        assert_eq!(record_of(&target.join("sub/stale.txt")), None);
+        assert_eq!(record_of(env, &target.join("sub/stale.txt")), None);
         assert!(
             fs::symlink_metadata(target.join("sub"))
                 .unwrap()
@@ -879,8 +878,8 @@ fn obstructed_parent_path_behaviors(
         Some("[portal]\n")
     },
     false,
-    |_source: &Path, target: &Path| {
-        assert_eq!(record_of(&target.join("sub/file.txt")), None);
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
+        assert_eq!(record_of(env, &target.join("sub/file.txt")), None);
         assert!(
             fs::symlink_metadata(target.join("sub"))
                 .unwrap()
@@ -895,7 +894,7 @@ fn clean_up_behaviors(
     setup: impl Fn(&Path, &Path) -> &'static str,
     modify: impl Fn(&Path, &Path) -> Option<&'static str>,
     prune: bool,
-    assert: impl Fn(&Path, &Path),
+    assert: impl Fn(&ApplyScenario),
 ) {
     let scenario = ApplyScenario::new(setup);
     scenario.run();
@@ -905,7 +904,7 @@ fn clean_up_behaviors(
         prune_empty_dirs: prune,
         ..Default::default()
     });
-    assert(&scenario.source, &scenario.target);
+    assert(&scenario);
 }
 
 #[test]
@@ -930,7 +929,7 @@ fn skipped_entry_blocks_clean_up_for_that_run() {
 
     assert_eq!(status, ExitStatus::Skipped);
     assert!(scenario.target.join("b.txt").is_symlink());
-    assert!(record_of(&scenario.target.join("b.txt")).is_some());
+    assert!(record_of(&scenario.env, &scenario.target.join("b.txt")).is_some());
 
     set_prompt_choice(ObstructionChoice::Replace);
     let status = scenario
@@ -943,7 +942,10 @@ fn skipped_entry_blocks_clean_up_for_that_run() {
     assert_eq!(status, ExitStatus::Success);
     assert_eq!(fs::read(scenario.target.join("a.txt")).unwrap(), b"A");
     assert!(fs::symlink_metadata(scenario.target.join("b.txt")).is_err());
-    assert_eq!(record_of(&scenario.target.join("b.txt")), None);
+    assert_eq!(
+        record_of(&scenario.env, &scenario.target.join("b.txt")),
+        None
+    );
 }
 
 #[test]
@@ -955,8 +957,9 @@ fn records_outside_current_target_root_are_never_candidates() {
     let foreign_dir = scenario.env.path("other");
     fs::create_dir_all(&foreign_dir).unwrap();
     let foreign = foreign_dir.join("stale.txt");
-    StateDatabase::open()
-        .unwrap()
+    scenario
+        .env
+        .database()
         .put(&dotrift::record!(
             s,
             foreign.clone(),
@@ -969,7 +972,7 @@ fn records_outside_current_target_root_are_never_candidates() {
         ..Default::default()
     });
 
-    assert!(record_of(&foreign).is_some());
+    assert!(record_of(&scenario.env, &foreign).is_some());
 }
 
 #[test_case(
@@ -983,9 +986,9 @@ fn records_outside_current_target_root_are_never_candidates() {
         dry_run: true,
         ..Default::default()
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"unmanaged");
-        assert_eq!(record_of(&target.join("target.txt")), None);
+        assert_eq!(record_of(env, &target.join("target.txt")), None);
         assert_eq!(prompt_count(), 0);
     }
     ; "dry_run_leaves_obstruction_unprompted_and_untouched"
@@ -1003,10 +1006,10 @@ fn records_outside_current_target_root_are_never_candidates() {
         dry_run: true,
         ..Default::default()
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"tampered");
         assert_eq!(
-            record_of(&target.join("target.txt"))
+            record_of(env, &target.join("target.txt"))
                 .unwrap()
                 .content_hash,
             Some(hash_bytes(b"original"))
@@ -1030,9 +1033,9 @@ fn records_outside_current_target_root_are_never_candidates() {
         clean_up: true,
         ..Default::default()
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(target.join("b.txt").is_symlink());
-        assert!(record_of(&target.join("b.txt")).is_some());
+        assert!(record_of(env, &target.join("b.txt")).is_some());
     }
     ; "dry_run_with_clean_up_keeps_stale_target_and_record"
 )]
@@ -1048,10 +1051,10 @@ fn records_outside_current_target_root_are_never_candidates() {
         prune_empty_dirs: true,
         ..Default::default()
     },
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::metadata(target.join("a/b")).unwrap().is_dir());
         assert!(target.join("a/b/stale.txt").is_symlink());
-        assert!(record_of(&target.join("a/b/stale.txt")).is_some());
+        assert!(record_of(env, &target.join("a/b/stale.txt")).is_some());
     }
     ; "dry_run_with_clean_up_and_prune_keeps_stale_directories"
 )]
@@ -1059,7 +1062,7 @@ fn dry_run_preservation_behaviors(
     setup: impl Fn(&Path, &Path) -> &'static str,
     prepare: impl Fn(&ApplyScenario),
     options: ApplyOptions,
-    assert: impl Fn(&Path, &Path),
+    assert: impl Fn(&ApplyScenario),
 ) {
     let scenario = ApplyScenario::new(setup);
     prepare(&scenario);
@@ -1069,7 +1072,7 @@ fn dry_run_preservation_behaviors(
         .expect("apply failed");
 
     assert_eq!(status, ExitStatus::Success);
-    assert(&scenario.source, &scenario.target);
+    assert(&scenario);
 }
 
 #[test_case(
@@ -1081,11 +1084,10 @@ fn dry_run_preservation_behaviors(
         scenario.env.write_data_file("[variable]\n\"\" = \"x\"\n");
     },
     "empty key in `[variable]`",
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("good-target.txt")).is_err());
         assert!(
-            StateDatabase::open()
-                .unwrap()
+            env.database()
                 .managed_paths()
                 .unwrap()
                 .is_empty()
@@ -1100,11 +1102,10 @@ fn dry_run_preservation_behaviors(
     },
     |_scenario: &ApplyScenario| {},
     "literal portal source",
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target.join("good-target.txt")).is_err());
         assert!(
-            StateDatabase::open()
-                .unwrap()
+            env.database()
                 .managed_paths()
                 .unwrap()
                 .is_empty()
@@ -1120,11 +1121,11 @@ fn dry_run_preservation_behaviors(
     },
     |_scenario: &ApplyScenario| {},
     "undefined variable",
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"G");
-        assert!(record_of(&target.join("a.txt")).is_some());
+        assert!(record_of(env, &target.join("a.txt")).is_some());
         assert!(fs::symlink_metadata(target.join("b.txt")).is_err());
-        assert_eq!(record_of(&target.join("b.txt")), None);
+        assert_eq!(record_of(env, &target.join("b.txt")), None);
     }
     ; "template_render_failure_mid_run_preserves_completed_entries"
 )]
@@ -1138,7 +1139,7 @@ fn dry_run_preservation_behaviors(
         fs::remove_file(scenario.source.join("file.txt")).unwrap();
     },
     "literal portal source",
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, .. }: &ApplyScenario| {
         assert!(target.join("target.txt").is_symlink());
     }
     ; "deleting_source_between_runs_fails_preflight"
@@ -1153,10 +1154,10 @@ fn dry_run_preservation_behaviors(
         symlink("does-not-exist", &scenario.target).unwrap();
     },
     "is not a directory",
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target).unwrap().file_type().is_symlink());
         assert!(fs::symlink_metadata(target.join("target.txt")).is_err());
-        assert!(StateDatabase::open().unwrap().managed_paths().unwrap().is_empty());
+        assert!(env.database().managed_paths().unwrap().is_empty());
     }
     ; "dangling_symlink_target_root_is_rejected_before_deployment"
 )]
@@ -1169,9 +1170,9 @@ fn dry_run_preservation_behaviors(
         symlink("does-not-exist", &scenario.target).unwrap();
     },
     "is not a directory",
-    |_source: &Path, target: &Path| {
+    |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert!(fs::symlink_metadata(target).unwrap().file_type().is_symlink());
-        assert!(StateDatabase::open().unwrap().managed_paths().unwrap().is_empty());
+        assert!(env.database().managed_paths().unwrap().is_empty());
     }
     ; "dangling_symlink_target_root_with_empty_deployment_is_rejected"
 )]
@@ -1179,7 +1180,7 @@ fn failing_apply_behaviors(
     setup: impl Fn(&Path, &Path) -> &'static str,
     prepare: impl Fn(&ApplyScenario),
     needle: &'static str,
-    assert: impl Fn(&Path, &Path),
+    assert: impl Fn(&ApplyScenario),
 ) {
     let scenario = ApplyScenario::new(setup);
     prepare(&scenario);
@@ -1187,5 +1188,5 @@ fn failing_apply_behaviors(
     let error = scenario.try_run().unwrap_err();
 
     assert_error_chain(&error, needle);
-    assert(&scenario.source, &scenario.target);
+    assert(&scenario);
 }

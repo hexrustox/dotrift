@@ -1,14 +1,15 @@
 use miette::Result;
 
 use crate::{
+    environment::Environment,
     managed, prettify_path,
     report::{Outcome, Reporter},
     state::StateDatabase,
 };
 
-pub fn run() -> Result<()> {
+pub fn run(env: &Environment) -> Result<()> {
     let report = Reporter::always();
-    let Some(database) = StateDatabase::open_read_only()? else {
+    let Some(database) = StateDatabase::open_read_only(env)? else {
         return Ok(());
     };
     let mut records = database.managed_paths()?;

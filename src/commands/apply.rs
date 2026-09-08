@@ -16,6 +16,7 @@ use tui::prompt::{PromptError, PromptOption};
 use crate::{
     ExitStatus,
     config::{self, DeployType},
+    environment::Environment,
     global_config::{GlobalConfig, PagerCommand},
     hash, managed, prettify_path,
     reconcile::{Decision, decide},
@@ -35,19 +36,24 @@ pub struct ApplyOptions {
     pub verbose: bool,
 }
 
-pub fn run(source: &Path, target_override: Option<PathBuf>) -> Result<ExitStatus> {
-    run_with_options(source, target_override, ApplyOptions::default())
+pub fn run(
+    source: &Path,
+    target_override: Option<PathBuf>,
+    env: &Environment,
+) -> Result<ExitStatus> {
+    run_with_options(source, target_override, ApplyOptions::default(), env)
 }
 
 pub fn run_with_options(
     source: &Path,
     target_override: Option<PathBuf>,
     options: ApplyOptions,
+    env: &Environment,
 ) -> Result<ExitStatus> {
-    let _lock = StateLock::acquire()?;
-    let global_config = GlobalConfig::load()?;
-    let mut registry = RenderRegistry::acquire(options.dry_run);
-    let deployment = config::read(source, target_override)?;
+    let _lock = StateLock::acquire(env)?;
+    let global_config = GlobalConfig::load(env)?;
+    let mut registry = RenderRegistry::acquire(env, options.dry_run);
+    let deployment = config::read(source, target_override, env)?;
     let target = &deployment.target_directory;
 
     if fs::symlink_metadata(target).is_ok()
@@ -63,7 +69,7 @@ pub fn run_with_options(
             .map_err(|error| miette!(error).wrap_err("cannot create target directory"))?;
     }
 
-    let database = StateDatabase::open()?;
+    let database = StateDatabase::open(env)?;
     let mut entries = deployment.entries.clone();
     entries.sort_by(|left, right| left.target_path.cmp(&right.target_path));
     let mut replace_all = false;

@@ -8,7 +8,7 @@ use std::{
 use miette::{Result, WrapErr, miette};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
-use crate::paths;
+use crate::environment::Environment;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -78,15 +78,15 @@ pub struct StateDatabase {
 }
 
 impl StateDatabase {
-    pub fn open() -> Result<Self> {
-        Self::open_at(&paths::state_dir()?)
+    pub fn open(env: &Environment) -> Result<Self> {
+        Self::open_at(&env.state_dir()?)
     }
 
     pub(crate) fn open_at(root: &Path) -> Result<Self> {
         fs::create_dir_all(root)
             .map_err(|error| miette!(error))
             .wrap_err_with(|| format!("cannot create state directory `{}`", root.display()))?;
-        let path = paths::state_database_path(root);
+        let path = root.join("state.sqlite");
         let connection = Connection::open(&path)
             .map_err(|error| miette!(error))
             .wrap_err_with(|| format!("cannot open state database `{}`", path.display()))?;
@@ -110,12 +110,12 @@ impl StateDatabase {
         Ok(Self { connection, path })
     }
 
-    pub fn open_read_only() -> Result<Option<Self>> {
-        Self::open_read_only_at(&paths::state_dir()?)
+    pub fn open_read_only(env: &Environment) -> Result<Option<Self>> {
+        Self::open_read_only_at(&env.state_dir()?)
     }
 
     fn open_read_only_at(root: &Path) -> Result<Option<Self>> {
-        let path = paths::state_database_path(root);
+        let path = root.join("state.sqlite");
         if !path.exists() {
             return Ok(None);
         }
@@ -283,8 +283,8 @@ impl StateDatabase {
 
 /// Active-profile selectors, or an empty list when no state database exists
 /// yet (`spec/core.md § State database`).
-pub fn load_active_profiles() -> Result<Vec<(String, i64)>> {
-    StateDatabase::open_read_only()?.map_or_else(|| Ok(Vec::new()), |db| db.active_profiles())
+pub fn load_active_profiles(env: &Environment) -> Result<Vec<(String, i64)>> {
+    StateDatabase::open_read_only(env)?.map_or_else(|| Ok(Vec::new()), |db| db.active_profiles())
 }
 
 pub(crate) struct StateLock {
@@ -292,15 +292,15 @@ pub(crate) struct StateLock {
 }
 
 impl StateLock {
-    pub(crate) fn acquire() -> Result<Self> {
-        Self::acquire_at(&paths::state_dir()?)
+    pub(crate) fn acquire(env: &Environment) -> Result<Self> {
+        Self::acquire_at(&env.state_dir()?)
     }
 
     fn acquire_at(root: &Path) -> Result<Self> {
         fs::create_dir_all(root)
             .map_err(|error| miette!(error))
             .wrap_err_with(|| format!("cannot create state directory `{}`", root.display()))?;
-        let lock_path = paths::state_lock_path(root);
+        let lock_path = root.join("state.lock");
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)

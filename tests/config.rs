@@ -36,7 +36,7 @@ fn read_assembles_desired_deployment_from_config_and_data() {
     );
 
     let mut deployment =
-        config::read(&source, Some(target.clone())).expect("cannot read configuration");
+        config::read(&source, Some(target.clone()), env.env()).expect("cannot read configuration");
 
     let mut entries = vec![
         deploy_entry!(
@@ -82,7 +82,7 @@ fn effective_symlink_drops_mode_from_earlier_rule() {
 
     report::clear();
     let deployment =
-        config::read(&source, Some(target.clone())).expect("cannot read configuration");
+        config::read(&source, Some(target.clone()), env.env()).expect("cannot read configuration");
 
     assert_eq!(
         deployment.entries,
@@ -109,7 +109,7 @@ fn active_profile_overrides_base_variable_in_rendered_config_and_context() {
     env.write_config("[portal]\n\"vimrc\" = \".config/{{ host }}/vimrc\"\n");
 
     let deployment =
-        config::read(&source, Some(target.clone())).expect("cannot read configuration");
+        config::read(&source, Some(target.clone()), env.env()).expect("cannot read configuration");
 
     assert_eq!(
         deployment,
@@ -133,8 +133,8 @@ fn active_profile_without_definition_is_ignored() {
     env.database().activate_profile("gone").unwrap();
     env.write_config("");
 
-    let deployment =
-        config::read(&source, Some(env.target_dir())).expect("cannot read configuration");
+    let deployment = config::read(&source, Some(env.target_dir()), env.env())
+        .expect("cannot read configuration");
 
     assert_eq!(
         deployment.variable_context,
@@ -148,8 +148,8 @@ fn missing_template_variable_fails_before_parsing() {
     let source = env.source_dir();
     env.write_config("[portal]\n\"vimrc\" = \"{{ absent }}/vimrc\"\n");
 
-    let error =
-        config::read(&source, Some(env.target_dir())).expect_err("undefined variable must fail");
+    let error = config::read(&source, Some(env.target_dir()), env.env())
+        .expect_err("undefined variable must fail");
 
     assert_error_chain(&error, "absent");
     assert!(
@@ -290,7 +290,7 @@ fn read_fails_with_expected_error(setup: impl FnOnce(&TestEnv), expected: &[&str
     let env = TestEnv::new();
     setup(&env);
 
-    let error = config::read(&env.source_dir(), Some(env.target_dir()))
+    let error = config::read(&env.source_dir(), Some(env.target_dir()), env.env())
         .expect_err("configuration must fail");
 
     for fragment in expected {
@@ -304,8 +304,8 @@ fn relative_target_directory_is_rejected() {
     let source = env.source_dir();
     env.write_config("target-directory = \"relative/path\"\n");
 
-    let error =
-        config::read(&source, None).expect_err("relative target-directory must be rejected");
+    let error = config::read(&source, None, env.env())
+        .expect_err("relative target-directory must be rejected");
 
     assert_error_chain(&error, "must be an absolute path");
 }
@@ -320,8 +320,12 @@ fn configured_target_directory_resolves(use_override: bool) {
         configured.display()
     ));
 
-    let deployment = config::read(&env.source_dir(), use_override.then(|| env.target_dir()))
-        .expect("cannot read configuration");
+    let deployment = config::read(
+        &env.source_dir(),
+        use_override.then(|| env.target_dir()),
+        env.env(),
+    )
+    .expect("cannot read configuration");
 
     assert_eq!(
         deployment.target_directory,
@@ -340,7 +344,7 @@ fn home_fallback_when_no_override_and_no_configured_target() {
     let home = env.path("home");
     let _guard = EnvVarGuard::set([("HOME", Some(home.to_str().unwrap()))]);
     env.write_config("");
-    let deployment = config::read(&source, None).expect("cannot read configuration");
+    let deployment = config::read(&source, None, env.env()).expect("cannot read configuration");
     assert_eq!(deployment.target_directory, home);
 }
 
@@ -437,8 +441,8 @@ fn portal_mapping_yields_expected_entries(setup: impl FnOnce(&TestEnv) -> Vec<De
     let env = TestEnv::new();
     let expected = setup(&env);
 
-    let deployment =
-        config::read(&env.source_dir(), Some(env.target_dir())).expect("cannot read configuration");
+    let deployment = config::read(&env.source_dir(), Some(env.target_dir()), env.env())
+        .expect("cannot read configuration");
 
     assert_eq!(deployment.entries, expected);
 }
@@ -453,8 +457,8 @@ fn profile_overlay_replaces_whole_value_without_recursive_merge() {
     env.database().activate_profile("work").unwrap();
     env.write_config("");
 
-    let deployment =
-        config::read(&source, Some(env.target_dir())).expect("cannot read configuration");
+    let deployment = config::read(&source, Some(env.target_dir()), env.env())
+        .expect("cannot read configuration");
 
     assert_eq!(
         deployment.variable_context,
@@ -485,8 +489,8 @@ fn source_that_is_not_a_directory_fails_with_does_not_exist(
 ) {
     let env = TestEnv::new();
     let source = setup(&env);
-    let error =
-        config::read(&source, Some(env.target_dir())).expect_err("non-directory source must fail");
+    let error = config::read(&source, Some(env.target_dir()), env.env())
+        .expect_err("non-directory source must fail");
     assert_error_chain(&error, expected);
 }
 
@@ -496,7 +500,7 @@ fn target_inside_source_reports_overlap() {
     let source = env.source_dir();
     env.write_config("");
 
-    let error = config::read(&source, Some(source.join("inside")))
+    let error = config::read(&source, Some(source.join("inside")), env.env())
         .expect_err("target inside source must fail");
 
     assert_error_chain(&error, "source and target directories overlap");

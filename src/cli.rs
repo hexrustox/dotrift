@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use miette::Result;
 
-use crate::ensure_absolute;
+use crate::{ensure_absolute, environment::Environment};
 
 #[derive(Debug, Parser)]
 #[command(name = "dotrift")]
@@ -47,7 +47,7 @@ pub enum ProfileCommand {
 }
 
 impl Cli {
-    pub fn resolve(self) -> Result<(Option<PathBuf>, Option<PathBuf>, Command)> {
+    pub fn resolve(self, env: &Environment) -> Result<(Option<PathBuf>, Option<PathBuf>, Command)> {
         let Cli {
             command,
             source,
@@ -64,7 +64,7 @@ impl Cli {
         } else {
             Some(match source {
                 Some(path) => ensure_absolute(&path)?,
-                None => ensure_absolute(&crate::paths::default_source_dir()?)?,
+                None => ensure_absolute(&env.default_source_dir()?)?,
             })
         };
         let target = target.map(|path| ensure_absolute(&path)).transpose()?;

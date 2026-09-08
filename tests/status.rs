@@ -8,23 +8,23 @@ use dotrift::state::{Kind, StateRecord};
 
 use common::{TestEnv, pin_color_support, snapshot_settings};
 
-fn run_status_and_take() -> String {
+fn run_status_and_take(env: &TestEnv) -> String {
     dotrift::report::clear();
-    dotrift::commands::status::run().expect("status run failed");
+    dotrift::commands::status::run(env.env()).expect("status run failed");
     dotrift::report::take_output()
 }
 
 #[test]
 fn status_reports_nothing_without_database() {
-    let _env = TestEnv::new();
-    assert_eq!(run_status_and_take(), "");
+    let env = TestEnv::new();
+    assert_eq!(run_status_and_take(&env), "");
 }
 
 #[test]
 fn status_reports_nothing_for_empty_database() {
     let env = TestEnv::new();
     let _database = env.database();
-    assert_eq!(run_status_and_take(), "");
+    assert_eq!(run_status_and_take(&env), "");
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn status_prints_sorted_lines_with_verdicts() {
         database.put(record).unwrap();
     }
 
-    let captured = run_status_and_take();
+    let captured = run_status_and_take(&env);
     snapshot_settings(&env).bind(|| {
         insta::assert_snapshot!(captured);
     });
@@ -136,7 +136,7 @@ fn status_layout_is_unchanged_with_color_forced() {
     // below would pass against colorless output.
     let colored = {
         let _color = pin_color_support(true);
-        run_status_and_take()
+        run_status_and_take(&env)
     };
     assert!(
         colored.contains('\u{1b}'),

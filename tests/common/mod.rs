@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use dotrift::commands::apply::ApplyOptions;
-use dotrift::paths::test_hooks::{TEST_GLOBAL_CONFIG_PATH, TEST_REGISTRY_DIR, TEST_STATE_DIR};
+use dotrift::environment::Environment;
 use dotrift::state::StateDatabase;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,22 +10,22 @@ use tempfile::TempDir;
 
 pub struct TestEnv {
     root: TempDir,
+    env: Environment,
 }
 
 impl TestEnv {
     pub fn new() -> Self {
         let root = TempDir::new().expect("cannot create temp dir");
-        TEST_STATE_DIR.with_borrow_mut(|r| *r = Some(root.path().join("state")));
-        TEST_REGISTRY_DIR
-            .with_borrow_mut(|r| *r = Some(root.path().join("render-registry/registry")));
-        TEST_GLOBAL_CONFIG_PATH.with_borrow_mut(|r| {
-            *r = Some(root.path().join("config-home/dotrift/config.toml"));
-        });
-        Self { root }
+        let env = Environment::test_root(root.path());
+        Self { root, env }
     }
 
     pub fn root(&self) -> &Path {
         self.root.path()
+    }
+
+    pub fn env(&self) -> &Environment {
+        &self.env
     }
 
     pub fn path(&self, relative: impl AsRef<Path>) -> PathBuf {
@@ -33,7 +33,7 @@ impl TestEnv {
     }
 
     pub fn database(&self) -> StateDatabase {
-        StateDatabase::open().expect("cannot open state database")
+        StateDatabase::open(&self.env).expect("cannot open state database")
     }
 
     /// Creates and returns `<root>/source`.
@@ -203,14 +203,19 @@ impl ApplyScenario {
     }
 
     pub fn try_run(&self) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
-        dotrift::commands::apply::run(&self.source, Some(self.target.clone()))
+        dotrift::commands::apply::run(&self.source, Some(self.target.clone()), self.env.env())
     }
 
     pub fn try_run_with_options(
         &self,
         options: ApplyOptions,
     ) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
-        dotrift::commands::apply::run_with_options(&self.source, Some(self.target.clone()), options)
+        dotrift::commands::apply::run_with_options(
+            &self.source,
+            Some(self.target.clone()),
+            options,
+            self.env.env(),
+        )
     }
 }
 

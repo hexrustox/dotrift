@@ -163,8 +163,8 @@ mod tests {
     use test_case::test_case;
 
     use crate::{
+        environment::Environment,
         hash::hash_bytes,
-        paths,
         state::{Kind, StateRecord},
     };
 
@@ -181,6 +181,10 @@ mod tests {
 
     fn no_context() -> HashMap<String, Value> {
         HashMap::new()
+    }
+
+    fn dry_registry(anchor: &Path) -> RenderRegistry {
+        RenderRegistry::acquire(&Environment::test_root(anchor), true)
     }
 
     #[test_case(|t| t.join("file") => None ; "target_directly_below_root_reports_no_obstruction")]
@@ -247,12 +251,13 @@ mod tests {
         let state = tempdir().unwrap();
         fs::write(source.path().join("file.txt"), "new").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
+        let env = Environment::test_root(state.path());
         let entry = entry(
             &source.path().join("file.txt"),
             &target.path().join("target.txt"),
             DeployType::Copy,
         );
-        let mut registry = RenderRegistry::acquire(true);
+        let mut registry = RenderRegistry::acquire(&env, true);
 
         let decision = decide(
             &database,
@@ -301,7 +306,7 @@ mod tests {
         };
         database.put(&record).unwrap();
         let entry = entry(&source.path().join("file.txt"), &target_path, deploy_type);
-        let mut registry = RenderRegistry::acquire(true);
+        let mut registry = dry_registry(state.path());
 
         let decision = decide(
             &database,
@@ -335,7 +340,7 @@ mod tests {
             &target.path().join("target.txt"),
             DeployType::Copy,
         );
-        let mut registry = RenderRegistry::acquire(true);
+        let mut registry = dry_registry(state.path());
 
         let decision = decide(
             &database,
@@ -368,7 +373,7 @@ mod tests {
             &target.path().join("target.txt"),
             DeployType::Copy,
         );
-        let mut registry = RenderRegistry::acquire(true);
+        let mut registry = dry_registry(state.path());
 
         let decision = decide(
             &database,
@@ -397,7 +402,7 @@ mod tests {
             &target.path().join("target.txt"),
             DeployType::Copy,
         );
-        let mut registry = RenderRegistry::acquire(true);
+        let mut registry = dry_registry(state.path());
 
         let decision = decide(
             &database,
@@ -435,7 +440,7 @@ mod tests {
             &target.path().join("a/b.txt"),
             DeployType::Copy,
         );
-        let mut registry = RenderRegistry::acquire(true);
+        let mut registry = dry_registry(state.path());
 
         let decision = decide(
             &database,
@@ -457,8 +462,7 @@ mod tests {
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
         let registry_root = tempdir().unwrap();
-        paths::test_hooks::TEST_REGISTRY_DIR
-            .with(|cell| *cell.borrow_mut() = Some(registry_root.path().join("registry")));
+        let env = Environment::test_root(registry_root.path());
         fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
         fs::write(target.path().join("target.txt"), "hello\n").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
@@ -468,7 +472,7 @@ mod tests {
             DeployType::Template,
         );
         let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
-        let mut registry = RenderRegistry::acquire(false);
+        let mut registry = RenderRegistry::acquire(&env, false);
 
         let decision = decide(
             &database,
@@ -495,8 +499,7 @@ mod tests {
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
         let registry_root = tempdir().unwrap();
-        paths::test_hooks::TEST_REGISTRY_DIR
-            .with(|cell| *cell.borrow_mut() = Some(registry_root.path().join("registry")));
+        let env = Environment::test_root(registry_root.path());
         fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
         fs::write(target.path().join("target.txt"), "stale\n").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
@@ -506,7 +509,7 @@ mod tests {
             DeployType::Template,
         );
         let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
-        let mut registry = RenderRegistry::acquire(false);
+        let mut registry = RenderRegistry::acquire(&env, false);
 
         let decision = decide(
             &database,
@@ -536,7 +539,7 @@ mod tests {
             DeployType::Template,
         );
         let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
-        let mut registry = RenderRegistry::acquire(true);
+        let mut registry = dry_registry(state.path());
 
         let decision = decide(
             &database,
@@ -570,7 +573,7 @@ mod tests {
             &target.path().join("target.txt"),
             DeployType::Copy,
         );
-        let mut registry = RenderRegistry::acquire(true);
+        let mut registry = dry_registry(state.path());
 
         let decision = decide(
             &database,
@@ -605,7 +608,7 @@ mod tests {
             &target.path().join("target.txt"),
             DeployType::Copy,
         );
-        let mut registry = RenderRegistry::acquire(true);
+        let mut registry = dry_registry(state.path());
 
         let decision = decide(
             &database,
@@ -642,7 +645,7 @@ mod tests {
             &target.path().join("target.txt"),
             DeployType::Copy,
         );
-        let mut registry = RenderRegistry::acquire(true);
+        let mut registry = dry_registry(state.path());
 
         let decision = decide(
             &database,

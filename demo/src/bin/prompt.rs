@@ -21,7 +21,8 @@ fn main() {
     fs::write(target.join("file1"), "old").unwrap();
     fs::write(target.join("file2"), "old").unwrap();
 
-    let status = dotrift::commands::apply::run(&source, Some(target.clone())).unwrap();
+    let env = dotrift::environment::Environment::resolve();
+    let status = dotrift::commands::apply::run(&source, Some(target.clone()), &env).unwrap();
 
     for f in ["file1", "file2"] {
         println!("{f}: {}", fs::read_to_string(target.join(f)).unwrap());

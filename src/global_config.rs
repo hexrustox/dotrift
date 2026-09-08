@@ -11,6 +11,8 @@ use std::{fs, io};
 use miette::{Result, WrapErr, miette};
 use serde::Deserialize;
 
+use crate::environment::Environment;
+
 /// The per-user global config: the configured pager and `apply` behavior.
 #[derive(Debug, Default)]
 pub struct GlobalConfig {
@@ -21,8 +23,8 @@ pub struct GlobalConfig {
 impl GlobalConfig {
     /// Reads the global config, contributing the defaults when the file is
     /// missing. Discovery and validation errors fail the caller.
-    pub fn load() -> Result<Self> {
-        let path = crate::paths::global_config_path()?;
+    pub fn load(env: &Environment) -> Result<Self> {
+        let path = env.global_config_path()?;
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),

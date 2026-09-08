@@ -9,7 +9,7 @@ use miette::{Result, WrapErr, miette};
 use serde::Deserialize;
 use templater::value::Value;
 
-use crate::data::DataFile;
+use crate::{data::DataFile, environment::Environment};
 
 mod ignore;
 mod portals;
@@ -109,13 +109,17 @@ struct FileConfig {
     rule: indexmap::IndexMap<String, rules::RuleConfig>,
 }
 
-pub fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDeployment> {
+pub fn read(
+    source: &Path,
+    target_override: Option<PathBuf>,
+    env: &Environment,
+) -> Result<DesiredDeployment> {
     crate::ensure_source_dir(source)?;
     let data = DataFile::read(source)?;
     // The variable context is resolved once per run (`spec/CONTEXT.md`); a
     // missing state database contributes no active profiles (`spec/core.md §
     // State database`).
-    let active = crate::state::load_active_profiles()?;
+    let active = crate::state::load_active_profiles(env)?;
     let context = data.context(&active).into_iter().collect::<HashMap<_, _>>();
     let config_path = source.join("dotrift.toml");
     let rendered = render_config(&config_path, &context)?;
@@ -124,7 +128,7 @@ pub fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDe
         .wrap_err_with(|| format!("cannot parse `{}`", config_path.display()))?;
     let target = match target_override.or_else(|| config.target_directory.map(PathBuf::from)) {
         Some(target) => target,
-        None => crate::paths::default_target_dir()?,
+        None => env.default_target_dir()?,
     };
     if !target.is_absolute() {
         return Err(miette!("target directory must be an absolute path"));

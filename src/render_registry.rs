@@ -12,7 +12,7 @@ use std::{
 use miette::Result;
 use templater::value::Value;
 
-use crate::{hash, template};
+use crate::{environment::Environment, hash, template};
 
 /// The rendered output of one template for this run.
 #[derive(Debug)]
@@ -40,14 +40,14 @@ impl RenderRegistry {
     /// Prepares the registry for a run. A dry run constructs nothing;
     /// a real run empties and re-creates the registry directory, falling
     /// back to no registry when that fails.
-    pub(crate) fn acquire(dry_run: bool) -> Self {
+    pub(crate) fn acquire(env: &Environment, dry_run: bool) -> Self {
         if dry_run {
             return Self {
                 dir: None,
                 memo: HashMap::new(),
             };
         }
-        let dir = crate::paths::registry_dir();
+        let dir = env.registry_dir();
         if clear_and_create(&dir) {
             Self {
                 dir: Some(dir),
@@ -146,8 +146,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::RenderRegistry;
-    use crate::hash;
-    use crate::paths::test_hooks::TEST_REGISTRY_DIR;
+    use crate::{environment::Environment, hash};
     use templater::value::Value;
 
     fn context() -> HashMap<String, Value> {
@@ -158,13 +157,12 @@ mod tests {
     fn acquire_falls_back_when_the_registry_dir_cannot_be_created() {
         let root = tempdir().expect("cannot create temp dir");
         fs::write(root.path().join("blocked"), b"").expect("cannot write blocker");
-        TEST_REGISTRY_DIR.with_borrow_mut(|cell| {
-            *cell = Some(root.path().join("blocked"));
-        });
+        let env =
+            Environment::test_root(root.path()).with_registry_dir(root.path().join("blocked"));
 
         let template = root.path().join("greeting.txt");
         fs::write(&template, b"{{ greeting }}\n").expect("cannot write template");
-        let mut registry = RenderRegistry::acquire(false);
+        let mut registry = RenderRegistry::acquire(&env, false);
 
         assert!(
             registry
@@ -177,10 +175,8 @@ mod tests {
     #[test]
     fn registry_entry_holds_the_render_with_owner_only_permissions() {
         let root = tempdir().expect("cannot create temp dir");
-        TEST_REGISTRY_DIR.with_borrow_mut(|cell| {
-            *cell = Some(root.path().join("render-root/registry"));
-        });
-        let mut registry = RenderRegistry::acquire(false);
+        let env = Environment::test_root(root.path());
+        let mut registry = RenderRegistry::acquire(&env, false);
 
         let template = root.path().join("greeting.txt");
         fs::write(&template, b"{{ greeting }}\n").expect("cannot write template");
