@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 use super::portals::{ResolvedPortal, reject_brace_expansion, validate_relative};
 use super::{DeployMode, DeployType, DeploymentEntry, GLOB_MATCH_OPTIONS};
+use crate::report::Reporter;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct RuleConfig {
@@ -70,10 +71,10 @@ pub(super) fn apply_rules(
     }
     if deploy_type == DeployType::Symlink {
         if mode.is_some() {
-            eprintln!(
+            Reporter::always().warning(format_args!(
                 "ignoring `mode` for `{}`: effective `type` is `symlink`",
                 entry.target.display()
-            );
+            ));
         }
         mode = None;
     }
@@ -247,5 +248,24 @@ mod tests {
             .expect("target path is under the temp dir")
             .to_path_buf();
         actual
+    }
+
+    #[test]
+    fn mode_with_effective_symlink_warns_on_stderr() {
+        crate::report::clear();
+        let dir = tempdir().expect("cannot create temp dir");
+        let entry = apply_rules(
+            resolved!("vimrc", "a/b"),
+            &rule_map!("a/*" => rule_config!(Copy, 0o600), "a/b" => rule_config!(Symlink)),
+            dir.path(),
+        )
+        .expect("apply_rules failed");
+        assert_eq!(entry.deploy_type, DeployType::Symlink);
+        assert_eq!(entry.mode, None);
+        assert_eq!(
+            crate::report::take_errors(),
+            "ignoring `mode` for `a/b`: effective `type` is `symlink`\n"
+        );
+        assert_eq!(crate::report::take_output(), "");
     }
 }

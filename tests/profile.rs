@@ -8,9 +8,9 @@ use test_case::test_case;
 use common::TestEnv;
 
 fn run_and_take(source: Option<&Path>, command: ProfileCommand) -> String {
-    dotrift::capture::clear();
+    dotrift::report::clear();
     dotrift::commands::profile::run(source, command).unwrap();
-    dotrift::capture::take()
+    dotrift::report::take_output()
 }
 
 fn run_expects_error(source: Option<&Path>, command: ProfileCommand, needle: &str) {

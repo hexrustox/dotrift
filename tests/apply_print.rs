@@ -16,11 +16,11 @@ enum PrintScenario {
 }
 
 fn captured_with_options(scenario: &ApplyScenario, options: ApplyOptions) -> String {
-    dotrift::capture::clear();
+    dotrift::report::clear();
     scenario
         .try_run_with_options(options)
         .expect("apply failed");
-    dotrift::capture::take()
+    dotrift::report::take_output()
 }
 
 fn scenario_for(scenario: PrintScenario) -> ApplyScenario {

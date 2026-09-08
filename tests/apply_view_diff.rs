@@ -119,11 +119,11 @@ fn pager_fallback(dotrift_pager: Option<&str>, pager: PagerChoice) {
         ("PAGER", pager_value.as_deref()),
     ]);
     set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
-    dotrift::capture::clear();
+    dotrift::report::clear();
     scenario.run();
     let diff = match output {
         Some(path) => fs::read_to_string(path).unwrap(),
-        None => dotrift::capture::take(),
+        None => dotrift::report::take_output(),
     };
     snapshot_settings(&scenario.env).bind(|| {
         insta::assert_snapshot!(test_name(), &diff);

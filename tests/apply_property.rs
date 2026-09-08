@@ -304,9 +304,9 @@ fn parse_actions(output: &str) -> Vec<(Action, PathBuf)> {
 
 fn dry_run_output(scenario: &ApplyScenario, mut options: ApplyOptions) -> Vec<(Action, PathBuf)> {
     options.dry_run = true;
-    dotrift::capture::clear();
+    dotrift::report::clear();
     scenario.run_with_options(options);
-    parse_actions(&dotrift::capture::take())
+    parse_actions(&dotrift::report::take_output())
 }
 
 proptest! {

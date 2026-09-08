@@ -9,9 +9,9 @@ use dotrift::state::{Kind, StateRecord};
 use common::{TestEnv, pin_color_support, snapshot_settings};
 
 fn run_status_and_take() -> String {
-    dotrift::capture::clear();
+    dotrift::report::clear();
     dotrift::commands::status::run().expect("status run failed");
-    dotrift::capture::take()
+    dotrift::report::take_output()
 }
 
 #[test]

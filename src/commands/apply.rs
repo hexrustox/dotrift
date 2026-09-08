@@ -8,22 +8,19 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crossterm::style::Color;
 use miette::{Result, WrapErr, miette};
 use strum::EnumIter;
 use templater::value::Value;
-use tui::{
-    apply_color,
-    prompt::{PromptError, PromptOption},
-};
+use tui::prompt::{PromptError, PromptOption};
 
 use crate::{
-    ExitStatus, color_enabled,
+    ExitStatus,
     config::{self, DeployType},
     global_config::{GlobalConfig, PagerCommand},
-    hash, managed, prettify_path, println_capture,
+    hash, managed, prettify_path,
     reconcile::{Decision, decide},
     render_registry::RenderRegistry,
+    report::{Outcome, Reporter, diff_sink},
     state::{Kind, StateDatabase, StateLock, StateRecord},
     template,
 };
@@ -73,6 +70,7 @@ pub fn run_with_options(
     let mut skipped = 0;
     let mut deployed = 0;
     let mut replaced = 0;
+    let report = Reporter::new(options.verbose || options.dry_run, options.quiet);
     for entry in entries {
         if options.dry_run {
             report_dry_run_entry(
@@ -82,6 +80,7 @@ pub fn run_with_options(
                 &deployment.variable_context,
                 &mut registry,
                 &global_config,
+                &report,
             )?;
             continue;
         }
@@ -96,33 +95,27 @@ pub fn run_with_options(
         )? {
             EntryResult::Deployed => {
                 deployed += 1;
-                if options.verbose {
-                    println_capture!(
-                        "{} {}",
-                        apply_color("deployed", Color::Green, color_enabled!()),
-                        prettify_path(&entry.target_path).display()
-                    );
-                }
+                report.outcome_line(format_args!(
+                    "{} {}",
+                    report.paint(Outcome::Deployed, "deployed"),
+                    prettify_path(&entry.target_path).display()
+                ));
             }
             EntryResult::Replaced => {
                 replaced += 1;
-                if options.verbose {
-                    println_capture!(
-                        "{} {}",
-                        apply_color("replaced", Color::Cyan, color_enabled!()),
-                        prettify_path(&entry.target_path).display()
-                    );
-                }
+                report.outcome_line(format_args!(
+                    "{} {}",
+                    report.paint(Outcome::Replaced, "replaced"),
+                    prettify_path(&entry.target_path).display()
+                ));
             }
             EntryResult::Skipped => {
                 skipped += 1;
-                if options.verbose {
-                    println_capture!(
-                        "{} {}",
-                        apply_color("skipped", Color::DarkGrey, color_enabled!()),
-                        prettify_path(&entry.target_path).display()
-                    );
-                }
+                report.outcome_line(format_args!(
+                    "{} {}",
+                    report.paint(Outcome::Skipped, "skipped"),
+                    prettify_path(&entry.target_path).display()
+                ));
             }
             EntryResult::Cancelled => return Ok(ExitStatus::Cancelled),
         }
@@ -134,7 +127,7 @@ pub fn run_with_options(
                 .iter()
                 .map(|entry| entry.target_path.clone())
                 .collect();
-            let _ = cleanup(&database, target, &desired, options)?;
+            let _ = cleanup(&database, target, &desired, options, &report)?;
         }
         return Ok(ExitStatus::Success);
     }
@@ -146,16 +139,16 @@ pub fn run_with_options(
             .iter()
             .map(|entry| entry.target_path.clone())
             .collect();
-        (removed, pruned) = cleanup(&database, target, &desired, options)?;
+        (removed, pruned) = cleanup(&database, target, &desired, options, &report)?;
     }
-    if !options.quiet {
-        if options.clean_up {
-            println_capture!(
-                "deployed {deployed}, replaced {replaced}, skipped {skipped}, removed {removed}, pruned {pruned}"
-            );
-        } else {
-            println_capture!("deployed {deployed}, replaced {replaced}, skipped {skipped}");
-        }
+    if options.clean_up {
+        report.summary(format_args!(
+            "deployed {deployed}, replaced {replaced}, skipped {skipped}, removed {removed}, pruned {pruned}"
+        ));
+    } else {
+        report.summary(format_args!(
+            "deployed {deployed}, replaced {replaced}, skipped {skipped}"
+        ));
     }
     if skipped > 0 {
         return Ok(ExitStatus::Skipped);
@@ -340,8 +333,9 @@ fn report_dry_run_entry(
     context: &HashMap<String, Value>,
     registry: &mut RenderRegistry,
     global_config: &GlobalConfig,
+    report: &Reporter,
 ) -> Result<()> {
-    let (action, color) = match decide(
+    let (outcome, word) = match decide(
         database,
         target_root,
         entry,
@@ -350,9 +344,9 @@ fn report_dry_run_entry(
         false,
         global_config.replace_identical(),
     )? {
-        Decision::Deployed => ("deployed", Color::Green),
-        Decision::Replaced { .. } => ("replaced", Color::Cyan),
-        Decision::Prompt(_) => ("obstruction", Color::Yellow),
+        Decision::Deployed => (Outcome::Deployed, "deployed"),
+        Decision::Replaced { .. } => (Outcome::Replaced, "replaced"),
+        Decision::Prompt(_) => (Outcome::Obstruction, "obstruction"),
     };
     let deploy_type = match entry.deploy_type {
         DeployType::Symlink => "symlink",
@@ -363,11 +357,11 @@ fn report_dry_run_entry(
         Some(mode) => format!("[{deploy_type} {:03o}]", u32::from(mode)),
         None => format!("[{deploy_type}]"),
     };
-    println_capture!(
+    report.outcome_line(format_args!(
         "{} {} {suffix}",
-        apply_color(action, color, color_enabled!()),
+        report.paint(outcome, word),
         prettify_path(&entry.target_path).display()
-    );
+    ));
     Ok(())
 }
 
@@ -376,6 +370,7 @@ fn cleanup(
     target_root: &Path,
     desired: &HashSet<PathBuf>,
     options: ApplyOptions,
+    report: &Reporter,
 ) -> Result<(usize, usize)> {
     let dry_run = options.dry_run;
     let mut removed = 0;
@@ -412,33 +407,35 @@ fn cleanup(
         }
         if dry_run {
             planned_removals.insert(path.clone());
-            println_capture!(
+            report.outcome_line(format_args!(
                 "{} {}",
-                apply_color("removed", Color::Red, color_enabled!()),
+                report.paint(Outcome::Removed, "removed"),
                 prettify_path(path).display()
-            );
+            ));
             continue;
         }
         remove_path(database, path)?;
         removed += 1;
-        if options.verbose {
-            println_capture!(
-                "{} {}",
-                apply_color("removed", Color::Red, color_enabled!()),
-                prettify_path(path).display()
-            );
-        }
+        report.outcome_line(format_args!(
+            "{} {}",
+            report.paint(Outcome::Removed, "removed"),
+            prettify_path(path).display()
+        ));
         if options.prune_empty_dirs {
-            pruned += prune_parents(target_root, path, options.verbose)?;
+            pruned += prune_parents(target_root, path, report)?;
         }
     }
     if dry_run && options.prune_empty_dirs {
-        report_dry_run_pruning(target_root, &planned_removals)?;
+        report_dry_run_pruning(target_root, &planned_removals, report)?;
     }
     Ok((removed, pruned))
 }
 
-fn report_dry_run_pruning(target_root: &Path, removals: &HashSet<PathBuf>) -> Result<()> {
+fn report_dry_run_pruning(
+    target_root: &Path,
+    removals: &HashSet<PathBuf>,
+    report: &Reporter,
+) -> Result<()> {
     let mut planned = removals.clone();
     let mut parents = removals
         .iter()
@@ -456,11 +453,11 @@ fn report_dry_run_pruning(target_root: &Path, removals: &HashSet<PathBuf>) -> Re
             if !would_be_empty(&directory, &planned)? {
                 break;
             }
-            println_capture!(
+            report.outcome_line(format_args!(
                 "{} {}",
-                apply_color("pruned", Color::Magenta, color_enabled!()),
+                report.paint(Outcome::Pruned, "pruned"),
                 prettify_path(&directory).display()
-            );
+            ));
             planned.insert(directory.clone());
             current = directory.parent().map(Path::to_path_buf);
         }
@@ -491,7 +488,7 @@ fn would_be_empty(path: &Path, removals: &HashSet<std::path::PathBuf>) -> Result
     Ok(true)
 }
 
-fn prune_parents(target_root: &Path, removed_path: &Path, verbose: bool) -> Result<usize> {
+fn prune_parents(target_root: &Path, removed_path: &Path, report: &Reporter) -> Result<usize> {
     let mut current = removed_path.parent();
     let mut count = 0;
     while let Some(parent) = current {
@@ -514,13 +511,11 @@ fn prune_parents(target_root: &Path, removed_path: &Path, verbose: bool) -> Resu
         fs::remove_dir(parent)
             .map_err(|error| miette!(error).wrap_err("cannot prune empty directory"))?;
         count += 1;
-        if verbose {
-            println_capture!(
-                "{} {}",
-                apply_color("pruned", Color::Magenta, color_enabled!()),
-                prettify_path(parent).display()
-            );
-        }
+        report.outcome_line(format_args!(
+            "{} {}",
+            report.paint(Outcome::Pruned, "pruned"),
+            prettify_path(parent).display()
+        ));
         current = parent.parent();
     }
     Ok(count)
@@ -593,6 +588,8 @@ fn prompt_for_obstruction(
         use std::{fs, path::Path};
 
         use crossterm::style::Color;
+
+        use crate::prettify_path;
 
         fn path_kind(path: &Path) -> std::io::Result<&'static str> {
             let meta = fs::symlink_metadata(path)?;
@@ -673,7 +670,7 @@ fn view_diff(
     {
         return diff_through(child, target, &entry.source_path, source);
     }
-    let mut output = diff_output();
+    let mut output = diff_sink();
     run_diff_into(target, &entry.source_path, source, &mut output)
 }
 
@@ -719,16 +716,6 @@ fn run_diff_into<W: Write>(
         return Err(miette!("diff exited with an error"));
     }
     Ok(())
-}
-
-#[cfg(not(feature = "testing"))]
-fn diff_output() -> std::io::Stdout {
-    std::io::stdout()
-}
-
-#[cfg(feature = "testing")]
-fn diff_output() -> crate::capture::CaptureWriter {
-    crate::capture::CaptureWriter
 }
 
 fn spawn_pager(command: &str) -> std::io::Result<std::process::Child> {
@@ -868,8 +855,12 @@ mod tests {
     )]
     fn prunes_empty_parents_for(setup: impl Fn(&Path) -> PathBuf, assert: impl Fn(&Path)) {
         let dir = tempdir().expect("cannot create temp dir");
-        prune_parents(dir.path(), &setup(dir.path()), false)
-            .unwrap_or_else(|error| panic!("{error}"));
+        prune_parents(
+            dir.path(),
+            &setup(dir.path()),
+            &crate::report::Reporter::always(),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
         assert(dir.path());
     }
 }

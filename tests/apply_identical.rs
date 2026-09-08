@@ -206,14 +206,14 @@ fn replace_all_latch_subsumes_the_identical_check() {
 }
 
 fn dry_run_line(scenario: &ApplyScenario, path: &Path) -> String {
-    dotrift::capture::clear();
+    dotrift::report::clear();
     scenario
         .try_run_with_options(ApplyOptions {
             dry_run: true,
             ..Default::default()
         })
         .expect("apply failed");
-    let output = dotrift::capture::take();
+    let output = dotrift::report::take_output();
     output
         .lines()
         .find(|line| line.contains(path.to_str().unwrap()))

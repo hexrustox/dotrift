@@ -8,7 +8,7 @@ use std::{
 
 use dotrift::{
     config::{self, DeploymentEntry, DesiredDeployment},
-    deploy_entry,
+    deploy_entry, report,
 };
 use templater::value::Value;
 use test_case::test_case;
@@ -80,6 +80,7 @@ fn effective_symlink_drops_mode_from_earlier_rule() {
          \"a.txt\" = { type = \"symlink\" }\n",
     );
 
+    report::clear();
     let deployment =
         config::read(&source, Some(target.clone())).expect("cannot read configuration");
 
@@ -90,6 +91,10 @@ fn effective_symlink_drops_mode_from_earlier_rule() {
             target.join("a.txt"),
             Symlink
         )]
+    );
+    assert_eq!(
+        report::take_errors(),
+        "ignoring `mode` for `a.txt`: effective `type` is `symlink`\n"
     );
 }
 

@@ -1,14 +1,11 @@
 use std::path::Path;
 
-use crossterm::style::Color;
 use miette::{Result, miette};
-use tui::apply_color;
 
 use crate::{
     cli::ProfileCommand,
-    color_enabled,
     data::DataFile,
-    println_capture,
+    report::{Outcome, Reporter},
     state::{StateDatabase, StateLock},
 };
 
@@ -29,17 +26,18 @@ pub fn run(source: Option<&Path>, command: ProfileCommand) -> Result<()> {
 }
 
 fn list(source: &Path) -> Result<()> {
+    let report = Reporter::always();
     let data = DataFile::read(source)?;
     let active = crate::state::load_active_profiles()?;
     for name in data.profile.keys() {
         if active.iter().any(|(active_name, _)| active_name == name) {
-            println_capture!(
+            report.line(format_args!(
                 "{} {}",
                 name,
-                apply_color("(active)", Color::Green, color_enabled!())
-            );
+                report.paint(Outcome::Active, "(active)")
+            ));
         } else {
-            println_capture!("{}", name);
+            report.line(format_args!("{name}"));
         }
     }
     Ok(())
@@ -54,7 +52,7 @@ fn activate(source: &Path, name: &str) -> Result<()> {
         let _lock = StateLock::acquire()?;
         StateDatabase::open()?.activate_profile(name)?;
     }
-    println_capture!("profile `{name}` activated");
+    Reporter::always().line(format_args!("profile `{name}` activated"));
     Ok(())
 }
 
@@ -65,11 +63,12 @@ fn deactivate(name: &str) -> Result<()> {
             return Err(miette!("profile `{name}` is not active"));
         }
     }
-    println_capture!("profile `{name}` deactivated");
+    Reporter::always().line(format_args!("profile `{name}` deactivated"));
     Ok(())
 }
 
 fn show(source: &Path) -> Result<()> {
+    let report = Reporter::always();
     let data = DataFile::read(source)?;
     let active = crate::state::load_active_profiles()?;
     let context = data.context(&active);
@@ -79,10 +78,10 @@ fn show(source: &Path) -> Result<()> {
         value
             .write_top(&mut rendered)
             .map_err(|error| miette!(error))?;
-        println_capture!(
+        report.line(format_args!(
             "{key:<max$}   {}",
             String::from_utf8(rendered).map_err(|error| miette!(error))?,
-        );
+        ));
     }
     Ok(())
 }

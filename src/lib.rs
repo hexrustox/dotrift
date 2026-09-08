@@ -1,4 +1,3 @@
-pub mod capture;
 pub mod cli;
 pub mod commands;
 pub mod config;
@@ -8,6 +7,7 @@ pub mod hash;
 pub mod managed;
 mod reconcile;
 pub mod render_registry;
+pub mod report;
 pub mod state;
 pub mod template;
 
@@ -21,13 +21,6 @@ use miette::{Result, WrapErr, miette};
 use normalize_path::NormalizePath;
 
 pub static COLOR_SUPPORT: LazyLock<RwLock<bool>> = LazyLock::new(|| RwLock::new(false));
-
-#[macro_export]
-macro_rules! color_enabled {
-    () => {
-        *$crate::COLOR_SUPPORT.read().unwrap()
-    };
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitStatus {
