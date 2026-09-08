@@ -4,7 +4,7 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 
-use common::{ApplyScenario, global_config, prompt_count};
+use common::{ApplyScenario, prompt_count};
 use dotrift::ExitStatus;
 use dotrift::commands::apply::{ApplyOptions, ObstructionChoice, test_hooks::set_prompt_choice};
 use dotrift::hash::hash_bytes;
@@ -56,7 +56,7 @@ fn symlink_obstruction_behaviors(
     assert: impl Fn(&Path, &Path),
 ) {
     let scenario = ApplyScenario::new(setup);
-    let _guard = global_config(&scenario.env, REPLACE_IDENTICAL);
+    scenario.env.write_global_config(REPLACE_IDENTICAL);
     if let Some(choice) = choice {
         set_prompt_choice(choice);
     }
@@ -116,7 +116,7 @@ fn copy_obstruction_behaviors(
     assert: impl Fn(&Path, &Path),
 ) {
     let scenario = ApplyScenario::new(setup);
-    let _guard = global_config(&scenario.env, REPLACE_IDENTICAL);
+    scenario.env.write_global_config(REPLACE_IDENTICAL);
     if let Some(choice) = choice {
         set_prompt_choice(choice);
     }
@@ -157,7 +157,7 @@ fn template_obstruction_behaviors(
     assert: impl Fn(&Path, &Path),
 ) {
     let scenario = ApplyScenario::new(setup);
-    let _guard = global_config(&scenario.env, REPLACE_IDENTICAL);
+    scenario.env.write_global_config(REPLACE_IDENTICAL);
     if let Some(choice) = choice {
         set_prompt_choice(choice);
     }
@@ -175,7 +175,7 @@ fn parent_obstruction_still_prompts() {
         fs::write(target.join("a"), b"occupied").unwrap();
         "[portal]\n\"file.txt\" = \"a/b.txt\"\n"
     });
-    let _guard = global_config(&scenario.env, REPLACE_IDENTICAL);
+    scenario.env.write_global_config(REPLACE_IDENTICAL);
     set_prompt_choice(ObstructionChoice::Replace);
 
     let status = scenario.try_run().expect("apply failed");
@@ -194,7 +194,7 @@ fn replace_all_latch_subsumes_the_identical_check() {
         fs::write(target.join("b.txt"), b"B").unwrap();
         "[portal]\n\"a.txt\" = \"a.txt\"\n\"b.txt\" = \"b.txt\"\n"
     });
-    let _guard = global_config(&scenario.env, REPLACE_IDENTICAL);
+    scenario.env.write_global_config(REPLACE_IDENTICAL);
     set_prompt_choice(ObstructionChoice::ReplaceAll);
 
     let status = scenario.try_run().expect("apply failed");
@@ -228,7 +228,7 @@ fn dry_run_reports_identical_obstruction_as_replaced() {
         fs::write(target.join("target.txt"), b"same").unwrap();
         "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
     });
-    let _guard = global_config(&scenario.env, REPLACE_IDENTICAL);
+    scenario.env.write_global_config(REPLACE_IDENTICAL);
 
     let line = dry_run_line(&scenario, &scenario.target.join("target.txt"));
 
@@ -253,7 +253,7 @@ fn dry_run_reports_template_obstruction_as_obstruction_without_rendering() {
         fs::write(target.join("target.txt"), b"hello\n").unwrap();
         "[portal]\n\"greeting.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"template\" }\n"
     });
-    let _guard = global_config(&scenario.env, REPLACE_IDENTICAL);
+    scenario.env.write_global_config(REPLACE_IDENTICAL);
 
     let line = dry_run_line(&scenario, &scenario.target.join("target.txt"));
 

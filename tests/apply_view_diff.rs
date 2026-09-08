@@ -4,9 +4,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use common::{
-    ApplyScenario, EnvVarGuard, TestEnv, global_config_with, snapshot_settings, test_name,
-};
+use common::{ApplyScenario, EnvVarGuard, TestEnv, snapshot_settings, test_name};
 use dotrift::commands::apply::{ObstructionChoice, test_hooks::set_prompt_choices};
 use test_case::test_case;
 
@@ -149,11 +147,10 @@ fn config_pager_used_when_dotrift_pager_unset() {
     let scenario = ApplyScenario::new(copy_diff_setup);
     let (config_script, config_output) = argv_capture_script(&scenario.env);
     let (env_pager_script, env_pager_output) = capture_script(&scenario.env);
-    let _guard = global_config_with(
-        &scenario.env,
-        &config_pager_toml(&config_script, &[]),
-        [("PAGER", Some(env_pager_script.to_str().unwrap()))],
-    );
+    scenario
+        .env
+        .write_global_config(&config_pager_toml(&config_script, &[]));
+    let _guard = EnvVarGuard::set([("PAGER", Some(env_pager_script.to_str().unwrap()))]);
     set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
 
     scenario.run();
@@ -171,14 +168,13 @@ fn dotrift_pager_overrides_config_pager() {
     let scenario = ApplyScenario::new(copy_diff_setup);
     let (config_script, config_output) = capture_script_named(&scenario.env, "config-pager");
     let (env_pager_script, env_pager_output) = capture_script_named(&scenario.env, "env-pager");
-    let _guard = global_config_with(
-        &scenario.env,
-        &config_pager_toml(&config_script, &[]),
-        [
-            ("DOTRIFT_PAGER", Some(env_pager_script.to_str().unwrap())),
-            ("PAGER", None),
-        ],
-    );
+    scenario
+        .env
+        .write_global_config(&config_pager_toml(&config_script, &[]));
+    let _guard = EnvVarGuard::set([
+        ("DOTRIFT_PAGER", Some(env_pager_script.to_str().unwrap())),
+        ("PAGER", None),
+    ]);
     set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
 
     scenario.run();
@@ -196,11 +192,8 @@ fn empty_config_command_falls_through_to_pager() {
     let scenario = ApplyScenario::new(copy_diff_setup);
     let (env_pager_script, env_pager_output) = capture_script(&scenario.env);
     let config_output = scenario.env.path("unused-config-out.txt");
-    let _guard = global_config_with(
-        &scenario.env,
-        "[pager]\ncommand = ''\n",
-        [("PAGER", Some(env_pager_script.to_str().unwrap()))],
-    );
+    scenario.env.write_global_config("[pager]\ncommand = ''\n");
+    let _guard = EnvVarGuard::set([("PAGER", Some(env_pager_script.to_str().unwrap()))]);
     set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
 
     scenario.run();
@@ -217,11 +210,10 @@ fn empty_config_command_falls_through_to_pager() {
 fn config_pager_args_are_literal() {
     let scenario = ApplyScenario::new(copy_diff_setup);
     let (script, output) = argv_capture_script(&scenario.env);
-    let _guard = global_config_with(
-        &scenario.env,
-        &config_pager_toml(&script, &["one two", "three", "-R"]),
-        [("PAGER", None)],
-    );
+    scenario
+        .env
+        .write_global_config(&config_pager_toml(&script, &["one two", "three", "-R"]));
+    let _guard = EnvVarGuard::set([("PAGER", None)]);
     set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
 
     scenario.run();
@@ -237,11 +229,10 @@ fn failing_config_pager_fails_the_run_without_falling_back() {
     let scenario = ApplyScenario::new(copy_diff_setup);
     let missing = scenario.env.path("no-such-pager");
     let (env_pager_script, env_pager_output) = capture_script(&scenario.env);
-    let _guard = global_config_with(
-        &scenario.env,
-        &config_pager_toml(&missing, &[]),
-        [("PAGER", Some(env_pager_script.to_str().unwrap()))],
-    );
+    scenario
+        .env
+        .write_global_config(&config_pager_toml(&missing, &[]));
+    let _guard = EnvVarGuard::set([("PAGER", Some(env_pager_script.to_str().unwrap()))]);
     set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
 
     let error = scenario.try_run().unwrap_err();

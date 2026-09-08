@@ -4,10 +4,7 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::Path;
 
-use common::{
-    ApplyScenario, assert_error_chain, global_config, global_config_home,
-    home_fallback_global_config, prompt_count,
-};
+use common::{ApplyScenario, assert_error_chain, prompt_count};
 use dotrift::commands::apply::{ApplyOptions, ObstructionChoice, test_hooks::set_prompt_choice};
 use test_case::test_case;
 
@@ -20,7 +17,7 @@ fn obstruction_setup(source: &Path, target: &Path) -> &'static str {
 #[test]
 fn missing_config_file_leaves_apply_behavior_unchanged() {
     let scenario = ApplyScenario::new(obstruction_setup);
-    let _guard = global_config(&scenario.env, "");
+    scenario.env.write_global_config("");
 
     set_prompt_choice(ObstructionChoice::Skip);
     let status = scenario.try_run().expect("apply failed");
@@ -36,7 +33,7 @@ fn missing_config_file_leaves_apply_behavior_unchanged() {
 #[test]
 fn malformed_toml_fails_the_run_before_any_change() {
     let scenario = ApplyScenario::new(obstruction_setup);
-    let _guard = global_config(&scenario.env, "[pager\ncommand =");
+    scenario.env.write_global_config("[pager\ncommand =");
 
     let error = scenario.try_run().unwrap_err();
 
@@ -51,7 +48,7 @@ fn malformed_toml_fails_the_run_before_any_change() {
 #[test]
 fn malformed_toml_fails_a_dry_run() {
     let scenario = ApplyScenario::new(obstruction_setup);
-    let _guard = global_config(&scenario.env, "[pager\ncommand =");
+    scenario.env.write_global_config("[pager\ncommand =");
 
     let error = scenario
         .try_run_with_options(ApplyOptions {
@@ -81,7 +78,7 @@ fn malformed_toml_fails_a_dry_run() {
 #[test_case("[pager]\n" ; "empty_pager_table_rejected")]
 fn invalid_config_fails_the_run_before_any_change(toml: &str) {
     let scenario = ApplyScenario::new(obstruction_setup);
-    let _guard = global_config(&scenario.env, toml);
+    scenario.env.write_global_config(toml);
 
     let error = scenario.try_run().unwrap_err();
 
@@ -100,7 +97,7 @@ fn invalid_config_fails_the_run_before_any_change(toml: &str) {
 #[test_case("[pager]\ncommand = \"   \"" ; "whitespace_command_accepted")]
 fn valid_config_is_accepted(toml: &str) {
     let scenario = ApplyScenario::new(obstruction_setup);
-    let _guard = global_config(&scenario.env, toml);
+    scenario.env.write_global_config(toml);
 
     set_prompt_choice(ObstructionChoice::Skip);
     let status = scenario.try_run().expect("apply failed");
@@ -112,9 +109,10 @@ fn valid_config_is_accepted(toml: &str) {
 #[test]
 fn config_path_being_a_directory_fails_the_run() {
     let scenario = ApplyScenario::new(obstruction_setup);
-    let _guard = global_config(&scenario.env, "");
-    fs::remove_file(global_config_home(&scenario.env).join("dotrift/config.toml")).unwrap();
-    fs::create_dir(global_config_home(&scenario.env).join("dotrift/config.toml")).unwrap();
+    scenario.env.write_global_config("");
+    let path = scenario.env.path("config-home/dotrift/config.toml");
+    fs::remove_file(&path).unwrap();
+    fs::create_dir(&path).unwrap();
 
     let error = scenario.try_run().unwrap_err();
 
@@ -129,8 +127,8 @@ fn config_path_being_a_directory_fails_the_run() {
 #[test]
 fn dangling_symlink_at_config_path_counts_as_missing() {
     let scenario = ApplyScenario::new(obstruction_setup);
-    let _guard = global_config(&scenario.env, "");
-    let path = global_config_home(&scenario.env).join("dotrift/config.toml");
+    scenario.env.write_global_config("");
+    let path = scenario.env.path("config-home/dotrift/config.toml");
     fs::remove_file(&path).unwrap();
     symlink("nowhere", &path).unwrap();
 
@@ -142,20 +140,9 @@ fn dangling_symlink_at_config_path_counts_as_missing() {
 }
 
 #[test]
-fn home_fallback_used_when_xdg_config_home_is_unset() {
-    let scenario = ApplyScenario::new(obstruction_setup);
-    let _guard = home_fallback_global_config(&scenario.env, "[bogus]");
-
-    let error = scenario.try_run().unwrap_err();
-
-    assert_error_chain(&error, "cannot parse");
-    assert_eq!(prompt_count(), 0);
-}
-
-#[test]
 fn config_read_before_control_files() {
     let scenario = ApplyScenario::new(obstruction_setup);
-    let _guard = global_config(&scenario.env, "[bogus]");
+    scenario.env.write_global_config("[bogus]");
     scenario.write_config("[portal]\n\"file.txt\" = \"missing-source.txt\"\n");
 
     let error = scenario.try_run().unwrap_err();

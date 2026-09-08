@@ -8,6 +8,8 @@ use std::{
 use miette::{Result, WrapErr, miette};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
+use crate::paths;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     File,
@@ -50,51 +52,24 @@ pub struct StateRecord {
 }
 
 #[cfg(any(test, feature = "testing"))]
-pub mod test_hooks {
-    use std::{cell::RefCell, path::PathBuf};
-
-    #[macro_export]
-    macro_rules! record {
-        (f, $target:expr, $hash:expr) => {
-            $crate::state::StateRecord {
-                target_path: std::path::PathBuf::from($target),
-                source_path: std::path::PathBuf::new(),
-                kind: $crate::state::Kind::File,
-                content_hash: Some($hash.into()),
-            }
-        };
-        (s, $target:expr, $source:expr) => {
-            $crate::state::StateRecord {
-                target_path: std::path::PathBuf::from($target),
-                source_path: std::path::PathBuf::from($source),
-                kind: $crate::state::Kind::Symlink,
-                content_hash: None,
-            }
-        };
-    }
-
-    thread_local! {
-        pub static TEST_STATE_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-    }
-}
-
-fn state_root() -> Result<PathBuf> {
-    #[cfg(any(test, feature = "testing"))]
-    {
-        Ok(test_hooks::TEST_STATE_ROOT
-            .with(|root| root.borrow().clone())
-            .unwrap())
-    }
-
-    #[cfg(not(any(test, feature = "testing")))]
-    {
-        let state_home = dirs::state_dir()
-            .or_else(dirs::data_dir)
-            .map(|state_home| state_home.join("dotrift"))
-            .ok_or_else(|| miette!("XDG_STATE_HOME and XDG_DATA_HOME are unset"))
-            .wrap_err("cannot resolve state location")?;
-        Ok(state_home)
-    }
+#[macro_export]
+macro_rules! record {
+    (f, $target:expr, $hash:expr) => {
+        $crate::state::StateRecord {
+            target_path: std::path::PathBuf::from($target),
+            source_path: std::path::PathBuf::new(),
+            kind: $crate::state::Kind::File,
+            content_hash: Some($hash.into()),
+        }
+    };
+    (s, $target:expr, $source:expr) => {
+        $crate::state::StateRecord {
+            target_path: std::path::PathBuf::from($target),
+            source_path: std::path::PathBuf::from($source),
+            kind: $crate::state::Kind::Symlink,
+            content_hash: None,
+        }
+    };
 }
 
 pub struct StateDatabase {
@@ -104,14 +79,14 @@ pub struct StateDatabase {
 
 impl StateDatabase {
     pub fn open() -> Result<Self> {
-        Self::open_at(&state_root()?)
+        Self::open_at(&paths::state_dir()?)
     }
 
     pub(crate) fn open_at(root: &Path) -> Result<Self> {
         fs::create_dir_all(root)
             .map_err(|error| miette!(error))
             .wrap_err_with(|| format!("cannot create state directory `{}`", root.display()))?;
-        let path = root.join("state.sqlite");
+        let path = paths::state_database_path(root);
         let connection = Connection::open(&path)
             .map_err(|error| miette!(error))
             .wrap_err_with(|| format!("cannot open state database `{}`", path.display()))?;
@@ -136,11 +111,11 @@ impl StateDatabase {
     }
 
     pub fn open_read_only() -> Result<Option<Self>> {
-        Self::open_read_only_at(&state_root()?)
+        Self::open_read_only_at(&paths::state_dir()?)
     }
 
     fn open_read_only_at(root: &Path) -> Result<Option<Self>> {
-        let path = root.join("state.sqlite");
+        let path = paths::state_database_path(root);
         if !path.exists() {
             return Ok(None);
         }
@@ -318,14 +293,14 @@ pub(crate) struct StateLock {
 
 impl StateLock {
     pub(crate) fn acquire() -> Result<Self> {
-        Self::acquire_at(&state_root()?)
+        Self::acquire_at(&paths::state_dir()?)
     }
 
     fn acquire_at(root: &Path) -> Result<Self> {
         fs::create_dir_all(root)
             .map_err(|error| miette!(error))
             .wrap_err_with(|| format!("cannot create state directory `{}`", root.display()))?;
-        let lock_path = root.join("state.lock");
+        let lock_path = paths::state_lock_path(root);
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)

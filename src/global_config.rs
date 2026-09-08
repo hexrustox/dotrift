@@ -22,10 +22,7 @@ impl GlobalConfig {
     /// Reads the global config, contributing the defaults when the file is
     /// missing. Discovery and validation errors fail the caller.
     pub fn load() -> Result<Self> {
-        let config_home = dirs::config_dir()
-            .ok_or_else(|| miette!("`HOME` is unset or empty"))
-            .wrap_err("cannot resolve the global config location")?;
-        let path = config_home.join("dotrift").join("config.toml");
+        let path = crate::paths::global_config_path()?;
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),

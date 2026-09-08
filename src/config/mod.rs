@@ -122,10 +122,10 @@ pub fn read(source: &Path, target_override: Option<PathBuf>) -> Result<DesiredDe
     let config = toml::from_str::<FileConfig>(&rendered)
         .map_err(|error| miette!(error))
         .wrap_err_with(|| format!("cannot parse `{}`", config_path.display()))?;
-    let target = target_override
-        .or_else(|| config.target_directory.map(PathBuf::from))
-        .or_else(dirs::home_dir)
-        .ok_or_else(|| miette!("`HOME` is unset or empty"))?;
+    let target = match target_override.or_else(|| config.target_directory.map(PathBuf::from)) {
+        Some(target) => target,
+        None => crate::paths::default_target_dir()?,
+    };
     if !target.is_absolute() {
         return Err(miette!("target directory must be an absolute path"));
     }

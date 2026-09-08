@@ -17,8 +17,10 @@ source of truth for the *management state*; comparing it against the target
 directory and the desired deployment drives `apply`'s decisions.
 
 * **Location:** `$XDG_STATE_HOME/dotrift/state.sqlite`, falling back to
-  `$HOME/.local/state/dotrift/state.sqlite` when `XDG_STATE_HOME` is unset.
-  An error is raised only when no home directory can be resolved at all.
+  `$HOME/.local/state/dotrift/state.sqlite` when `XDG_STATE_HOME` is unset,
+  and to `$XDG_DATA_HOME/dotrift/state.sqlite` when neither the state
+  directory nor a home directory can be resolved. An error is raised only
+  when no state location can be resolved at all.
 * **Creation:** opening the database creates the state directory and an empty
   database file when absent. Every command that opens the state database —
   including `apply --dry-run` — therefore leaves these artifacts. Creation is

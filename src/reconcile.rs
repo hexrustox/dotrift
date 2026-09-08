@@ -164,7 +164,7 @@ mod tests {
 
     use crate::{
         hash::hash_bytes,
-        render_registry,
+        paths,
         state::{Kind, StateRecord},
     };
 
@@ -457,8 +457,8 @@ mod tests {
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
         let registry_root = tempdir().unwrap();
-        render_registry::test_hooks::TEST_REGISTRY_ROOT
-            .with(|cell| *cell.borrow_mut() = Some(registry_root.path().to_path_buf()));
+        paths::test_hooks::TEST_REGISTRY_DIR
+            .with(|cell| *cell.borrow_mut() = Some(registry_root.path().join("registry")));
         fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
         fs::write(target.path().join("target.txt"), "hello\n").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
@@ -495,8 +495,8 @@ mod tests {
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
         let registry_root = tempdir().unwrap();
-        render_registry::test_hooks::TEST_REGISTRY_ROOT
-            .with(|cell| *cell.borrow_mut() = Some(registry_root.path().to_path_buf()));
+        paths::test_hooks::TEST_REGISTRY_DIR
+            .with(|cell| *cell.borrow_mut() = Some(registry_root.path().join("registry")));
         fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
         fs::write(target.path().join("target.txt"), "stale\n").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();

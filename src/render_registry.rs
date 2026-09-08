@@ -14,9 +14,6 @@ use templater::value::Value;
 
 use crate::{hash, template};
 
-const RENDER_TEMP_DIR: &str = "dotrift-render";
-const REGISTRY_SUBDIR: &str = "registry";
-
 /// The rendered output of one template for this run.
 #[derive(Debug)]
 pub(crate) struct Rendered {
@@ -50,7 +47,7 @@ impl RenderRegistry {
                 memo: HashMap::new(),
             };
         }
-        let dir = registry_dir();
+        let dir = crate::paths::registry_dir();
         if clear_and_create(&dir) {
             Self {
                 dir: Some(dir),
@@ -142,33 +139,15 @@ fn clear_and_create(dir: &Path) -> bool {
     fs::create_dir_all(dir).is_ok()
 }
 
-fn registry_dir() -> PathBuf {
-    #[cfg(any(test, feature = "testing"))]
-    if let Some(root) = test_hooks::TEST_REGISTRY_ROOT.with(|cell| cell.borrow().clone()) {
-        return root.join(REGISTRY_SUBDIR);
-    }
-    std::env::temp_dir()
-        .join(RENDER_TEMP_DIR)
-        .join(REGISTRY_SUBDIR)
-}
-
-#[cfg(any(test, feature = "testing"))]
-pub mod test_hooks {
-    use std::{cell::RefCell, path::PathBuf};
-
-    thread_local! {
-        pub static TEST_REGISTRY_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, fs, os::unix::fs::PermissionsExt};
 
     use tempfile::tempdir;
 
-    use super::{RenderRegistry, test_hooks::TEST_REGISTRY_ROOT};
+    use super::RenderRegistry;
     use crate::hash;
+    use crate::paths::test_hooks::TEST_REGISTRY_DIR;
     use templater::value::Value;
 
     fn context() -> HashMap<String, Value> {
@@ -179,7 +158,7 @@ mod tests {
     fn acquire_falls_back_when_the_registry_dir_cannot_be_created() {
         let root = tempdir().expect("cannot create temp dir");
         fs::write(root.path().join("blocked"), b"").expect("cannot write blocker");
-        TEST_REGISTRY_ROOT.with_borrow_mut(|cell| {
+        TEST_REGISTRY_DIR.with_borrow_mut(|cell| {
             *cell = Some(root.path().join("blocked"));
         });
 
@@ -198,8 +177,8 @@ mod tests {
     #[test]
     fn registry_entry_holds_the_render_with_owner_only_permissions() {
         let root = tempdir().expect("cannot create temp dir");
-        TEST_REGISTRY_ROOT.with_borrow_mut(|cell| {
-            *cell = Some(root.path().join("render-root"));
+        TEST_REGISTRY_DIR.with_borrow_mut(|cell| {
+            *cell = Some(root.path().join("render-root/registry"));
         });
         let mut registry = RenderRegistry::acquire(false);
 

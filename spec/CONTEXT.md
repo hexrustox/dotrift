@@ -79,7 +79,8 @@ _Avoid_: checksum, hash (when meaning the recorded state)
 The single global SQLite file, per user, holding the management state:
 one *state record* per managed path plus the active-profile selectors.
 Located at `$XDG_STATE_HOME/dotrift/state.sqlite`, falling back to
-`$HOME/.local/state/dotrift/state.sqlite`.
+`$HOME/.local/state/dotrift/state.sqlite`, then to
+`$XDG_DATA_HOME/dotrift/state.sqlite`.
 _Avoid_: db, database (when meaning the dotrift file)
 
 **State record**:

@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use miette::{Result, WrapErr, miette};
+use miette::Result;
 
 use crate::ensure_absolute;
 
@@ -64,20 +64,12 @@ impl Cli {
         } else {
             Some(match source {
                 Some(path) => ensure_absolute(&path)?,
-                None => ensure_absolute(&default_source()?)?,
+                None => ensure_absolute(&crate::paths::default_source_dir()?)?,
             })
         };
         let target = target.map(|path| ensure_absolute(&path)).transpose()?;
         Ok((source, target, command))
     }
-}
-
-fn default_source() -> Result<PathBuf> {
-    let source = dirs::data_dir()
-        .map(|data_home| data_home.join("dotfiles"))
-        .ok_or_else(|| miette!("both XDG_DATA_HOME and HOME are unset"))
-        .wrap_err("cannot resolve source directory")?;
-    Ok(source)
 }
 
 #[cfg(test)]
