@@ -6,8 +6,9 @@ use std::path::Path;
 
 use common::{ApplyScenario, TestEnv, prompt_count};
 use dotrift::ExitStatus;
-use dotrift::commands::apply::{ApplyOptions, ObstructionChoice, test_hooks::set_prompt_choice};
+use dotrift::commands::apply::ApplyOptions;
 use dotrift::hash::hash_bytes;
+use dotrift::obstruction_interaction::{ObstructionChoice, test_hooks::set_prompt_choice};
 use dotrift::state::Kind;
 use test_case::test_case;
 

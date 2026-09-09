@@ -3,8 +3,9 @@ mod common;
 use std::{fs, path::Path, path::PathBuf};
 
 use common::{ApplyScenario, TestEnv, assert_error_chain};
-use dotrift::commands::apply::{ApplyOptions, ObstructionChoice, test_hooks::set_prompt_choices};
+use dotrift::commands::apply::ApplyOptions;
 use dotrift::hash::hash_bytes;
+use dotrift::obstruction_interaction::{ObstructionChoice, test_hooks::set_prompt_choices};
 use dotrift::state::StateRecord;
 
 fn record_of(env: &TestEnv, path: &Path) -> Option<StateRecord> {

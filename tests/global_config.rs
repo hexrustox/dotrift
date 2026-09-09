@@ -5,7 +5,8 @@ use std::os::unix::fs::symlink;
 use std::path::Path;
 
 use common::{ApplyScenario, assert_error_chain, prompt_count};
-use dotrift::commands::apply::{ApplyOptions, ObstructionChoice, test_hooks::set_prompt_choice};
+use dotrift::commands::apply::ApplyOptions;
+use dotrift::obstruction_interaction::{ObstructionChoice, test_hooks::set_prompt_choice};
 use test_case::test_case;
 
 fn obstruction_setup(source: &Path, target: &Path) -> &'static str {

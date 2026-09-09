@@ -221,7 +221,7 @@ impl ApplyScenario {
 
 /// Number of obstruction prompts fired by the current test.
 pub fn prompt_count() -> usize {
-    dotrift::commands::apply::test_hooks::PROMPT_COUNT.with(|count| *count.borrow())
+    dotrift::obstruction_interaction::test_hooks::PROMPT_COUNT.with(|count| *count.borrow())
 }
 
 /// Asserts that some cause in `error`'s chain contains `needle`.

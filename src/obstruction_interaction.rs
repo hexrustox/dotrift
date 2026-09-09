@@ -1,0 +1,538 @@
+//! Asks about and shows obstructions blocking deployment.
+//!
+//! The deployer decides *what* to remove via `reconcile::decide`; this module
+//! owns the interactive prompt and the ViewDiff pager chain. No paths cross
+//! this seam: resolution returns a `ResolveAction` and removal stays in
+//! `deployer`.
+
+use std::{
+    collections::HashMap,
+    ffi::OsStr,
+    io::Write,
+    path::Path,
+    process::{Child, Command, Stdio},
+};
+
+use miette::{Result, miette};
+use strum::EnumIter;
+use templater::value::Value;
+use tui::prompt::{PromptError, PromptOption};
+
+use crate::{
+    config::{self, DeployType},
+    global_config::{GlobalConfig, PagerCommand},
+    render_registry::RenderRegistry,
+    report::diff_sink,
+};
+
+/// What the user chose at an obstruction prompt, in prompt order.
+#[derive(Debug, Clone, PartialEq, Eq, EnumIter)]
+pub enum ObstructionChoice {
+    Skip,
+    ViewDiff,
+    Replace,
+    ReplaceAll,
+}
+
+impl PromptOption for ObstructionChoice {
+    fn hotkey(&self) -> Option<char> {
+        match self {
+            Self::ReplaceAll => Some('a'),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+pub mod test_hooks {
+    use std::cell::RefCell;
+
+    use super::ObstructionChoice;
+
+    pub enum PromptChoices {
+        Single(Option<ObstructionChoice>),
+        Sequence(Vec<ObstructionChoice>),
+    }
+
+    thread_local! {
+        pub static PROMPT_CHOICE: RefCell<PromptChoices> = const { RefCell::new(PromptChoices::Single(None)) };
+        pub static PROMPT_COUNT: RefCell<usize> = const { RefCell::new(0) };
+    }
+
+    pub fn set_prompt_choice(choice: ObstructionChoice) {
+        PROMPT_CHOICE.with(|current| *current.borrow_mut() = PromptChoices::Single(Some(choice)));
+    }
+
+    pub fn set_prompt_choices(choices: impl IntoIterator<Item = ObstructionChoice>) {
+        let mut choices: Vec<_> = choices.into_iter().collect();
+        choices.reverse();
+        PROMPT_CHOICE.with(|current| *current.borrow_mut() = PromptChoices::Sequence(choices));
+    }
+}
+
+/// What the interaction resolved to: removal stays in `deployer`, so no path
+/// crosses this seam.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResolveAction {
+    Skip,
+    Cancel,
+    Replace { latch_all: bool },
+}
+
+/// Thin prompt seam for ViewDiff-loop tests.
+pub(crate) trait Prompter {
+    fn prompt(
+        &self,
+        entry: &config::DeploymentEntry,
+        obstruction: &Path,
+    ) -> std::result::Result<ObstructionChoice, PromptError>;
+}
+
+/// Thin diff seam for ViewDiff-loop tests.
+pub(crate) trait Differ {
+    fn show_diff(
+        &self,
+        entry: &config::DeploymentEntry,
+        obstruction: &Path,
+        context: &HashMap<String, Value>,
+        registry: &mut RenderRegistry,
+        global_config: &GlobalConfig,
+    ) -> Result<()>;
+}
+
+/// Trait seam the deployer depends on.
+pub(crate) trait ObstructionResolver {
+    fn resolve_obstruction(
+        &self,
+        entry: &config::DeploymentEntry,
+        obstruction: &Path,
+        context: &HashMap<String, Value>,
+        registry: &mut RenderRegistry,
+    ) -> Result<ResolveAction>;
+}
+
+/// Real prompter backed by the TUI prompt (or test hooks under cfg test).
+#[derive(Debug, Default)]
+pub(crate) struct RealPrompter;
+
+impl Prompter for RealPrompter {
+    fn prompt(
+        &self,
+        entry: &config::DeploymentEntry,
+        obstruction: &Path,
+    ) -> std::result::Result<ObstructionChoice, PromptError> {
+        prompt_for_obstruction(entry, obstruction)
+    }
+}
+
+/// Real differ backed by `diff -u` plus the pager chain.
+#[derive(Debug, Default)]
+pub(crate) struct RealDiffer;
+
+impl Differ for RealDiffer {
+    fn show_diff(
+        &self,
+        entry: &config::DeploymentEntry,
+        obstruction: &Path,
+        context: &HashMap<String, Value>,
+        registry: &mut RenderRegistry,
+        global_config: &GlobalConfig,
+    ) -> Result<()> {
+        view_diff(entry, obstruction, context, registry, global_config)
+    }
+}
+
+/// Concrete interaction: loops the ViewDiff prompt internally.
+pub(crate) struct Interaction<'a, P = RealPrompter, D = RealDiffer> {
+    pub(crate) global_config: &'a GlobalConfig,
+    pub(crate) prompter: P,
+    pub(crate) differ: D,
+}
+
+impl<'a> Interaction<'a, RealPrompter, RealDiffer> {
+    pub(crate) fn new(global_config: &'a GlobalConfig) -> Self {
+        Self {
+            global_config,
+            prompter: RealPrompter,
+            differ: RealDiffer,
+        }
+    }
+}
+
+impl<P: Prompter, D: Differ> ObstructionResolver for Interaction<'_, P, D> {
+    fn resolve_obstruction(
+        &self,
+        entry: &config::DeploymentEntry,
+        obstruction: &Path,
+        context: &HashMap<String, Value>,
+        registry: &mut RenderRegistry,
+    ) -> Result<ResolveAction> {
+        loop {
+            match self.prompter.prompt(entry, obstruction) {
+                Ok(ObstructionChoice::Skip) => return Ok(ResolveAction::Skip),
+                Ok(ObstructionChoice::ViewDiff) => {
+                    self.differ.show_diff(
+                        entry,
+                        obstruction,
+                        context,
+                        registry,
+                        self.global_config,
+                    )?;
+                }
+                Ok(ObstructionChoice::Replace) => {
+                    return Ok(ResolveAction::Replace { latch_all: false });
+                }
+                Ok(ObstructionChoice::ReplaceAll) => {
+                    return Ok(ResolveAction::Replace { latch_all: true });
+                }
+                Err(PromptError::Cancelled) => return Ok(ResolveAction::Cancel),
+                Err(error) => {
+                    return Err(miette!(error).wrap_err("cannot display obstruction prompt"));
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn prompt_for_obstruction(
+    #[allow(unused_variables)] entry: &config::DeploymentEntry,
+    #[allow(unused_variables)] obstruction: &Path,
+) -> std::result::Result<ObstructionChoice, PromptError> {
+    #[cfg(any(test, feature = "testing"))]
+    {
+        use test_hooks::{PROMPT_CHOICE, PROMPT_COUNT, PromptChoices};
+
+        PROMPT_COUNT.with_borrow_mut(|count| *count += 1);
+        PROMPT_CHOICE.with(|current| match &mut *current.borrow_mut() {
+            PromptChoices::Single(None) => Err(PromptError::Cancelled),
+            PromptChoices::Single(Some(choice)) => Ok(choice.clone()),
+            PromptChoices::Sequence(choices) => Ok(choices
+                .pop()
+                .expect("obstruction prompt choices exhausted by test")),
+        })
+    }
+
+    #[cfg(not(any(test, feature = "testing")))]
+    {
+        use std::fs;
+
+        use crossterm::style::Color;
+
+        use crate::prettify_path;
+
+        let question = format!(
+            "Cannot deploy {} {} because {} {} is already present.\nHow would you like to proceed?",
+            path_kind(&entry.source_path)?,
+            prettify_path(&entry.source_path).display(),
+            path_kind(obstruction)?,
+            prettify_path(obstruction).display()
+        );
+        let style = tui::prompt::PromptStyle {
+            done_question: Color::Grey,
+            ..Default::default()
+        };
+        let should_show_diff = fs::metadata(&entry.source_path)
+            .is_ok_and(|metadata| metadata.is_file())
+            && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
+        tui::prompt::SelectPrompt::new()
+            .question(question)
+            .style(style)
+            .filter(move |choice| should_show_diff || *choice != ObstructionChoice::ViewDiff)
+            .interact()
+    }
+}
+
+#[cfg(not(any(test, feature = "testing")))]
+fn path_kind(path: &Path) -> std::io::Result<&'static str> {
+    let meta = std::fs::symlink_metadata(path)?;
+    Ok(if meta.is_dir() {
+        "directory"
+    } else if meta.is_file() {
+        "file"
+    } else if meta.is_symlink() {
+        "symlink"
+    } else {
+        "unknown"
+    })
+}
+
+/// Pure pager precedence: `DOTRIFT_PAGER` > Global config pager > `PAGER`
+/// best-effort > `diff_sink`. Empty strings are skipped.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PagerSelection<'a> {
+    EnvDotrift(String),
+    Config(&'a PagerCommand),
+    EnvPager(String),
+    Stdout,
+}
+
+pub(crate) fn pager_chain<'a>(
+    dotrift_pager: Option<String>,
+    config: Option<&'a PagerCommand>,
+    pager: Option<String>,
+) -> PagerSelection<'a> {
+    if let Some(command) = dotrift_pager.filter(|value| !value.trim().is_empty()) {
+        return PagerSelection::EnvDotrift(command);
+    }
+    if let Some(pager) = config {
+        return PagerSelection::Config(pager);
+    }
+    if let Some(command) = pager.filter(|value| !value.trim().is_empty()) {
+        return PagerSelection::EnvPager(command);
+    }
+    PagerSelection::Stdout
+}
+
+fn nonempty_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
+pub(crate) fn view_diff(
+    entry: &config::DeploymentEntry,
+    target: &Path,
+    context: &HashMap<String, Value>,
+    registry: &mut RenderRegistry,
+    global_config: &GlobalConfig,
+) -> Result<()> {
+    let rendered = if entry.deploy_type == DeployType::Template {
+        Some(
+            registry
+                .ensure_rendered(&entry.source_path, context)?
+                .ok_or_else(|| miette!("template render registry is unavailable"))?
+                .path,
+        )
+    } else {
+        None
+    };
+    let source = rendered
+        .as_ref()
+        .map_or(entry.source_path.as_path(), |path| path.as_path());
+
+    std::io::stdout().flush().map_err(|error| miette!(error))?;
+
+    match pager_chain(
+        nonempty_env("DOTRIFT_PAGER"),
+        global_config.pager(),
+        nonempty_env("PAGER"),
+    ) {
+        PagerSelection::EnvDotrift(command) => {
+            let child = spawn_pager(&command)
+                .map_err(|error| miette!(error).wrap_err("cannot run DOTRIFT_PAGER"))?;
+            diff_through(child, target, &entry.source_path, source)
+        }
+        PagerSelection::Config(pager) => {
+            let child = spawn_config_pager(pager)
+                .map_err(|error| miette!(error).wrap_err("cannot run the configured pager"))?;
+            diff_through(child, target, &entry.source_path, source)
+        }
+        PagerSelection::EnvPager(command) => match spawn_pager(&command) {
+            Ok(child) => diff_through(child, target, &entry.source_path, source),
+            Err(_) => {
+                let mut output = diff_sink();
+                run_diff_into(target, &entry.source_path, source, &mut output)
+            }
+        },
+        PagerSelection::Stdout => {
+            let mut output = diff_sink();
+            run_diff_into(target, &entry.source_path, source, &mut output)
+        }
+    }
+}
+
+fn diff_through(mut child: Child, target: &Path, source_label: &Path, source: &Path) -> Result<()> {
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| miette!("pager stdin is unavailable"))?;
+    run_diff_into(target, source_label, source, &mut stdin)?;
+    drop(stdin);
+    child.wait().map_err(|error| miette!(error))?;
+    Ok(())
+}
+
+fn run_diff_into<W: std::io::Write>(
+    target: &Path,
+    source_label: &Path,
+    source: &Path,
+    dest: &mut W,
+) -> Result<()> {
+    let mut child = Command::new("diff")
+        .arg("-u")
+        .arg("--label")
+        .arg(target)
+        .arg("--label")
+        .arg(source_label)
+        .arg(target)
+        .arg(source)
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|error| miette!(error).wrap_err("cannot run diff"))?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| miette!("diff stdout is unavailable"))?;
+    std::io::copy(&mut stdout, dest).map_err(|error| miette!(error))?;
+    if child.wait().map_err(|error| miette!(error))?.code() == Some(2) {
+        return Err(miette!("diff exited with an error"));
+    }
+    Ok(())
+}
+
+fn spawn_pager(command: &str) -> std::io::Result<Child> {
+    let mut parts = command.split_whitespace();
+    let Some(program) = parts.next() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "pager command is empty",
+        ));
+    };
+    spawn_pager_program(program, parts)
+}
+
+fn spawn_config_pager(pager: &PagerCommand) -> std::io::Result<Child> {
+    spawn_pager_program(&pager.command, &pager.args)
+}
+
+fn spawn_pager_program<I, S>(program: &str, args: I) -> std::io::Result<Child>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .spawn()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    fn test_config_pager() -> PagerCommand {
+        PagerCommand {
+            command: "config-pager".to_string(),
+            args: vec![],
+        }
+    }
+
+    #[test]
+    fn pager_chain_prefers_dotrift_pager_over_config_and_env() {
+        let config = test_config_pager();
+        let selection = pager_chain(
+            Some("dotrift-pager".to_string()),
+            Some(&config),
+            Some("env-pager".to_string()),
+        );
+        assert_eq!(
+            selection,
+            PagerSelection::EnvDotrift("dotrift-pager".to_string())
+        );
+    }
+
+    #[test]
+    fn pager_chain_prefers_config_over_env_pager() {
+        let config = test_config_pager();
+        let selection = pager_chain(None, Some(&config), Some("env-pager".to_string()));
+        assert_eq!(selection, PagerSelection::Config(&config));
+    }
+
+    #[test]
+    fn pager_chain_uses_env_pager_when_nothing_else_set() {
+        let selection = pager_chain(None, None, Some("env-pager".to_string()));
+        assert_eq!(selection, PagerSelection::EnvPager("env-pager".to_string()));
+    }
+
+    #[test]
+    fn pager_chain_blank_dotrift_pager_falls_back_to_config() {
+        let config = test_config_pager();
+        let selection = pager_chain(Some("   ".to_string()), Some(&config), None);
+        assert_eq!(selection, PagerSelection::Config(&config));
+    }
+
+    #[test]
+    fn pager_chain_skips_empty_strings() {
+        let selection = pager_chain(Some("   ".to_string()), None, Some("".to_string()));
+        assert_eq!(selection, PagerSelection::Stdout);
+    }
+
+    #[test]
+    fn pager_chain_falls_back_to_stdout() {
+        let selection: PagerSelection<'_> = pager_chain(None, None, None);
+        assert_eq!(selection, PagerSelection::Stdout);
+    }
+
+    struct SeqPrompter {
+        choices: RefCell<Vec<ObstructionChoice>>,
+        calls: RefCell<usize>,
+    }
+
+    impl Prompter for SeqPrompter {
+        fn prompt(
+            &self,
+            _entry: &config::DeploymentEntry,
+            _obstruction: &Path,
+        ) -> std::result::Result<ObstructionChoice, PromptError> {
+            *self.calls.borrow_mut() += 1;
+            Ok(self.choices.borrow_mut().pop().expect("choices exhausted"))
+        }
+    }
+
+    struct CountingDiffer {
+        calls: RefCell<usize>,
+    }
+
+    impl Differ for CountingDiffer {
+        fn show_diff(
+            &self,
+            _entry: &config::DeploymentEntry,
+            _obstruction: &Path,
+            _context: &HashMap<String, Value>,
+            _registry: &mut RenderRegistry,
+            _global_config: &GlobalConfig,
+        ) -> Result<()> {
+            *self.calls.borrow_mut() += 1;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn view_diff_then_replace_shows_once_and_replaces() {
+        use tempfile::tempdir;
+
+        use crate::environment::Environment;
+
+        let state = tempdir().unwrap();
+        let env = Environment::test_root(state.path());
+        let global_config = GlobalConfig::default();
+        let mut registry = RenderRegistry::acquire(&env, true);
+        let entry = config::DeploymentEntry {
+            source_path: state.path().join("src"),
+            target_path: state.path().join("dst"),
+            deploy_type: DeployType::Copy,
+            mode: None,
+        };
+        let interaction = Interaction {
+            global_config: &global_config,
+            prompter: SeqPrompter {
+                // Popped: ViewDiff first, then Replace.
+                choices: RefCell::new(vec![
+                    ObstructionChoice::Replace,
+                    ObstructionChoice::ViewDiff,
+                ]),
+                calls: RefCell::new(0),
+            },
+            differ: CountingDiffer {
+                calls: RefCell::new(0),
+            },
+        };
+        let action = interaction
+            .resolve_obstruction(&entry, &entry.target_path, &HashMap::new(), &mut registry)
+            .unwrap();
+        assert_eq!(action, ResolveAction::Replace { latch_all: false });
+        assert_eq!(*interaction.prompter.calls.borrow(), 2);
+        assert_eq!(*interaction.differ.calls.borrow(), 1);
+    }
+}

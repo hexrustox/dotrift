@@ -64,7 +64,7 @@ impl GlobalConfig {
 
 /// A pager program from the global config, used verbatim with literal
 /// arguments.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PagerCommand {
     pub(crate) command: String,
     pub(crate) args: Vec<String>,

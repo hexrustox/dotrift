@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use common::{ApplyScenario, EnvVarGuard, TestEnv, snapshot_settings, test_name};
-use dotrift::commands::apply::{ObstructionChoice, test_hooks::set_prompt_choices};
+use dotrift::obstruction_interaction::{ObstructionChoice, test_hooks::set_prompt_choices};
 use test_case::test_case;
 
 fn capture_script_named(env: &TestEnv, name: &str) -> (PathBuf, PathBuf) {
