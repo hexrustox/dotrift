@@ -4,11 +4,11 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 
-use common::{ApplyScenario, TestEnv, prompt_count};
+use common::{ApplyScenario, QueuePrompter, TestEnv};
 use dotrift::ExitStatus;
 use dotrift::commands::apply::ApplyOptions;
 use dotrift::hash::hash_bytes;
-use dotrift::obstruction_interaction::{ObstructionChoice, test_hooks::set_prompt_choice};
+use dotrift::obstruction_interaction::ObstructionChoice;
 use dotrift::state::Kind;
 use test_case::test_case;
 
@@ -43,7 +43,6 @@ fn symlink_setup(identical: bool) -> impl Fn(&Path, &Path) -> &'static str {
         let record = record_of(env, &target.join("target.txt")).unwrap();
         assert_eq!(record.kind, Kind::Symlink);
         assert_eq!(record.source_path, source.join("file.txt"));
-        assert_eq!(prompt_count(), 0);
     }
     ; "identical_symlink_obstruction_replaced_without_prompt"
 )]
@@ -55,11 +54,19 @@ fn symlink_obstruction_behaviors(
 ) {
     let scenario = ApplyScenario::new(setup);
     scenario.env.write_global_config(REPLACE_IDENTICAL);
-    if let Some(choice) = choice {
-        set_prompt_choice(choice);
-    }
-
-    let status = scenario.try_run().expect("apply failed");
+    let status = match choice {
+        Some(choice) => {
+            let prompter = QueuePrompter::once(choice);
+            let status = scenario
+                .try_run_with_prompter(&prompter)
+                .expect("apply failed");
+            assert_eq!(prompter.calls(), 1);
+            status
+        }
+        // Identical obstructions replace without prompting; the panicking
+        // default proves no prompt fires.
+        None => scenario.try_run().expect("apply failed"),
+    };
 
     assert_eq!(status, expected_status);
     assert(&scenario);
@@ -89,7 +96,6 @@ fn symlink_obstruction_behaviors(
         let record = record_of(env, &target.join("target.txt")).unwrap();
         assert_eq!(record.kind, Kind::File);
         assert_eq!(record.content_hash, Some(String::from(hash_bytes(b"same"))));
-        assert_eq!(prompt_count(), 0);
     }
     ; "identical_bytes_with_different_mode_replaced_and_rule_mode_reapplied"
 )]
@@ -103,7 +109,6 @@ fn symlink_obstruction_behaviors(
     ExitStatus::Skipped,
     |ApplyScenario { target, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"old");
-        assert_eq!(prompt_count(), 1);
     }
     ; "divergent_copy_obstruction_still_prompts"
 )]
@@ -115,11 +120,19 @@ fn copy_obstruction_behaviors(
 ) {
     let scenario = ApplyScenario::new(setup);
     scenario.env.write_global_config(REPLACE_IDENTICAL);
-    if let Some(choice) = choice {
-        set_prompt_choice(choice);
-    }
-
-    let status = scenario.try_run().expect("apply failed");
+    let status = match choice {
+        Some(choice) => {
+            let prompter = QueuePrompter::once(choice);
+            let status = scenario
+                .try_run_with_prompter(&prompter)
+                .expect("apply failed");
+            assert_eq!(prompter.calls(), 1);
+            status
+        }
+        // Identical obstructions replace without prompting; the panicking
+        // default proves no prompt fires.
+        None => scenario.try_run().expect("apply failed"),
+    };
 
     assert_eq!(status, expected_status);
     assert(&scenario);
@@ -144,7 +157,6 @@ fn template_setup(target_bytes: &[u8]) -> impl Fn(&Path, &Path) -> &'static str 
     ExitStatus::Success,
     |ApplyScenario { target, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"hello\n");
-        assert_eq!(prompt_count(), 0);
     }
     ; "identical_template_obstruction_replaced_without_prompt"
 )]
@@ -156,11 +168,19 @@ fn template_obstruction_behaviors(
 ) {
     let scenario = ApplyScenario::new(setup);
     scenario.env.write_global_config(REPLACE_IDENTICAL);
-    if let Some(choice) = choice {
-        set_prompt_choice(choice);
-    }
-
-    let status = scenario.try_run().expect("apply failed");
+    let status = match choice {
+        Some(choice) => {
+            let prompter = QueuePrompter::once(choice);
+            let status = scenario
+                .try_run_with_prompter(&prompter)
+                .expect("apply failed");
+            assert_eq!(prompter.calls(), 1);
+            status
+        }
+        // Identical obstructions replace without prompting; the panicking
+        // default proves no prompt fires.
+        None => scenario.try_run().expect("apply failed"),
+    };
 
     assert_eq!(status, expected_status);
     assert(&scenario);
@@ -174,13 +194,15 @@ fn parent_obstruction_still_prompts() {
         "[portal]\n\"file.txt\" = \"a/b.txt\"\n"
     });
     scenario.env.write_global_config(REPLACE_IDENTICAL);
-    set_prompt_choice(ObstructionChoice::Replace);
+    let prompter = QueuePrompter::once(ObstructionChoice::Replace);
 
-    let status = scenario.try_run().expect("apply failed");
+    let status = scenario
+        .try_run_with_prompter(&prompter)
+        .expect("apply failed");
 
+    assert_eq!(prompter.calls(), 1);
     assert_eq!(status, ExitStatus::Success);
     assert_eq!(fs::read(scenario.target.join("a/b.txt")).unwrap(), b"new");
-    assert_eq!(prompt_count(), 1);
 }
 
 #[test]
@@ -193,14 +215,16 @@ fn replace_all_latch_subsumes_the_identical_check() {
         "[portal]\n\"a.txt\" = \"a.txt\"\n\"b.txt\" = \"b.txt\"\n"
     });
     scenario.env.write_global_config(REPLACE_IDENTICAL);
-    set_prompt_choice(ObstructionChoice::ReplaceAll);
+    let prompter = QueuePrompter::once(ObstructionChoice::ReplaceAll);
 
-    let status = scenario.try_run().expect("apply failed");
+    let status = scenario
+        .try_run_with_prompter(&prompter)
+        .expect("apply failed");
 
+    assert_eq!(prompter.calls(), 1);
     assert_eq!(status, ExitStatus::Success);
     assert_eq!(fs::read(scenario.target.join("a.txt")).unwrap(), b"A");
     assert_eq!(fs::read(scenario.target.join("b.txt")).unwrap(), b"B");
-    assert_eq!(prompt_count(), 1);
 }
 
 fn dry_run_line(scenario: &ApplyScenario, path: &Path) -> String {
@@ -236,7 +260,6 @@ fn dry_run_reports_identical_obstruction_as_replaced() {
         fs::read(scenario.target.join("target.txt")).unwrap(),
         b"same"
     );
-    assert_eq!(prompt_count(), 0);
 }
 
 #[test]

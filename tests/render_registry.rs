@@ -2,10 +2,10 @@ mod common;
 
 use std::{fs, path::Path, path::PathBuf};
 
-use common::{ApplyScenario, TestEnv, assert_error_chain};
+use common::{ApplyScenario, QueuePrompter, TestEnv, assert_error_chain};
 use dotrift::commands::apply::ApplyOptions;
 use dotrift::hash::hash_bytes;
-use dotrift::obstruction_interaction::{ObstructionChoice, test_hooks::set_prompt_choices};
+use dotrift::obstruction_interaction::ObstructionChoice;
 use dotrift::state::StateRecord;
 
 fn record_of(env: &TestEnv, path: &Path) -> Option<StateRecord> {
@@ -122,9 +122,9 @@ fn dry_run_leaves_a_preexisting_registry_untouched() {
 fn view_diff_fails_when_the_registry_is_unavailable() {
     let scenario = ApplyScenario::new(obstructed_template_setup);
     fs::write(scenario.env.path("render-registry"), b"").unwrap();
-    set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+    let prompter = QueuePrompter::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
 
-    let error = scenario.try_run().unwrap_err();
+    let error = scenario.try_run_with_prompter(&prompter).unwrap_err();
 
     assert_error_chain(&error, "template render registry is unavailable");
     assert_eq!(
@@ -156,9 +156,10 @@ fn template_deploy_falls_back_when_the_registry_is_unavailable() {
 #[test]
 fn view_diff_then_replace_deploys_the_shared_render() {
     let scenario = ApplyScenario::new(obstructed_template_setup);
-    set_prompt_choices([ObstructionChoice::ViewDiff, ObstructionChoice::Replace]);
+    let prompter =
+        QueuePrompter::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Replace]);
 
-    scenario.run();
+    scenario.run_with_prompter(&prompter);
 
     assert_eq!(
         fs::read(scenario.target.join("target.txt")).unwrap(),

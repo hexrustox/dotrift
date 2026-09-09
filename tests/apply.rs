@@ -6,11 +6,11 @@ use std::{
     path::Path,
 };
 
-use common::{ApplyScenario, TestEnv, assert_error_chain, prompt_count};
+use common::{ApplyScenario, CancellingPrompter, QueuePrompter, TestEnv, assert_error_chain};
 use dotrift::ExitStatus;
 use dotrift::commands::apply::ApplyOptions;
 use dotrift::hash::hash_bytes;
-use dotrift::obstruction_interaction::{ObstructionChoice, test_hooks::set_prompt_choice};
+use dotrift::obstruction_interaction::ObstructionChoice;
 use dotrift::state::Kind;
 use test_case::test_case;
 
@@ -232,7 +232,6 @@ fn fresh_env_behaviors(setup: impl Fn(&TestEnv), options: ApplyOptions, assert: 
         assert_eq!(fs::read_link(&link).unwrap(), source.join("file.txt"));
         assert_eq!(fs::read(&link).unwrap(), b"new");
         assert_eq!(record_of(env, &link).unwrap().source_path, source.join("file.txt"));
-        assert_eq!(prompt_count(), 0);
     }
     ; "symlink_source_change_rewires_without_prompt"
 )]
@@ -380,7 +379,6 @@ fn profile_activation_between_runs_rerenders_override() {
     |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"old");
         assert_eq!(record_of(env, &target.join("target.txt")), None);
-        assert_eq!(prompt_count(), 1);
     }
     ; "skipping_unmanaged_target_keeps_file_without_record_and_reports_skipped"
 )]
@@ -413,7 +411,6 @@ fn profile_activation_between_runs_rerenders_override() {
     |ApplyScenario { target, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("a.txt")).unwrap(), b"new-a");
         assert_eq!(fs::read(target.join("b.txt")).unwrap(), b"new-b");
-        assert_eq!(prompt_count(), 1);
     }
     ; "replace_all_latches_across_obstructions"
 )]
@@ -431,7 +428,6 @@ fn profile_activation_between_runs_rerenders_override() {
         assert!(record_of(env, &target.join("a.txt")).is_some());
         assert_eq!(fs::read(target.join("z.txt")).unwrap(), b"old");
         assert_eq!(record_of(env, &target.join("z.txt")), None);
-        assert_eq!(prompt_count(), 1);
     }
     ; "cancelled_prompt_stops_run_preserving_completed_entries"
 )]
@@ -442,11 +438,24 @@ fn unmanaged_target_obstruction_behaviors(
     assert: impl Fn(&ApplyScenario),
 ) {
     let scenario = ApplyScenario::new(setup);
-    if let Some(choice) = choice {
-        set_prompt_choice(choice);
-    }
-
-    let status = scenario.try_run().expect("apply failed");
+    let status = match choice {
+        Some(choice) => {
+            let prompter = QueuePrompter::once(choice);
+            let status = scenario
+                .try_run_with_prompter(&prompter)
+                .expect("apply failed");
+            assert_eq!(prompter.calls(), 1);
+            status
+        }
+        None => {
+            let prompter = CancellingPrompter::new();
+            let status = scenario
+                .try_run_with_prompter(&prompter)
+                .expect("apply failed");
+            assert_eq!(prompter.calls(), 1);
+            status
+        }
+    };
 
     assert_eq!(status, expected_status);
     assert(&scenario);
@@ -470,7 +479,6 @@ fn unmanaged_target_obstruction_behaviors(
                 .content_hash,
             Some(String::from(hash_bytes(b"original")))
         );
-        assert_eq!(prompt_count(), 1);
     }
     ; "skipping_tampered_managed_copy_retains_tamper_and_old_record"
 )]
@@ -492,7 +500,6 @@ fn unmanaged_target_obstruction_behaviors(
                 .content_hash,
             Some(String::from(hash_bytes(b"original")))
         );
-        assert_eq!(prompt_count(), 1);
     }
     ; "replacing_tampered_managed_copy_restores_content_and_hash"
 )]
@@ -517,7 +524,6 @@ fn unmanaged_target_obstruction_behaviors(
         );
         assert_eq!(fs::read_link(&link).unwrap(), source.join("file.txt"));
         assert_eq!(record_of(env, &link).unwrap().kind, Kind::Symlink);
-        assert_eq!(prompt_count(), 1);
     }
     ; "replacing_tampered_managed_symlink_restores_link_and_kind"
 )]
@@ -530,11 +536,14 @@ fn tampered_managed_target_behaviors(
 ) {
     let scenario = ApplyScenario::new(setup);
     scenario.run();
-    set_prompt_choice(choice);
+    let prompter = QueuePrompter::once(choice);
     tamper(&scenario.source, &scenario.target);
 
-    let status = scenario.try_run().expect("apply failed");
+    let status = scenario
+        .try_run_with_prompter(&prompter)
+        .expect("apply failed");
 
+    assert_eq!(prompter.calls(), 1);
     assert_eq!(status, expected_status);
     assert(&scenario);
 }
@@ -584,7 +593,6 @@ fn tampered_managed_target_behaviors(
         assert_eq!(fs::read(target.join("real/file.txt")).unwrap(), b"behind");
         assert_eq!(fs::read(target.join("link/file.txt")).unwrap(), b"behind");
         assert!(record_of(env, &target.join("link/file.txt")).is_some());
-        assert_eq!(prompt_count(), 0);
     }
     ; "directory_symlink_parent_is_traversed_for_deployment"
 )]
@@ -613,11 +621,19 @@ fn obstructed_parent_path_behaviors(
     assert: impl Fn(&ApplyScenario),
 ) {
     let scenario = ApplyScenario::new(setup);
-    if let Some(choice) = choice {
-        set_prompt_choice(choice);
-    }
-
-    let status = scenario.try_run().expect("apply failed");
+    let status = match choice {
+        Some(choice) => {
+            let prompter = QueuePrompter::once(choice);
+            let status = scenario
+                .try_run_with_prompter(&prompter)
+                .expect("apply failed");
+            assert_eq!(prompter.calls(), 1);
+            status
+        }
+        // Symlink traversal deploys without prompting; the panicking default
+        // proves no prompt fires.
+        None => scenario.try_run().expect("apply failed"),
+    };
 
     assert_eq!(status, expected_status);
     assert(&scenario);
@@ -921,26 +937,34 @@ fn skipped_entry_blocks_clean_up_for_that_run() {
     scenario
         .write_config("[portal]\n\"a.txt\" = \"a.txt\"\n[rule]\n\"a.txt\" = { type = \"copy\" }\n");
 
-    set_prompt_choice(ObstructionChoice::Skip);
+    let skip = QueuePrompter::once(ObstructionChoice::Skip);
     let status = scenario
-        .try_run_with_options(ApplyOptions {
-            clean_up: true,
-            ..Default::default()
-        })
+        .try_run_with_options_and_prompter(
+            ApplyOptions {
+                clean_up: true,
+                ..Default::default()
+            },
+            &skip,
+        )
         .expect("apply failed");
 
+    assert_eq!(skip.calls(), 1);
     assert_eq!(status, ExitStatus::Skipped);
     assert!(scenario.target.join("b.txt").is_symlink());
     assert!(record_of(&scenario.env, &scenario.target.join("b.txt")).is_some());
 
-    set_prompt_choice(ObstructionChoice::Replace);
+    let replace = QueuePrompter::once(ObstructionChoice::Replace);
     let status = scenario
-        .try_run_with_options(ApplyOptions {
-            clean_up: true,
-            ..Default::default()
-        })
+        .try_run_with_options_and_prompter(
+            ApplyOptions {
+                clean_up: true,
+                ..Default::default()
+            },
+            &replace,
+        )
         .expect("apply failed");
 
+    assert_eq!(replace.calls(), 1);
     assert_eq!(status, ExitStatus::Success);
     assert_eq!(fs::read(scenario.target.join("a.txt")).unwrap(), b"A");
     assert!(fs::symlink_metadata(scenario.target.join("b.txt")).is_err());
@@ -991,7 +1015,6 @@ fn records_outside_current_target_root_are_never_candidates() {
     |ApplyScenario { target, env, .. }: &ApplyScenario| {
         assert_eq!(fs::read(target.join("target.txt")).unwrap(), b"unmanaged");
         assert_eq!(record_of(env, &target.join("target.txt")), None);
-        assert_eq!(prompt_count(), 0);
     }
     ; "dry_run_leaves_obstruction_unprompted_and_untouched"
 )]
@@ -1016,7 +1039,6 @@ fn records_outside_current_target_root_are_never_candidates() {
                 .content_hash,
             Some(String::from(hash_bytes(b"original")))
         );
-        assert_eq!(prompt_count(), 0);
     }
     ; "dry_run_leaves_tampered_managed_target_untouched"
 )]

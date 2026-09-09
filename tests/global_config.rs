@@ -4,9 +4,9 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::Path;
 
-use common::{ApplyScenario, assert_error_chain, prompt_count};
+use common::{ApplyScenario, QueuePrompter, assert_error_chain};
 use dotrift::commands::apply::ApplyOptions;
-use dotrift::obstruction_interaction::{ObstructionChoice, test_hooks::set_prompt_choice};
+use dotrift::obstruction_interaction::ObstructionChoice;
 use test_case::test_case;
 
 fn obstruction_setup(source: &Path, target: &Path) -> &'static str {
@@ -20,15 +20,17 @@ fn missing_config_file_leaves_apply_behavior_unchanged() {
     let scenario = ApplyScenario::new(obstruction_setup);
     scenario.env.write_global_config("");
 
-    set_prompt_choice(ObstructionChoice::Skip);
-    let status = scenario.try_run().expect("apply failed");
+    let prompter = QueuePrompter::once(ObstructionChoice::Skip);
+    let status = scenario
+        .try_run_with_prompter(&prompter)
+        .expect("apply failed");
 
+    assert_eq!(prompter.calls(), 1);
     assert_eq!(status, dotrift::ExitStatus::Skipped);
     assert_eq!(
         fs::read(scenario.target.join("target.txt")).unwrap(),
         b"old"
     );
-    assert_eq!(prompt_count(), 1);
 }
 
 #[test]
@@ -43,7 +45,6 @@ fn malformed_toml_fails_the_run_before_any_change() {
         fs::read(scenario.target.join("target.txt")).unwrap(),
         b"old"
     );
-    assert_eq!(prompt_count(), 0);
 }
 
 #[test]
@@ -63,7 +64,6 @@ fn malformed_toml_fails_a_dry_run() {
         fs::read(scenario.target.join("target.txt")).unwrap(),
         b"old"
     );
-    assert_eq!(prompt_count(), 0);
 }
 
 #[test_case("[bogus]\nkey = 1" ; "unknown_root_section_rejected")]
@@ -88,7 +88,6 @@ fn invalid_config_fails_the_run_before_any_change(toml: &str) {
         fs::read(scenario.target.join("target.txt")).unwrap(),
         b"old"
     );
-    assert_eq!(prompt_count(), 0);
 }
 
 #[test_case("[pager]\ncommand = \"less\"\n[apply]\nreplace-identical = false" ; "both_sections_accepted")]
@@ -100,11 +99,13 @@ fn valid_config_is_accepted(toml: &str) {
     let scenario = ApplyScenario::new(obstruction_setup);
     scenario.env.write_global_config(toml);
 
-    set_prompt_choice(ObstructionChoice::Skip);
-    let status = scenario.try_run().expect("apply failed");
+    let prompter = QueuePrompter::once(ObstructionChoice::Skip);
+    let status = scenario
+        .try_run_with_prompter(&prompter)
+        .expect("apply failed");
 
     assert_eq!(status, dotrift::ExitStatus::Skipped);
-    assert_eq!(prompt_count(), 1);
+    assert_eq!(prompter.calls(), 1);
 }
 
 #[test]
@@ -122,7 +123,6 @@ fn config_path_being_a_directory_fails_the_run() {
         fs::read(scenario.target.join("target.txt")).unwrap(),
         b"old"
     );
-    assert_eq!(prompt_count(), 0);
 }
 
 #[test]
@@ -133,11 +133,13 @@ fn dangling_symlink_at_config_path_counts_as_missing() {
     fs::remove_file(&path).unwrap();
     symlink("nowhere", &path).unwrap();
 
-    set_prompt_choice(ObstructionChoice::Skip);
-    let status = scenario.try_run().expect("apply failed");
+    let prompter = QueuePrompter::once(ObstructionChoice::Skip);
+    let status = scenario
+        .try_run_with_prompter(&prompter)
+        .expect("apply failed");
 
     assert_eq!(status, dotrift::ExitStatus::Skipped);
-    assert_eq!(prompt_count(), 1);
+    assert_eq!(prompter.calls(), 1);
 }
 
 #[test]

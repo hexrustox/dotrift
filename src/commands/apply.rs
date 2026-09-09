@@ -13,7 +13,7 @@ use crate::{
     deployer::{DeployOutcome, Deployer, ReplaceLatch, cleanup, describe_decision},
     environment::Environment,
     global_config::GlobalConfig,
-    obstruction_interaction::Interaction,
+    obstruction_interaction::{Interaction, Prompter, RealDiffer, RealPrompter},
     prettify_path,
     reconcile::decide,
     render_registry::RenderRegistry,
@@ -40,12 +40,44 @@ pub fn run(
     run_with_options(source, target_override, ApplyOptions::default(), env, color)
 }
 
+/// Reconciles the desired deployment with default options, answering
+/// obstruction prompts from `prompter`.
+pub fn run_with_prompter(
+    source: &Path,
+    target_override: Option<PathBuf>,
+    env: &Environment,
+    color: bool,
+    prompter: &dyn Prompter,
+) -> Result<ExitStatus> {
+    run_with_options_and_prompter(
+        source,
+        target_override,
+        ApplyOptions::default(),
+        env,
+        color,
+        prompter,
+    )
+}
+
 pub fn run_with_options(
     source: &Path,
     target_override: Option<PathBuf>,
     options: ApplyOptions,
     env: &Environment,
     color: bool,
+) -> Result<ExitStatus> {
+    run_with_options_and_prompter(source, target_override, options, env, color, &RealPrompter)
+}
+
+/// Reconciles the desired deployment, answering obstruction prompts from
+/// `prompter` while running the real ViewDiff pager chain.
+pub fn run_with_options_and_prompter(
+    source: &Path,
+    target_override: Option<PathBuf>,
+    options: ApplyOptions,
+    env: &Environment,
+    color: bool,
+    prompter: &dyn Prompter,
 ) -> Result<ExitStatus> {
     let _lock = StateLock::acquire(env)?;
     let global_config = GlobalConfig::load(env)?;
@@ -94,7 +126,7 @@ pub fn run_with_options(
         return Ok(ExitStatus::Success);
     }
 
-    let interaction = Interaction::new(&global_config);
+    let interaction = Interaction::from_parts(&global_config, prompter, RealDiffer);
     let mut latch = ReplaceLatch::default();
     let mut deployer = Deployer::new(
         &database,

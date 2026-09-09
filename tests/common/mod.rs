@@ -2,7 +2,10 @@
 
 use dotrift::commands::apply::ApplyOptions;
 use dotrift::environment::Environment;
+use dotrift::obstruction_interaction::{ObstructionChoice, Prompter};
 use dotrift::state::StateDatabase;
+use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -174,35 +177,138 @@ impl ApplyScenario {
     }
 
     pub fn run_with_options(&self, options: ApplyOptions) {
-        self.try_run_with_options(options).expect("apply failed");
+        self.try_run_with_options_and_prompter(options, &PanickingPrompter)
+            .expect("apply failed");
+    }
+
+    pub fn run_with_prompter(&self, prompter: &dyn Prompter) {
+        self.try_run_with_prompter(prompter).expect("apply failed");
+    }
+
+    pub fn run_with_options_and_prompter(&self, options: ApplyOptions, prompter: &dyn Prompter) {
+        self.try_run_with_options_and_prompter(options, prompter)
+            .expect("apply failed");
     }
 
     pub fn try_run(&self) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
-        dotrift::commands::apply::run(
-            &self.source,
-            Some(self.target.clone()),
-            self.env.env(),
-            false,
-        )
+        self.try_run_with_prompter(&PanickingPrompter)
     }
 
     pub fn try_run_with_options(
         &self,
         options: ApplyOptions,
     ) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
-        dotrift::commands::apply::run_with_options(
+        self.try_run_with_options_and_prompter(options, &PanickingPrompter)
+    }
+
+    pub fn try_run_with_prompter(
+        &self,
+        prompter: &dyn Prompter,
+    ) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
+        dotrift::commands::apply::run_with_prompter(
+            &self.source,
+            Some(self.target.clone()),
+            self.env.env(),
+            false,
+            prompter,
+        )
+    }
+
+    pub fn try_run_with_options_and_prompter(
+        &self,
+        options: ApplyOptions,
+        prompter: &dyn Prompter,
+    ) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
+        dotrift::commands::apply::run_with_options_and_prompter(
             &self.source,
             Some(self.target.clone()),
             options,
             self.env.env(),
             false,
+            prompter,
         )
     }
 }
 
-/// Number of obstruction prompts fired by the current test.
-pub fn prompt_count() -> usize {
-    dotrift::obstruction_interaction::test_hooks::PROMPT_COUNT.with(|count| *count.borrow())
+/// Scripted obstruction prompter: answers each prompt from a queue, in order.
+/// Panics when the queue is exhausted, so a test that prompts more often than
+/// scripted fails loudly instead of silently cancelling.
+pub struct QueuePrompter {
+    choices: RefCell<VecDeque<ObstructionChoice>>,
+    calls: Cell<usize>,
+}
+
+impl QueuePrompter {
+    pub fn once(choice: ObstructionChoice) -> Self {
+        Self::sequence([choice])
+    }
+
+    pub fn sequence(choices: impl IntoIterator<Item = ObstructionChoice>) -> Self {
+        Self {
+            choices: RefCell::new(choices.into_iter().collect()),
+            calls: Cell::new(0),
+        }
+    }
+
+    pub fn calls(&self) -> usize {
+        self.calls.get()
+    }
+}
+
+impl Prompter for QueuePrompter {
+    fn prompt(
+        &self,
+        _entry: &dotrift::config::DeploymentEntry,
+        _obstruction: &Path,
+    ) -> std::result::Result<ObstructionChoice, tui::prompt::PromptError> {
+        self.calls.set(self.calls.get() + 1);
+        Ok(self
+            .choices
+            .borrow_mut()
+            .pop_front()
+            .expect("obstruction prompt choices exhausted by test"))
+    }
+}
+
+/// Obstruction prompter that cancels the run at the first prompt.
+pub struct CancellingPrompter {
+    calls: Cell<usize>,
+}
+
+impl CancellingPrompter {
+    pub fn new() -> Self {
+        Self {
+            calls: Cell::new(0),
+        }
+    }
+
+    pub fn calls(&self) -> usize {
+        self.calls.get()
+    }
+}
+
+impl Prompter for CancellingPrompter {
+    fn prompt(
+        &self,
+        _entry: &dotrift::config::DeploymentEntry,
+        _obstruction: &Path,
+    ) -> std::result::Result<ObstructionChoice, tui::prompt::PromptError> {
+        self.calls.set(self.calls.get() + 1);
+        Err(tui::prompt::PromptError::Cancelled)
+    }
+}
+
+/// Obstruction prompter that must never fire: any prompt is a test failure.
+pub struct PanickingPrompter;
+
+impl Prompter for PanickingPrompter {
+    fn prompt(
+        &self,
+        _entry: &dotrift::config::DeploymentEntry,
+        _obstruction: &Path,
+    ) -> std::result::Result<ObstructionChoice, tui::prompt::PromptError> {
+        panic!("obstruction prompt must not fire in this test");
+    }
 }
 
 /// Asserts that some cause in `error`'s chain contains `needle`.

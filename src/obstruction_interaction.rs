@@ -43,33 +43,6 @@ impl PromptOption for ObstructionChoice {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
-pub mod test_hooks {
-    use std::cell::RefCell;
-
-    use super::ObstructionChoice;
-
-    pub enum PromptChoices {
-        Single(Option<ObstructionChoice>),
-        Sequence(Vec<ObstructionChoice>),
-    }
-
-    thread_local! {
-        pub static PROMPT_CHOICE: RefCell<PromptChoices> = const { RefCell::new(PromptChoices::Single(None)) };
-        pub static PROMPT_COUNT: RefCell<usize> = const { RefCell::new(0) };
-    }
-
-    pub fn set_prompt_choice(choice: ObstructionChoice) {
-        PROMPT_CHOICE.with(|current| *current.borrow_mut() = PromptChoices::Single(Some(choice)));
-    }
-
-    pub fn set_prompt_choices(choices: impl IntoIterator<Item = ObstructionChoice>) {
-        let mut choices: Vec<_> = choices.into_iter().collect();
-        choices.reverse();
-        PROMPT_CHOICE.with(|current| *current.borrow_mut() = PromptChoices::Sequence(choices));
-    }
-}
-
 /// What the interaction resolved to: removal stays in `deployer`, so no path
 /// crosses this seam.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,12 +53,22 @@ pub(crate) enum ResolveAction {
 }
 
 /// Thin prompt seam for ViewDiff-loop tests.
-pub(crate) trait Prompter {
+pub trait Prompter {
     fn prompt(
         &self,
         entry: &config::DeploymentEntry,
         obstruction: &Path,
     ) -> std::result::Result<ObstructionChoice, PromptError>;
+}
+
+impl<P: Prompter + ?Sized> Prompter for &P {
+    fn prompt(
+        &self,
+        entry: &config::DeploymentEntry,
+        obstruction: &Path,
+    ) -> std::result::Result<ObstructionChoice, PromptError> {
+        (**self).prompt(entry, obstruction)
+    }
 }
 
 /// Thin diff seam for ViewDiff-loop tests.
@@ -111,7 +94,7 @@ pub(crate) trait ObstructionResolver {
     ) -> Result<ResolveAction>;
 }
 
-/// Real prompter backed by the TUI prompt (or test hooks under cfg test).
+/// Real prompter backed by the TUI prompt.
 #[derive(Debug, Default)]
 pub(crate) struct RealPrompter;
 
@@ -149,12 +132,12 @@ pub(crate) struct Interaction<'a, P = RealPrompter, D = RealDiffer> {
     pub(crate) differ: D,
 }
 
-impl<'a> Interaction<'a, RealPrompter, RealDiffer> {
-    pub(crate) fn new(global_config: &'a GlobalConfig) -> Self {
+impl<'a, P, D> Interaction<'a, P, D> {
+    pub(crate) fn from_parts(global_config: &'a GlobalConfig, prompter: P, differ: D) -> Self {
         Self {
             global_config,
-            prompter: RealPrompter,
-            differ: RealDiffer,
+            prompter,
+            differ,
         }
     }
 }
@@ -195,54 +178,36 @@ impl<P: Prompter, D: Differ> ObstructionResolver for Interaction<'_, P, D> {
 }
 
 pub(crate) fn prompt_for_obstruction(
-    #[allow(unused_variables)] entry: &config::DeploymentEntry,
-    #[allow(unused_variables)] obstruction: &Path,
+    entry: &config::DeploymentEntry,
+    obstruction: &Path,
 ) -> std::result::Result<ObstructionChoice, PromptError> {
-    #[cfg(any(test, feature = "testing"))]
-    {
-        use test_hooks::{PROMPT_CHOICE, PROMPT_COUNT, PromptChoices};
+    use std::fs;
 
-        PROMPT_COUNT.with_borrow_mut(|count| *count += 1);
-        PROMPT_CHOICE.with(|current| match &mut *current.borrow_mut() {
-            PromptChoices::Single(None) => Err(PromptError::Cancelled),
-            PromptChoices::Single(Some(choice)) => Ok(choice.clone()),
-            PromptChoices::Sequence(choices) => Ok(choices
-                .pop()
-                .expect("obstruction prompt choices exhausted by test")),
-        })
-    }
+    use crossterm::style::Color;
 
-    #[cfg(not(any(test, feature = "testing")))]
-    {
-        use std::fs;
+    use crate::prettify_path;
 
-        use crossterm::style::Color;
-
-        use crate::prettify_path;
-
-        let question = format!(
-            "Cannot deploy {} {} because {} {} is already present.\nHow would you like to proceed?",
-            path_kind(&entry.source_path)?,
-            prettify_path(&entry.source_path).display(),
-            path_kind(obstruction)?,
-            prettify_path(obstruction).display()
-        );
-        let style = tui::prompt::PromptStyle {
-            done_question: Color::Grey,
-            ..Default::default()
-        };
-        let should_show_diff = fs::metadata(&entry.source_path)
-            .is_ok_and(|metadata| metadata.is_file())
-            && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
-        tui::prompt::SelectPrompt::new()
-            .question(question)
-            .style(style)
-            .filter(move |choice| should_show_diff || *choice != ObstructionChoice::ViewDiff)
-            .interact()
-    }
+    let question = format!(
+        "Cannot deploy {} {} because {} {} is already present.\nHow would you like to proceed?",
+        path_kind(&entry.source_path)?,
+        prettify_path(&entry.source_path).display(),
+        path_kind(obstruction)?,
+        prettify_path(obstruction).display()
+    );
+    let style = tui::prompt::PromptStyle {
+        done_question: Color::Grey,
+        ..Default::default()
+    };
+    let should_show_diff = fs::metadata(&entry.source_path)
+        .is_ok_and(|metadata| metadata.is_file())
+        && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
+    tui::prompt::SelectPrompt::new()
+        .question(question)
+        .style(style)
+        .filter(move |choice| should_show_diff || *choice != ObstructionChoice::ViewDiff)
+        .interact()
 }
 
-#[cfg(not(any(test, feature = "testing")))]
 fn path_kind(path: &Path) -> std::io::Result<&'static str> {
     let meta = std::fs::symlink_metadata(path)?;
     Ok(if meta.is_dir() {
