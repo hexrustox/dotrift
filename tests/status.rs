@@ -64,13 +64,13 @@ fn status_prints_sorted_lines_with_verdicts() {
             target_path: managed_file,
             source_path: managed_source,
             kind: Kind::File,
-            content_hash: Some(hash_bytes(b"key=value")),
+            content_hash: Some(String::from(hash_bytes(b"key=value"))),
         },
         StateRecord {
             target_path: changed_file,
             source_path: changed_source,
             kind: Kind::File,
-            content_hash: Some(hash_bytes(b"original content")),
+            content_hash: Some(String::from(hash_bytes(b"original content"))),
         },
         StateRecord {
             target_path: managed_link,
@@ -114,12 +114,12 @@ fn status_layout_is_unchanged_with_color_forced() {
         (
             &managed_source,
             &managed_target,
-            Some(hash_bytes(b"key=value")),
+            Some(String::from(hash_bytes(b"key=value"))),
         ),
         (
             &changed_source,
             &changed_target,
-            Some(hash_bytes(b"original content")),
+            Some(String::from(hash_bytes(b"original content"))),
         ),
     ] {
         database

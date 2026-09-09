@@ -1,0 +1,517 @@
+//! The fingerprint of deployed bytes: the single module that produces,
+//! records, and compares content hashes.
+//!
+//! A [`Fingerprint`] is the hash of deployed bytes (what lands on disk for a
+//! copy or template deploy); a [`TemplateHash`] is the digest of a template's
+//! source bytes (what keys the template render registry). The two were both
+//! plain strings, so nothing stopped a caller from comparing one against the
+//! other; the types now carry the distinction from `spec/CONTEXT.md`.
+//!
+//! Both read-side comparisons live here so the filesystem probing stays in one
+//! place: [`is_managed`] (the managed check, record vs disk) inspects without
+//! following symlinks, while [`is_identical`] (the identical-obstruction
+//! check, disk vs desired bytes) resolves symlinks. Any read or render failure
+//! during either check means "not established", never an error to the caller.
+
+use std::{
+    collections::HashMap,
+    fs::{self, File},
+    hash::Hasher,
+    io::{BufReader, Read, Write},
+    path::Path,
+};
+
+use miette::{Result, WrapErr, miette};
+use templater::value::Value;
+use twox_hash::XxHash64;
+
+use crate::{
+    config::{DeployType, DeploymentEntry},
+    render_registry::RenderRegistry,
+    state::{Kind, StateRecord},
+};
+
+/// The hash of deployed bytes: the recorded last-applied state of a target
+/// path dotrift created for a copy or template deploy.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Fingerprint(String);
+
+impl Fingerprint {
+    /// Computes the fingerprint of `bytes`.
+    pub fn of_bytes(bytes: &[u8]) -> Self {
+        Self(xxhash_hex(bytes))
+    }
+
+    /// Computes the fingerprint of the file at `path`, following symlinks.
+    pub(crate) fn of_file(path: &Path) -> Result<Self> {
+        Ok(Self(xxhash_file_hex(path)?))
+    }
+
+    /// Borrows the hex digest, for comparing against a stored state record.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for Fingerprint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl From<Fingerprint> for String {
+    fn from(fingerprint: Fingerprint) -> Self {
+        fingerprint.0
+    }
+}
+
+/// The digest of a template's source bytes, computed before render and
+/// following symlinks. Keys the template render registry and the run's
+/// in-memory memo of rendered-output digests.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TemplateHash(String);
+
+impl TemplateHash {
+    /// Computes the template hash of `bytes`.
+    pub fn of_bytes(bytes: &[u8]) -> Self {
+        Self(xxhash_hex(bytes))
+    }
+
+    /// Computes the template hash of the file at `path`, following symlinks.
+    pub(crate) fn of_file(path: &Path) -> Result<Self> {
+        Ok(Self(xxhash_file_hex(path)?))
+    }
+
+    /// Borrows the hex digest, for naming a registry entry.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for TemplateHash {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+/// An [`Write`] adapter that fingerprints every accepted byte while
+/// forwarding it, producing the same digest as [`hash_bytes`] for the same
+/// byte stream.
+pub(crate) struct HashWriter<W> {
+    inner: W,
+    hasher: XxHash64,
+}
+
+impl<W> HashWriter<W> {
+    pub(crate) fn new(inner: W) -> Self {
+        Self {
+            inner,
+            hasher: XxHash64::with_seed(SEED),
+        }
+    }
+
+    /// Consumes the adapter, returning the fingerprint of everything written.
+    pub(crate) fn into_digest(self) -> Fingerprint {
+        Fingerprint(format!("{:016x}", self.hasher.finish()))
+    }
+}
+
+impl<W: Write> Write for HashWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.hasher.write(&buf[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// Computes the fingerprint of `bytes`.
+pub fn hash_bytes(bytes: &[u8]) -> Fingerprint {
+    Fingerprint::of_bytes(bytes)
+}
+
+/// Whether the target path is still a managed path: dotrift created it and
+/// its current kind and fingerprint still match its state record.
+///
+/// The target is inspected without following symlinks, so a symlink swapped
+/// for a file (or the reverse) fails the kind check. Anything unreadable
+/// fails the check and is not a managed path.
+pub(crate) fn is_managed(record: &StateRecord) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(&record.target_path) {
+        Ok(metadata) => metadata,
+        Err(_) => return Ok(false),
+    };
+
+    match record.kind {
+        Kind::Symlink => {
+            if !metadata.file_type().is_symlink() {
+                return Ok(false);
+            }
+            Ok(matches!(
+                fs::read_link(&record.target_path),
+                Ok(link) if link == record.source_path
+            ))
+        }
+        Kind::File => {
+            if !metadata.file_type().is_file() {
+                return Ok(false);
+            }
+            match Fingerprint::of_file(&record.target_path) {
+                Ok(fingerprint) => Ok(record.content_hash.as_deref() == Some(fingerprint.as_str())),
+                Err(_) => Ok(false),
+            }
+        }
+    }
+}
+
+/// Whether the entry's own target path is an *identical obstruction*: for a
+/// symlink deploy, a symlink whose link target equals the source path; for a
+/// file deploy, a path resolving to a regular file whose content fingerprint
+/// equals the fingerprint of the bytes that would be deployed. Any failure to
+/// read a path or obtain the rendered bytes means the check cannot establish
+/// identity and the obstruction is treated as not identical.
+pub(crate) fn is_identical(
+    entry: &DeploymentEntry,
+    context: &HashMap<String, Value>,
+    registry: &mut RenderRegistry,
+) -> bool {
+    match entry.deploy_type {
+        DeployType::Symlink => {
+            fs::read_link(&entry.target_path).is_ok_and(|link| link == entry.source_path)
+        }
+        DeployType::Copy => file_matches(&entry.target_path, &entry.source_path),
+        DeployType::Template => {
+            let Ok(Some(rendered)) = registry.ensure_rendered(&entry.source_path, context) else {
+                return false;
+            };
+            file_matches_digest(&entry.target_path, &rendered.digest)
+        }
+    }
+}
+
+const SEED: u64 = 0;
+const CHUNK_SIZE: usize = 64 * 1024;
+
+fn xxhash_hex(bytes: &[u8]) -> String {
+    let mut hasher = XxHash64::with_seed(SEED);
+    hasher.write(bytes);
+    format!("{:016x}", hasher.finish())
+}
+
+fn xxhash_file_hex(path: &Path) -> Result<String> {
+    let file = File::open(path)
+        .map_err(|error| miette!(error))
+        .wrap_err_with(|| format!("cannot read `{}` for hashing", path.display()))?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = XxHash64::with_seed(SEED);
+    let mut buffer = vec![0u8; CHUNK_SIZE];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot read `{}` for hashing", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.write(&buffer[..read]);
+    }
+    Ok(format!("{:016x}", hasher.finish()))
+}
+
+/// Whether `path` resolves, following symlinks, to a regular file holding the
+/// same bytes as `source`. File mode is not part of the comparison.
+fn file_matches(path: &Path, source: &Path) -> bool {
+    Fingerprint::of_file(source)
+        .is_ok_and(|source_fingerprint| file_matches_digest(path, &source_fingerprint))
+}
+
+/// Whether `path` resolves, following symlinks, to a regular file whose
+/// content fingerprint equals `fingerprint`.
+fn file_matches_digest(path: &Path, fingerprint: &Fingerprint) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+        && Fingerprint::of_file(path).is_ok_and(|hash| hash == *fingerprint)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+    use test_case::test_case;
+
+    use super::*;
+
+    #[test]
+    fn hash_bytes_empty_matches_known_digest() {
+        assert_eq!(hash_bytes(&[]).as_str(), "ef46db3751d8e999");
+    }
+
+    #[test]
+    fn hash_bytes_text_matches_known_digest() {
+        assert_eq!(hash_bytes(b"hello").as_str(), "26c7827d889f6da3");
+    }
+
+    #[test]
+    fn template_hash_matches_fingerprint_for_same_bytes() {
+        assert_eq!(
+            TemplateHash::of_bytes(b"hello").as_str(),
+            hash_bytes(b"hello").as_str()
+        );
+    }
+
+    #[test]
+    fn hash_file_digests_same_as_its_bytes() {
+        let dir = tempdir().expect("cannot create temp dir");
+        let path = dir.path().join("sample");
+        fs::write(&path, b"hello").expect("cannot write sample file");
+        assert_eq!(
+            Fingerprint::of_file(&path).expect("cannot hash sample file"),
+            hash_bytes(b"hello")
+        );
+    }
+
+    #[test]
+    fn hash_file_errs_on_missing_path() {
+        let dir = tempdir().expect("cannot create temp dir");
+        assert!(Fingerprint::of_file(&dir.path().join("missing")).is_err());
+    }
+
+    #[test]
+    fn hash_writer_digests_empty_stream_like_hash_bytes() {
+        let writer = HashWriter::new(Vec::<u8>::new());
+        assert_eq!(writer.into_digest(), hash_bytes(&[]));
+    }
+
+    #[test]
+    fn hash_writer_digests_text_like_hash_bytes() {
+        let mut writer = HashWriter::new(Vec::new());
+        writer.write_all(b"hello").expect("cannot write");
+        assert_eq!(writer.into_digest(), hash_bytes(b"hello"));
+    }
+
+    #[test]
+    fn hash_writer_digests_chunked_stream_like_hash_bytes() {
+        let mut writer = HashWriter::new(Vec::new());
+        for chunk in [b"foo".as_slice(), b"bar", b"baz"] {
+            writer.write_all(chunk).expect("cannot write");
+        }
+        assert_eq!(writer.into_digest(), hash_bytes(b"foobarbaz"));
+    }
+
+    #[test_case(
+        |t| fs::write(t.join("file"), "hello").unwrap(),
+        |t| crate::record!(f, t.join("file"), hash_bytes(b"hello")) => true;
+        "file_content_matches_record_is_managed"
+    )]
+    #[test_case(
+        |t| fs::write(t.join("file"), "hello").unwrap(),
+        |t| crate::record!(f, t.join("file"), hash_bytes(b"world")) => false;
+        "file_content_diverged_from_record_not_managed"
+    )]
+    #[test_case(
+        |_| {},
+        |t| crate::record!(f, t.join("file"), hash_bytes(b"hello")) => false;
+        "file_record_target_missing_not_managed"
+    )]
+    #[test_case(
+        |t| std::os::unix::fs::symlink(t.join("elsewhere"), t.join("file")).unwrap(),
+        |t| crate::record!(f, t.join("file"), hash_bytes(b"hello")) => false;
+        "file_record_target_is_symlink_not_managed"
+    )]
+    #[test_case(
+        |t| fs::create_dir(t.join("dir")).unwrap(),
+        |t| crate::record!(f, t.join("dir"), hash_bytes(b"hello")) => false;
+        "file_record_target_is_directory_not_managed"
+    )]
+    #[test_case(
+        |t| fs::write(t.join("file"), "").unwrap(),
+        |t| crate::record!(f, t.join("file"), hash_bytes(b"")) => true;
+        "empty_file_matches_empty_record_is_managed"
+    )]
+    #[test_case(
+        |t| fs::write(t.join("file"), "hello").unwrap(),
+        |t| crate::record!(s, t.join("file"), t.join("target")) => false;
+        "symlink_record_target_is_regular_file_not_managed"
+    )]
+    #[test_case(
+        |t| std::os::unix::fs::symlink(t.join("elsewhere"), t.join("link")).unwrap(),
+        |t| crate::record!(s, t.join("link"), t.join("elsewhere")) => true;
+        "symlink_to_recorded_source_path_is_managed"
+    )]
+    #[test_case(
+        |t| std::os::unix::fs::symlink(t.join("elsewhere"), t.join("link")).unwrap(),
+        |t| crate::record!(s, t.join("link"), t.join("other")) => false;
+        "symlink_to_other_source_path_not_managed"
+    )]
+    #[test_case(
+        |_| {},
+        |t| crate::record!(s, t.join("link"), t.join("elsewhere")) => false;
+        "symlink_record_target_missing_not_managed"
+    )]
+    fn is_managed_when_target_matches_record(
+        setup: impl Fn(&std::path::Path),
+        record: impl Fn(&std::path::Path) -> StateRecord,
+    ) -> bool {
+        let tmp = tempdir().unwrap();
+        setup(tmp.path());
+        is_managed(&record(tmp.path())).unwrap()
+    }
+
+    fn entry(source: &Path, target: &Path, deploy_type: DeployType) -> DeploymentEntry {
+        DeploymentEntry {
+            source_path: source.to_path_buf(),
+            target_path: target.to_path_buf(),
+            deploy_type,
+            mode: None,
+        }
+    }
+
+    fn no_context() -> HashMap<String, Value> {
+        HashMap::new()
+    }
+
+    fn dry_registry(anchor: &Path) -> RenderRegistry {
+        RenderRegistry::acquire(&crate::environment::Environment::test_root(anchor), true)
+    }
+
+    #[test]
+    fn identical_copy_with_matching_bytes_is_identical() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("source.txt"), "same").unwrap();
+        fs::write(dir.path().join("target.txt"), "same").unwrap();
+        let entry = entry(
+            &dir.path().join("source.txt"),
+            &dir.path().join("target.txt"),
+            DeployType::Copy,
+        );
+        let mut registry = dry_registry(dir.path());
+
+        assert!(is_identical(&entry, &no_context(), &mut registry));
+    }
+
+    #[test]
+    fn identical_copy_with_divergent_bytes_is_not_identical() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("source.txt"), "new").unwrap();
+        fs::write(dir.path().join("target.txt"), "old").unwrap();
+        let entry = entry(
+            &dir.path().join("source.txt"),
+            &dir.path().join("target.txt"),
+            DeployType::Copy,
+        );
+        let mut registry = dry_registry(dir.path());
+
+        assert!(!is_identical(&entry, &no_context(), &mut registry));
+    }
+
+    #[test]
+    fn identical_copy_with_directory_target_is_not_identical() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("source.txt"), "same").unwrap();
+        fs::create_dir(dir.path().join("target.txt")).unwrap();
+        fs::write(dir.path().join("target.txt/inner"), "same").unwrap();
+        let entry = entry(
+            &dir.path().join("source.txt"),
+            &dir.path().join("target.txt"),
+            DeployType::Copy,
+        );
+        let mut registry = dry_registry(dir.path());
+
+        assert!(!is_identical(&entry, &no_context(), &mut registry));
+    }
+
+    #[test]
+    fn identical_symlink_pointing_at_source_is_identical() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("source.txt"), "content").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("source.txt"), dir.path().join("target.txt"))
+            .unwrap();
+        let entry = entry(
+            &dir.path().join("source.txt"),
+            &dir.path().join("target.txt"),
+            DeployType::Symlink,
+        );
+        let mut registry = dry_registry(dir.path());
+
+        assert!(is_identical(&entry, &no_context(), &mut registry));
+    }
+
+    #[test]
+    fn identical_symlink_pointing_elsewhere_is_not_identical() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("source.txt"), "content").unwrap();
+        fs::write(dir.path().join("other.txt"), "content").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("other.txt"), dir.path().join("target.txt"))
+            .unwrap();
+        let entry = entry(
+            &dir.path().join("source.txt"),
+            &dir.path().join("target.txt"),
+            DeployType::Symlink,
+        );
+        let mut registry = dry_registry(dir.path());
+
+        assert!(!is_identical(&entry, &no_context(), &mut registry));
+    }
+
+    #[test]
+    fn identical_template_matching_render_is_identical() {
+        use crate::environment::Environment;
+
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let registry_root = tempdir().unwrap();
+        let env = Environment::test_root(registry_root.path());
+        fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
+        fs::write(target.path().join("target.txt"), "hello\n").unwrap();
+        let entry = entry(
+            &source.path().join("greeting.txt"),
+            &target.path().join("target.txt"),
+            DeployType::Template,
+        );
+        let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
+        let mut registry = RenderRegistry::acquire(&env, false);
+
+        assert!(is_identical(&entry, &context, &mut registry));
+    }
+
+    #[test]
+    fn identical_template_with_divergent_render_is_not_identical() {
+        use crate::environment::Environment;
+
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let registry_root = tempdir().unwrap();
+        let env = Environment::test_root(registry_root.path());
+        fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
+        fs::write(target.path().join("target.txt"), "stale\n").unwrap();
+        let entry = entry(
+            &source.path().join("greeting.txt"),
+            &target.path().join("target.txt"),
+            DeployType::Template,
+        );
+        let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
+        let mut registry = RenderRegistry::acquire(&env, false);
+
+        assert!(!is_identical(&entry, &context, &mut registry));
+    }
+
+    #[test]
+    fn identical_template_without_registry_is_not_identical() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
+        fs::write(target.path().join("target.txt"), "hello\n").unwrap();
+        let entry = entry(
+            &source.path().join("greeting.txt"),
+            &target.path().join("target.txt"),
+            DeployType::Template,
+        );
+        let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
+        let mut registry = dry_registry(source.path());
+
+        assert!(!is_identical(&entry, &context, &mut registry));
+    }
+}

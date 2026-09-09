@@ -63,7 +63,7 @@ fn record_of(env: &TestEnv, path: &Path) -> Option<dotrift::state::StateRecord> 
         assert_eq!(fs::read(&file).unwrap(), b"copy me");
         let record = record_of(env, &file).unwrap();
         assert_eq!(record.kind, Kind::File);
-        assert_eq!(record.content_hash, Some(hash_bytes(b"copy me")));
+        assert_eq!(record.content_hash, Some(String::from(hash_bytes(b"copy me"))));
     }
     ; "copy_rule_resolves_symlink_source_into_regular_file"
 )]
@@ -113,7 +113,7 @@ fn record_of(env: &TestEnv, path: &Path) -> Option<dotrift::state::StateRecord> 
         assert_eq!(fs::read(&file).unwrap(), b"copy me");
         let record = record_of(env, &file).unwrap();
         assert_eq!(record.kind, Kind::File);
-        assert_eq!(record.content_hash, Some(hash_bytes(b"copy me")));
+        assert_eq!(record.content_hash, Some(String::from(hash_bytes(b"copy me"))));
     }
     ; "copy_rule_deploys_regular_file_with_recorded_hash"
 )]
@@ -249,7 +249,7 @@ fn fresh_env_behaviors(setup: impl Fn(&TestEnv), options: ApplyOptions, assert: 
         assert_eq!(fs::read(&file).unwrap(), b"new");
         assert_eq!(
             record_of(env, &file).unwrap().content_hash,
-            Some(hash_bytes(b"new"))
+            Some(String::from(hash_bytes(b"new")))
         );
     }
     ; "copy_source_change_redeploys_with_updated_hash"
@@ -284,7 +284,7 @@ fn fresh_env_behaviors(setup: impl Fn(&TestEnv), options: ApplyOptions, assert: 
         assert_eq!(fs::read(&file).unwrap(), b"content");
         let record = record_of(env, &file).unwrap();
         assert_eq!(record.kind, Kind::File);
-        assert_eq!(record.content_hash, Some(hash_bytes(b"content")));
+        assert_eq!(record.content_hash, Some(String::from(hash_bytes(b"content"))));
     }
     ; "adding_copy_rule_converts_symlink_to_plain_file"
 )]
@@ -467,7 +467,7 @@ fn unmanaged_target_obstruction_behaviors(
             record_of(env, &target.join("target.txt"))
                 .unwrap()
                 .content_hash,
-            Some(hash_bytes(b"original"))
+            Some(String::from(hash_bytes(b"original")))
         );
         assert_eq!(prompt_count(), 1);
     }
@@ -489,7 +489,7 @@ fn unmanaged_target_obstruction_behaviors(
             record_of(env, &target.join("target.txt"))
                 .unwrap()
                 .content_hash,
-            Some(hash_bytes(b"original"))
+            Some(String::from(hash_bytes(b"original")))
         );
         assert_eq!(prompt_count(), 1);
     }
@@ -1013,7 +1013,7 @@ fn records_outside_current_target_root_are_never_candidates() {
             record_of(env, &target.join("target.txt"))
                 .unwrap()
                 .content_hash,
-            Some(hash_bytes(b"original"))
+            Some(String::from(hash_bytes(b"original")))
         );
         assert_eq!(prompt_count(), 0);
     }

@@ -19,8 +19,8 @@ use templater::value::Value;
 use crate::{
     commands::apply::ApplyOptions,
     config::{self, DeployType},
+    fingerprint::{self, Fingerprint, HashWriter},
     global_config::GlobalConfig,
-    hash, managed,
     obstruction_interaction::{ObstructionResolver, ResolveAction},
     prettify_path,
     reconcile::{Decision, decide},
@@ -170,7 +170,7 @@ impl<'a> Deployer<'a> {
                     target_path: entry.target_path.clone(),
                     source_path: entry.source_path.clone(),
                     kind: Kind::File,
-                    content_hash: Some(content_hash),
+                    content_hash: Some(content_hash.into()),
                 }
             }
         };
@@ -202,7 +202,7 @@ fn write_deployed_file(
     entry: &config::DeploymentEntry,
     context: &HashMap<String, Value>,
     registry: &mut RenderRegistry,
-) -> Result<String> {
+) -> Result<Fingerprint> {
     if entry.deploy_type == DeployType::Template
         && let Some(rendered) = registry.ensure_rendered(&entry.source_path, context)?
     {
@@ -225,7 +225,7 @@ fn write_deployed_file(
     let file = fs::File::create(&entry.target_path)
         .map_err(|error| miette!(error))
         .wrap_err("cannot write target file")?;
-    let mut writer = hash::HashWriter::new(BufWriter::new(file));
+    let mut writer = HashWriter::new(BufWriter::new(file));
     let outcome = match entry.deploy_type {
         DeployType::Template => {
             template::render_template_to(&entry.source_path, context, &mut writer)
@@ -286,7 +286,7 @@ pub(crate) fn cleanup(
             }
             continue;
         }
-        if !managed::is_managed(&record)? {
+        if !fingerprint::is_managed(&record)? {
             if !dry_run {
                 database.remove(path)?;
             }
@@ -685,7 +685,7 @@ mod tests {
                 target_path: target.path().join("target.txt"),
                 source_path: source.path().join("file.txt"),
                 kind: Kind::File,
-                content_hash: Some(hash_bytes(b"v1")),
+                content_hash: Some(hash_bytes(b"v1").into()),
             })
             .unwrap();
         let env = Environment::test_root(registry_root.path());

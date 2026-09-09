@@ -12,15 +12,19 @@ use std::{
 use miette::Result;
 use templater::value::Value;
 
-use crate::{environment::Environment, hash, template};
+use crate::{
+    environment::Environment,
+    fingerprint::{Fingerprint, HashWriter, TemplateHash},
+    template,
+};
 
 /// The rendered output of one template for this run.
 #[derive(Debug)]
 pub(crate) struct Rendered {
     /// The registry entry holding the rendered bytes.
     pub(crate) path: PathBuf,
-    /// The digest of the rendered bytes.
-    pub(crate) digest: String,
+    /// The fingerprint of the rendered bytes.
+    pub(crate) digest: Fingerprint,
 }
 
 /// A per-run, content-addressed store of rendered template output.
@@ -33,7 +37,7 @@ pub(crate) struct Rendered {
 /// template view diffs fail — while template-engine errors always propagate.
 pub(crate) struct RenderRegistry {
     dir: Option<PathBuf>,
-    memo: HashMap<String, String>,
+    memo: HashMap<TemplateHash, Fingerprint>,
 }
 
 impl RenderRegistry {
@@ -71,13 +75,13 @@ impl RenderRegistry {
         let Some(dir) = self.dir.clone() else {
             return Ok(None);
         };
-        let template_hash = hash::hash_file(source)?;
+        let template_hash = TemplateHash::of_file(source)?;
         let entry = dir.join(format!("{template_hash}.tmpl"));
         if fs::symlink_metadata(&entry).is_ok() {
             let digest = match self.memo.get(&template_hash) {
                 Some(digest) => digest.clone(),
                 None => {
-                    let digest = hash::hash_file(&entry)?;
+                    let digest = Fingerprint::of_file(&entry)?;
                     self.memo.insert(template_hash.clone(), digest.clone());
                     digest
                 }
@@ -99,7 +103,7 @@ impl RenderRegistry {
                 return Ok(None);
             }
         };
-        let mut writer = hash::HashWriter::new(BufWriter::new(file));
+        let mut writer = HashWriter::new(BufWriter::new(file));
         match template::render_template_into(source, context, &mut writer) {
             Ok(()) => {}
             Err(template::RenderFailure::Sink(_)) => {

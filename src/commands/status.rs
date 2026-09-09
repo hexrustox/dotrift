@@ -2,7 +2,7 @@ use miette::Result;
 
 use crate::{
     environment::Environment,
-    managed, prettify_path,
+    fingerprint, prettify_path,
     report::{Outcome, Reporter},
     state::StateDatabase,
 };
@@ -16,7 +16,7 @@ pub fn run(env: &Environment) -> Result<()> {
     records.sort_by(|left, right| left.target_path.cmp(&right.target_path));
 
     for record in records {
-        let managed = managed::is_managed(&record)?;
+        let managed = fingerprint::is_managed(&record)?;
         let (outcome, verdict) = if managed {
             (Outcome::Managed, "managed")
         } else {

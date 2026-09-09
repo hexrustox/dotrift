@@ -88,7 +88,7 @@ fn symlink_obstruction_behaviors(
         assert_eq!(mode, 0o644);
         let record = record_of(env, &target.join("target.txt")).unwrap();
         assert_eq!(record.kind, Kind::File);
-        assert_eq!(record.content_hash, Some(hash_bytes(b"same")));
+        assert_eq!(record.content_hash, Some(String::from(hash_bytes(b"same"))));
         assert_eq!(prompt_count(), 0);
     }
     ; "identical_bytes_with_different_mode_replaced_and_rule_mode_reapplied"

@@ -11,10 +11,7 @@ use miette::{Result, miette};
 use templater::value::Value;
 
 use crate::{
-    config::{DeployType, DeploymentEntry},
-    hash, managed,
-    render_registry::RenderRegistry,
-    state::StateDatabase,
+    config::DeploymentEntry, fingerprint, render_registry::RenderRegistry, state::StateDatabase,
 };
 
 /// What `apply` does with one entry before any filesystem effect: a missing
@@ -71,56 +68,18 @@ pub(crate) fn decide(
         return Ok(Decision::Deployed);
     }
     let managed = match database.record(&entry.target_path)? {
-        Some(record) => managed::is_managed(&record)?,
+        Some(record) => fingerprint::is_managed(&record)?,
         None => false,
     };
     if managed
         || replace_all
-        || (replace_identical && is_identical_obstruction(entry, context, registry))
+        || (replace_identical && fingerprint::is_identical(entry, context, registry))
     {
         return Ok(Decision::Replaced {
             remove: entry.target_path.clone(),
         });
     }
     Ok(Decision::Prompt(entry.target_path.clone()))
-}
-
-/// Whether the entry's own target path is an *identical obstruction*: for a
-/// symlink deploy, a symlink whose link target equals the source path; for a
-/// file deploy, a path resolving to a regular file whose content fingerprint
-/// equals the fingerprint of the bytes that would be deployed. Any failure to
-/// read a path or obtain the rendered bytes means the check cannot establish
-/// identity and the obstruction is treated as not identical.
-fn is_identical_obstruction(
-    entry: &DeploymentEntry,
-    context: &HashMap<String, Value>,
-    registry: &mut RenderRegistry,
-) -> bool {
-    match entry.deploy_type {
-        DeployType::Symlink => {
-            fs::read_link(&entry.target_path).is_ok_and(|link| link == entry.source_path)
-        }
-        DeployType::Copy => file_matches(&entry.target_path, &entry.source_path),
-        DeployType::Template => {
-            let Ok(Some(rendered)) = registry.ensure_rendered(&entry.source_path, context) else {
-                return false;
-            };
-            file_matches_digest(&entry.target_path, &rendered.digest)
-        }
-    }
-}
-
-/// Whether `path` resolves, following symlinks, to a regular file holding the
-/// same bytes as `source`. File mode is not part of the comparison.
-fn file_matches(path: &Path, source: &Path) -> bool {
-    hash::hash_file(source).is_ok_and(|source_hash| file_matches_digest(path, &source_hash))
-}
-
-/// Whether `path` resolves, following symlinks, to a regular file whose
-/// content fingerprint equals `digest`.
-fn file_matches_digest(path: &Path, digest: &str) -> bool {
-    fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
-        && hash::hash_file(path).is_ok_and(|hash| hash == digest)
 }
 
 fn parent_obstruction(target_root: &Path, target_path: &Path) -> Result<Option<PathBuf>> {
@@ -163,6 +122,7 @@ mod tests {
     use test_case::test_case;
 
     use crate::{
+        config::DeployType,
         environment::Environment,
         hash::hash_bytes,
         state::{Kind, StateRecord},
@@ -289,7 +249,7 @@ mod tests {
                     target_path: target_path.clone(),
                     source_path: source.path().join("file.txt"),
                     kind: Kind::File,
-                    content_hash: Some(hash_bytes(b"v1")),
+                    content_hash: Some(hash_bytes(b"v1").into()),
                 }
             }
             DeployType::Symlink => {
@@ -637,7 +597,7 @@ mod tests {
                 target_path: target.path().join("target.txt"),
                 source_path: source.path().join("file.txt"),
                 kind: Kind::File,
-                content_hash: Some(hash_bytes(b"v2")),
+                content_hash: Some(hash_bytes(b"v2").into()),
             })
             .unwrap();
         let entry = entry(
