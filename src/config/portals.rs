@@ -2,19 +2,13 @@ use std::{
     collections::BTreeMap,
     fs,
     os::unix::fs::MetadataExt,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 use glob::Pattern;
 use miette::{Result, WrapErr, miette};
 
-use super::GLOB_MATCH_OPTIONS;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ResolvedPortal {
-    pub(super) source: PathBuf,
-    pub(super) target: PathBuf,
-}
+use super::{GLOB_MATCH_OPTIONS, ResolvedPortal, reject_brace_expansion, validate_relative};
 
 pub(super) fn resolve_portals(
     source: &Path,
@@ -103,7 +97,7 @@ pub(super) fn resolve_portals(
             match kind {
                 ResolvedKind::File => {
                     let remainder = relative.strip_prefix(&strip).unwrap_or(relative);
-                    push_deployable(&mut result, path, &PathBuf::from(value).join(remainder))
+                    push_deployable(&mut result, path, &Path::new(value).join(remainder))
                 }
                 ResolvedKind::Dangling => Err(miette!("dangling symlink `{}`", path.display())),
                 ResolvedKind::Special => Err(miette!(
@@ -126,34 +120,15 @@ fn push_deployable(result: &mut Vec<ResolvedPortal>, source: &Path, target: &Pat
     }
     result.push(ResolvedPortal {
         source: source.to_path_buf(),
-        target: normalized_target(target),
+        target: target.strip_prefix("./").unwrap_or(target).to_path_buf(),
     });
     Ok(())
-}
-
-// Target-path equality is component-wise (`./x` and `x` are the same target
-// path); dropping the cosmetic leading `.` component up front makes the
-// plain component comparison in `validate_targets` component-wise too.
-fn normalized_target(target: &Path) -> PathBuf {
-    target
-        .components()
-        .filter(|component| !matches!(component, Component::CurDir))
-        .collect()
 }
 
 fn contains_wildcard(value: &str) -> bool {
     value
         .bytes()
         .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b']'))
-}
-
-pub(super) fn reject_brace_expansion(value: &str, what: &str) -> Result<()> {
-    if value.bytes().any(|byte| byte == b'{' || byte == b'}') {
-        return Err(miette!(
-            "unsupported pattern syntax in {what} `{value}`: brace expansion is not supported"
-        ));
-    }
-    Ok(())
 }
 
 fn wildcard_prefix(pattern: &str) -> PathBuf {
@@ -166,23 +141,6 @@ fn wildcard_prefix(pattern: &str) -> PathBuf {
         prefix.push(value.as_ref());
     }
     prefix
-}
-
-pub(super) fn validate_relative(value: &str, what: &str) -> Result<()> {
-    if value.is_empty() || Path::new(value).is_absolute() {
-        return Err(miette!("invalid {what} path `{value}`"));
-    }
-    for (index, component) in value.split('/').enumerate() {
-        let valid = match component {
-            "" | ".." => false,
-            "." => index == 0,
-            _ => true,
-        };
-        if !valid {
-            return Err(miette!("invalid {what} path `{value}`"));
-        }
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,9 +211,6 @@ macro_rules! resolved_list {
         }
     };
 }
-
-#[cfg(test)]
-pub(super) use resolved_list;
 
 #[cfg(test)]
 mod tests {

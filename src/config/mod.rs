@@ -1,26 +1,31 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    ffi::OsString,
     fs,
     path::{Path, PathBuf},
 };
 
-use glob::MatchOptions;
+use glob::{MatchOptions, Pattern};
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use miette::{Result, WrapErr, miette};
 use serde::Deserialize;
 use templater::value::Value;
 
-use crate::{data::DataFile, environment::Environment};
+use crate::{data::DataFile, environment::Environment, report::Reporter};
 
-mod ignore;
 mod portals;
-mod rules;
-mod targets;
 
 const GLOB_MATCH_OPTIONS: MatchOptions = MatchOptions {
     case_sensitive: true,
     require_literal_separator: true,
     require_literal_leading_dot: false,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedPortal {
+    source: PathBuf,
+    target: PathBuf,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -106,7 +111,7 @@ struct FileConfig {
     #[serde(default)]
     portal: BTreeMap<String, String>,
     #[serde(default)]
-    rule: indexmap::IndexMap<String, rules::RuleConfig>,
+    rule: indexmap::IndexMap<String, RuleConfig>,
 }
 
 pub fn read(
@@ -134,20 +139,24 @@ pub fn read(
         return Err(miette!("target directory must be an absolute path"));
     }
     validate_overlap(source, &target)?;
+    // The Desired deployment chain owns one invariant: Ignore patterns and
+    // Rules match target paths only (`spec/CONTEXT.md` § Ignore pattern,
+    // § Rule; ADR-0002). Portal resolution produces target paths, filtering
+    // removes ignored targets, validation rejects Collisions and Structural
+    // conflicts among the survivors, and Rules decorate them. The order is
+    // enforced here by construction: an ignored entry never reaches
+    // validation, so it never causes a Collision.
     let portals = portals::resolve_portals(source, &config.portal)?;
-    // Ignore patterns match target paths, after portal resolution and before
-    // collision validation (`spec/dotriftignore.md § Filtering stage`,
-    // ADR-0002); an ignored entry never causes a collision.
-    let ignore = ignore::read_ignore(source)?;
+    let ignore = read_ignore(source)?;
     let portals = portals
         .into_iter()
         .filter(|entry| !ignore.matched(&entry.target, false).is_ignore())
         .collect::<Vec<_>>();
-    targets::validate_targets(&portals)?;
-    let rules = rules::compile_rules(&config.rule)?;
+    validate_targets(&portals)?;
+    let rules = compile_rules(&config.rule)?;
     let entries = portals
         .into_iter()
-        .map(|entry| rules::apply_rules(entry, &rules, &target))
+        .map(|entry| apply_rules(entry, &rules, &target))
         .collect::<Result<Vec<_>>>()?;
     Ok(DesiredDeployment {
         target_directory: target,
@@ -191,6 +200,208 @@ fn resolve_for_comparison(path: &Path) -> Result<PathBuf> {
         resolved.push(component);
     }
     Ok(resolved)
+}
+
+fn validate_relative(value: &str, what: &str) -> Result<()> {
+    if value.is_empty() || Path::new(value).is_absolute() {
+        return Err(miette!("invalid {what} path `{value}`"));
+    }
+    for (index, component) in value.split('/').enumerate() {
+        let valid = match component {
+            "" | ".." => false,
+            "." => index == 0,
+            _ => true,
+        };
+        if !valid {
+            return Err(miette!("invalid {what} path `{value}`"));
+        }
+    }
+    Ok(())
+}
+
+fn reject_brace_expansion(value: &str, what: &str) -> Result<()> {
+    if value.bytes().any(|byte| byte == b'{' || byte == b'}') {
+        return Err(miette!(
+            "unsupported pattern syntax in {what} `{value}`: brace expansion is not supported"
+        ));
+    }
+    Ok(())
+}
+
+fn read_ignore(source: &Path) -> Result<Gitignore> {
+    let mut builder = GitignoreBuilder::new(source);
+    builder
+        .add_line(None, "/dotrift.toml")
+        .map_err(|error| miette!(error))?;
+    builder
+        .add_line(None, "/dotrift_data.toml")
+        .map_err(|error| miette!(error))?;
+    builder
+        .add_line(None, "/.dotriftignore")
+        .map_err(|error| miette!(error))?;
+    let path = source.join(".dotriftignore");
+    if path.exists() {
+        match builder.add(path) {
+            None => {}
+            Some(error) => return Err(miette!(error)),
+        }
+    }
+    builder.build().map_err(|error| miette!(error))
+}
+
+fn validate_targets(entries: &[ResolvedPortal]) -> Result<()> {
+    let mut tree = Node::Dir(BTreeMap::new());
+    for entry in entries {
+        tree.insert(&entry.target, &entry.source)?;
+    }
+    Ok(())
+}
+
+enum Node {
+    Dir(BTreeMap<OsString, Node>),
+    File(PathBuf),
+}
+
+impl Default for Node {
+    fn default() -> Self {
+        Self::Dir(BTreeMap::new())
+    }
+}
+
+impl Node {
+    fn insert(&mut self, target: &Path, source: &Path) -> Result<()> {
+        let mut node = self;
+        let mut consumed = PathBuf::new();
+        let mut components = target.components().peekable();
+        while let Some(component) = components.next() {
+            let name = component.as_os_str().to_owned();
+            match node {
+                Node::File(_) => {
+                    return Err(miette!(
+                        "structural conflict between `{}` and `{}`",
+                        consumed.display(),
+                        target.display()
+                    ));
+                }
+                Node::Dir(children) => {
+                    consumed.push(&name);
+                    let child = children.entry(name).or_default();
+                    if components.peek().is_none() {
+                        if let Node::File(existing) = child {
+                            return Err(miette!(
+                                "collision at `{}` between `{}` and `{}`",
+                                target.display(),
+                                existing.display(),
+                                source.display()
+                            ));
+                        }
+                        if matches!(child, Node::Dir(children) if children.is_empty()) {
+                            *child = Node::File(source.to_path_buf());
+                            return Ok(());
+                        }
+                        let descendant = consumed.join(child.first_file_path());
+                        return Err(miette!(
+                            "structural conflict between `{}` and `{}`",
+                            target.display(),
+                            descendant.display()
+                        ));
+                    }
+                    node = child;
+                }
+            }
+        }
+        unreachable!("validated targets are non-empty relative paths")
+    }
+
+    fn first_file_path(&self) -> PathBuf {
+        match self {
+            Node::File(_) => PathBuf::new(),
+            Node::Dir(children) => {
+                let (name, child) = children.iter().next().unwrap_or_else(|| {
+                    unreachable!("caller guarantees the directory has children")
+                });
+                PathBuf::from(name).join(child.first_file_path())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RuleConfig {
+    deploy_type: Option<DeployType>,
+    mode: Option<DeployMode>,
+}
+
+impl<'de> serde::Deserialize<'de> for RuleConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            #[serde(rename = "type")]
+            deploy_type: Option<DeployType>,
+            mode: Option<DeployMode>,
+        }
+        let raw = Raw::deserialize(deserializer)?;
+        if raw.mode.is_some() && raw.deploy_type == Some(DeployType::Symlink) {
+            return Err(serde::de::Error::custom(
+                "`mode` cannot be used with `type` `symlink`",
+            ));
+        }
+        Ok(RuleConfig {
+            deploy_type: raw.deploy_type,
+            mode: raw.mode,
+        })
+    }
+}
+
+fn compile_rules(
+    rules: &indexmap::IndexMap<String, RuleConfig>,
+) -> Result<indexmap::IndexMap<Pattern, RuleConfig>> {
+    let mut compiled = indexmap::IndexMap::with_capacity(rules.len());
+    for (pattern, rule) in rules {
+        validate_relative(pattern, "rule")?;
+        reject_brace_expansion(pattern, "rule")?;
+        let pattern = Pattern::new(pattern.strip_prefix("./").unwrap_or(pattern))
+            .map_err(|error| miette!("invalid rule pattern `{pattern}` because {error}"))?;
+        compiled.insert(pattern, *rule);
+    }
+    Ok(compiled)
+}
+
+fn apply_rules(
+    entry: ResolvedPortal,
+    rules: &indexmap::IndexMap<Pattern, RuleConfig>,
+    target_root: &Path,
+) -> Result<DeploymentEntry> {
+    let mut deploy_type = DeployType::Symlink;
+    let mut mode = None;
+    for (pattern, rule) in rules {
+        if pattern.matches_path_with(&entry.target, GLOB_MATCH_OPTIONS) {
+            if let Some(value) = rule.deploy_type {
+                deploy_type = value;
+            }
+            if let Some(value) = &rule.mode {
+                mode = Some(*value);
+            }
+        }
+    }
+    if deploy_type == DeployType::Symlink {
+        if mode.is_some() {
+            Reporter::always().warning(format_args!(
+                "ignoring `mode` for `{}`: effective `type` is `symlink`",
+                entry.target.display()
+            ));
+        }
+        mode = None;
+    }
+    Ok(DeploymentEntry {
+        source_path: entry.source,
+        target_path: target_root.join(entry.target),
+        deploy_type,
+        mode,
+    })
 }
 
 #[cfg(any(test, feature = "testing"))]
