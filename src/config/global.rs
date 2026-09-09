@@ -11,7 +11,7 @@ use std::{fs, io};
 use miette::{Result, WrapErr, miette};
 use serde::Deserialize;
 
-use crate::environment::Environment;
+use crate::platform::Environment;
 
 /// The per-user global config: the configured pager and `apply` behavior.
 #[derive(Debug, Default)]

@@ -9,14 +9,11 @@ use templater::value::Value;
 
 use crate::{
     ExitStatus,
-    config::{self, DeployType},
-    deployer::{DeployOutcome, Deployer, ReplaceLatch, cleanup, describe_decision},
-    environment::Environment,
-    global_config::GlobalConfig,
-    obstruction_interaction::{Interaction, Prompter, RealDiffer, RealPrompter},
-    prettify_path,
-    reconcile::decide,
-    render_registry::RenderRegistry,
+    config::{self, DeployType, GlobalConfig},
+    deploy::obstruction::{Interaction, Prompter, RealDiffer, RealPrompter},
+    deploy::{DeployOutcome, Deployer, ReplaceLatch, cleanup, decide, describe_decision},
+    platform::{Environment, prettify_path},
+    render::RenderRegistry,
     report::{Outcome, Reporter},
     state::{StateDatabase, StateLock},
 };

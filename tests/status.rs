@@ -3,7 +3,7 @@ mod common;
 use std::fs;
 use std::os::unix::fs::symlink;
 
-use dotrift::hash::hash_bytes;
+use dotrift::state::hash_bytes;
 use dotrift::state::{Kind, StateRecord};
 
 use common::{TestEnv, snapshot_settings};

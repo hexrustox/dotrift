@@ -12,10 +12,10 @@ use std::{
 use miette::Result;
 use templater::value::Value;
 
+use super::template;
 use crate::{
-    environment::Environment,
-    fingerprint::{Fingerprint, HashWriter, TemplateHash},
-    template,
+    platform::Environment,
+    state::{Fingerprint, HashWriter, TemplateHash},
 };
 
 /// The rendered output of one template for this run.
@@ -150,7 +150,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::RenderRegistry;
-    use crate::{environment::Environment, hash};
+    use crate::{platform::Environment, state::hash_bytes};
     use templater::value::Value;
 
     fn context() -> HashMap<String, Value> {
@@ -199,6 +199,6 @@ mod tests {
                 & 0o777,
             0o600
         );
-        assert_eq!(rendered.digest, hash::hash_bytes(&bytes));
+        assert_eq!(rendered.digest, hash_bytes(&bytes));
     }
 }

@@ -6,7 +6,7 @@ use std::path::Path;
 
 use common::{ApplyScenario, QueuePrompter, assert_error_chain};
 use dotrift::commands::apply::ApplyOptions;
-use dotrift::obstruction_interaction::ObstructionChoice;
+use dotrift::deploy::ObstructionChoice;
 use test_case::test_case;
 
 fn obstruction_setup(source: &Path, target: &Path) -> &'static str {

@@ -11,9 +11,17 @@ use miette::{Result, WrapErr, miette};
 use serde::Deserialize;
 use templater::value::Value;
 
-use crate::{data::DataFile, environment::Environment, report::Reporter};
+use crate::{
+    platform::{Environment, ensure_source_dir},
+    report::Reporter,
+};
 
+pub(crate) mod data;
+pub mod global;
 mod portals;
+
+pub(crate) use data::DataFile;
+pub use global::{GlobalConfig, PagerCommand};
 
 const GLOB_MATCH_OPTIONS: MatchOptions = MatchOptions {
     case_sensitive: true,
@@ -120,7 +128,7 @@ pub fn read(
     env: &Environment,
     color: bool,
 ) -> Result<DesiredDeployment> {
-    crate::ensure_source_dir(source)?;
+    ensure_source_dir(source)?;
     let data = DataFile::read(source)?;
     // The variable context is resolved once per run (`spec/CONTEXT.md`); a
     // missing state database contributes no active profiles (`spec/core.md §
@@ -167,7 +175,7 @@ pub fn read(
 }
 
 fn render_config(path: &Path, context: &HashMap<String, Value>) -> Result<String> {
-    String::from_utf8(crate::template::render_template(path, context)?)
+    String::from_utf8(crate::render::render_template(path, context)?)
         .map_err(|error| miette!(error))
         .wrap_err("rendered configuration is not `UTF-8`")
 }

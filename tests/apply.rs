@@ -9,9 +9,9 @@ use std::{
 use common::{ApplyScenario, CancellingPrompter, QueuePrompter, TestEnv, assert_error_chain};
 use dotrift::ExitStatus;
 use dotrift::commands::apply::ApplyOptions;
-use dotrift::hash::hash_bytes;
-use dotrift::obstruction_interaction::ObstructionChoice;
+use dotrift::deploy::ObstructionChoice;
 use dotrift::state::Kind;
+use dotrift::state::hash_bytes;
 use test_case::test_case;
 
 fn record_of(env: &TestEnv, path: &Path) -> Option<dotrift::state::StateRecord> {

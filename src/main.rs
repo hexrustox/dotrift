@@ -4,7 +4,7 @@ use miette::{Error, miette};
 use dotrift::{
     ExitStatus,
     cli::{Cli, Command},
-    environment::Environment,
+    platform::Environment,
 };
 
 fn main() -> Result<(), Error> {

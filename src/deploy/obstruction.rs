@@ -19,9 +19,8 @@ use templater::value::Value;
 use tui::prompt::{PromptError, PromptOption};
 
 use crate::{
-    config::{self, DeployType},
-    global_config::{GlobalConfig, PagerCommand},
-    render_registry::RenderRegistry,
+    config::{self, DeployType, GlobalConfig, PagerCommand},
+    render::RenderRegistry,
     report::diff_sink,
 };
 
@@ -185,7 +184,7 @@ pub(crate) fn prompt_for_obstruction(
 
     use crossterm::style::Color;
 
-    use crate::prettify_path;
+    use crate::platform::prettify_path;
 
     let question = format!(
         "Cannot deploy {} {} because {} {} is already present.\nHow would you like to proceed?",
@@ -467,7 +466,7 @@ mod tests {
     fn view_diff_then_replace_shows_once_and_replaces() {
         use tempfile::tempdir;
 
-        use crate::environment::Environment;
+        use crate::platform::Environment;
 
         let state = tempdir().unwrap();
         let env = Environment::test_root(state.path());

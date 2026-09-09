@@ -11,7 +11,9 @@ use miette::{Result, miette};
 use templater::value::Value;
 
 use crate::{
-    config::DeploymentEntry, fingerprint, render_registry::RenderRegistry, state::StateDatabase,
+    config::DeploymentEntry,
+    render::RenderRegistry,
+    state::{StateDatabase, is_identical, is_managed},
 };
 
 /// What `apply` does with one entry before any filesystem effect: a missing
@@ -68,13 +70,10 @@ pub(crate) fn decide(
         return Ok(Decision::Deployed);
     }
     let managed = match database.record(&entry.target_path)? {
-        Some(record) => fingerprint::is_managed(&record)?,
+        Some(record) => is_managed(&record)?,
         None => false,
     };
-    if managed
-        || replace_all
-        || (replace_identical && fingerprint::is_identical(entry, context, registry))
-    {
+    if managed || replace_all || (replace_identical && is_identical(entry, context, registry)) {
         return Ok(Decision::Replaced {
             remove: entry.target_path.clone(),
         });
@@ -123,9 +122,8 @@ mod tests {
 
     use crate::{
         config::DeployType,
-        environment::Environment,
-        hash::hash_bytes,
-        state::{Kind, StateRecord},
+        platform::Environment,
+        state::{Kind, StateRecord, hash_bytes},
     };
 
     use super::*;

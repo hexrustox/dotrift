@@ -4,9 +4,9 @@ use std::{fs, path::Path, path::PathBuf};
 
 use common::{ApplyScenario, QueuePrompter, TestEnv, assert_error_chain};
 use dotrift::commands::apply::ApplyOptions;
-use dotrift::hash::hash_bytes;
-use dotrift::obstruction_interaction::ObstructionChoice;
+use dotrift::deploy::ObstructionChoice;
 use dotrift::state::StateRecord;
+use dotrift::state::hash_bytes;
 
 fn record_of(env: &TestEnv, path: &Path) -> Option<StateRecord> {
     env.database().record(path).unwrap()

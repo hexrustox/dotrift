@@ -16,18 +16,15 @@ use std::{
 use miette::{Result, WrapErr, miette};
 use templater::value::Value;
 
+use super::obstruction::{ObstructionResolver, ResolveAction};
+use super::reconcile::{Decision, decide};
 use crate::{
     commands::apply::ApplyOptions,
-    config::{self, DeployType},
-    fingerprint::{self, Fingerprint, HashWriter},
-    global_config::GlobalConfig,
-    obstruction_interaction::{ObstructionResolver, ResolveAction},
-    prettify_path,
-    reconcile::{Decision, decide},
-    render_registry::RenderRegistry,
+    config::{self, DeployType, GlobalConfig},
+    platform::prettify_path,
+    render::{RenderRegistry, render_template_to},
     report::{Outcome, Reporter},
-    state::{Kind, StateDatabase, StateRecord},
-    template,
+    state::{Fingerprint, HashWriter, Kind, StateDatabase, StateRecord, is_managed},
 };
 
 /// Latch for the `replace all` obstruction choice: once enabled, every
@@ -227,9 +224,7 @@ fn write_deployed_file(
         .wrap_err("cannot write target file")?;
     let mut writer = HashWriter::new(BufWriter::new(file));
     let outcome = match entry.deploy_type {
-        DeployType::Template => {
-            template::render_template_to(&entry.source_path, context, &mut writer)
-        }
+        DeployType::Template => render_template_to(&entry.source_path, context, &mut writer),
         DeployType::Copy => {
             let mut source = fs::File::open(&entry.source_path)
                 .map_err(|error| miette!(error))
@@ -286,7 +281,7 @@ pub(crate) fn cleanup(
             }
             continue;
         }
-        if !fingerprint::is_managed(&record)? {
+        if !is_managed(&record)? {
             if !dry_run {
                 database.remove(path)?;
             }
@@ -637,7 +632,7 @@ mod tests {
 
     #[test]
     fn deploy_one_deploys_missing_target() {
-        use crate::environment::Environment;
+        use crate::platform::Environment;
 
         let (source, target, state, registry_root) = test_harness();
         fs::write(source.path().join("file.txt"), "new").unwrap();
@@ -671,9 +666,8 @@ mod tests {
     #[test]
     fn deploy_one_replaces_managed_path_without_prompting() {
         use crate::{
-            environment::Environment,
-            hash::hash_bytes,
-            state::{Kind, StateRecord},
+            platform::Environment,
+            state::{Kind, StateRecord, hash_bytes},
         };
 
         let (source, target, state, registry_root) = test_harness();
@@ -712,7 +706,7 @@ mod tests {
 
     #[test]
     fn deploy_one_skip_and_cancel() {
-        use crate::environment::Environment;
+        use crate::platform::Environment;
 
         for (action, expected) in [
             (ResolveAction::Skip, DeployOutcome::Skipped),
@@ -752,7 +746,7 @@ mod tests {
 
     #[test]
     fn deploy_one_latch_suppresses_second_prompt() {
-        use crate::environment::Environment;
+        use crate::platform::Environment;
 
         let (source, target, state, registry_root) = test_harness();
         fs::write(source.path().join("a.txt"), "new-a").unwrap();
@@ -794,7 +788,7 @@ mod tests {
 
     #[test]
     fn deploy_one_template_failure_leaves_target_absent() {
-        use crate::environment::Environment;
+        use crate::platform::Environment;
 
         let (source, target, state, registry_root) = test_harness();
         fs::write(source.path().join("bad.txt"), "{{ unclosed").unwrap();

@@ -1,8 +1,3 @@
-# Dotrift Agent Guide
-
-Declarative, template-aware dotfile manager written in Rust. Maps files from a
-source directory to a target directory via `dotrift.toml`.
-
 ## Agent skills
 
 ### Issue tracker
@@ -17,7 +12,7 @@ The five canonical triage-role labels are used as-is. See `docs/agents/triage-la
 
 Multi-context: root `CONTEXT-MAP.md` points at per-context `CONTEXT.md` files, with ADRs in `docs/adr/`. See `docs/agents/domain.md`.
 
-**Authoritative behavior contract:** `spec/*.md` (root) and `<workspace>/spec/*.md` (per workspace member). Consult them before changing CLI, config, DB schema, templater syntax, or pager behavior.
+**Authoritative behavior contract:** `spec/**/*.md` (root) and `<workspace>/spec/*.md` (per workspace member). Consult them before changing any behavior.
 
 ## Workspace overview
 
@@ -36,8 +31,9 @@ live in `spec/`.
 
 ## Directory conventions
 
-- Root crate `dotrift`: library modules live flat in `src/*.rs`; subcommand
-  handlers in `src/commands/`; `src/main.rs` stays a thin entrypoint.
+- Modules, all crates (root or workspace): independent/shared modules live
+  flat at `src/*.rs`; related modules group in `src/<group>/*.rs` with a
+  `<group>/mod.rs`. Never use the `<group>.rs` + `<group>/*.rs` layout.
 - Integration tests sit in root `tests/`, one file per command/behavior;
   shared helpers in `tests/common/mod.rs`, insta snapshots in
   `tests/snapshots/`.

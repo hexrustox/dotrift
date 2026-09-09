@@ -8,7 +8,7 @@ use std::{
 use miette::{Result, WrapErr, miette};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
-use crate::environment::Environment;
+use crate::platform::Environment;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {

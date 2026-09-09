@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use miette::Result;
 
-use crate::{ensure_absolute, environment::Environment};
+use crate::platform::{Environment, ensure_absolute};
 
 #[derive(Debug, Parser)]
 #[command(name = "dotrift")]

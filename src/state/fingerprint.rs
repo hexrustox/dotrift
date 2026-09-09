@@ -27,7 +27,7 @@ use twox_hash::XxHash64;
 
 use crate::{
     config::{DeployType, DeploymentEntry},
-    render_registry::RenderRegistry,
+    render::RenderRegistry,
     state::{Kind, StateRecord},
 };
 
@@ -374,7 +374,7 @@ mod tests {
     }
 
     fn dry_registry(anchor: &Path) -> RenderRegistry {
-        RenderRegistry::acquire(&crate::environment::Environment::test_root(anchor), true)
+        RenderRegistry::acquire(&crate::platform::Environment::test_root(anchor), true)
     }
 
     #[test]
@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn identical_template_matching_render_is_identical() {
-        use crate::environment::Environment;
+        use crate::platform::Environment;
 
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
@@ -479,7 +479,7 @@ mod tests {
 
     #[test]
     fn identical_template_with_divergent_render_is_not_identical() {
-        use crate::environment::Environment;
+        use crate::platform::Environment;
 
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();

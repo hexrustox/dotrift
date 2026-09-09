@@ -7,9 +7,9 @@ use std::path::Path;
 use common::{ApplyScenario, QueuePrompter, TestEnv};
 use dotrift::ExitStatus;
 use dotrift::commands::apply::ApplyOptions;
-use dotrift::hash::hash_bytes;
-use dotrift::obstruction_interaction::ObstructionChoice;
+use dotrift::deploy::ObstructionChoice;
 use dotrift::state::Kind;
+use dotrift::state::hash_bytes;
 use test_case::test_case;
 
 const REPLACE_IDENTICAL: &str = "[apply]\nreplace-identical = true\n";

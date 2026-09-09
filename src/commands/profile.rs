@@ -4,8 +4,8 @@ use miette::{Result, miette};
 
 use crate::{
     cli::ProfileCommand,
-    data::DataFile,
-    environment::Environment,
+    config::DataFile,
+    platform::Environment,
     report::{Outcome, Reporter},
     state::{StateDatabase, StateLock},
 };

@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use dotrift::commands::apply::ApplyOptions;
-use dotrift::environment::Environment;
-use dotrift::obstruction_interaction::{ObstructionChoice, Prompter};
+use dotrift::deploy::{ObstructionChoice, Prompter};
+use dotrift::platform::Environment;
 use dotrift::state::StateDatabase;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
