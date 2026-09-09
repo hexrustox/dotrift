@@ -17,13 +17,10 @@ pub mod template;
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{LazyLock, RwLock},
 };
 
 use miette::{Result, WrapErr, miette};
 use normalize_path::NormalizePath;
-
-pub static COLOR_SUPPORT: LazyLock<RwLock<bool>> = LazyLock::new(|| RwLock::new(false));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitStatus {

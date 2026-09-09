@@ -210,6 +210,7 @@ fn fresh_env_behaviors(setup: impl Fn(&TestEnv), options: ApplyOptions, assert: 
         Some(env.path("target")),
         options,
         env.env(),
+        false,
     )
     .unwrap();
 

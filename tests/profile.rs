@@ -9,12 +9,12 @@ use common::TestEnv;
 
 fn run_and_take(env: &TestEnv, source: Option<&Path>, command: ProfileCommand) -> String {
     dotrift::report::clear();
-    dotrift::commands::profile::run(source, command, env.env()).unwrap();
+    dotrift::commands::profile::run(source, command, env.env(), false).unwrap();
     dotrift::report::take_output()
 }
 
 fn run_expects_error(env: &TestEnv, source: Option<&Path>, command: ProfileCommand, needle: &str) {
-    let error = dotrift::commands::profile::run(source, command, env.env()).unwrap_err();
+    let error = dotrift::commands::profile::run(source, command, env.env(), false).unwrap_err();
     common::assert_error_chain(&error, needle);
 }
 

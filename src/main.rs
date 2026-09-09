@@ -2,20 +2,20 @@ use clap::Parser;
 use miette::{Error, miette};
 
 use dotrift::{
-    COLOR_SUPPORT, ExitStatus,
+    ExitStatus,
     cli::{Cli, Command},
     environment::Environment,
 };
 
 fn main() -> Result<(), Error> {
-    *COLOR_SUPPORT.write().unwrap() = tui::color_support();
+    let color = tui::color_support();
 
     let env = Environment::resolve();
     let cli = Cli::parse();
     let (source, target, command) = cli.resolve(&env)?;
     let mut status = ExitStatus::Success;
     match command {
-        Command::Status => dotrift::commands::status::run(&env)?,
+        Command::Status => dotrift::commands::status::run(&env, color)?,
         Command::Apply {
             clean_up,
             prune_empty_dirs,
@@ -37,10 +37,11 @@ fn main() -> Result<(), Error> {
                     verbose,
                 },
                 &env,
+                color,
             )?
         }
         Command::Profile { command } => {
-            dotrift::commands::profile::run(source.as_deref(), command, &env)?
+            dotrift::commands::profile::run(source.as_deref(), command, &env, color)?
         }
     }
     std::process::exit(status as i32);

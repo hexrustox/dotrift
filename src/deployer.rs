@@ -557,7 +557,7 @@ mod tests {
         prune_parents(
             dir.path(),
             &setup(dir.path()),
-            &crate::report::Reporter::always(),
+            &crate::report::Reporter::always(false),
         )
         .unwrap_or_else(|error| panic!("{error}"));
         assert(dir.path());

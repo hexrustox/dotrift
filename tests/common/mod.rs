@@ -134,31 +134,6 @@ impl Drop for EnvVarGuard {
     }
 }
 
-/// Pins `COLOR_SUPPORT` to `enabled` for the guard's lifetime, then restores
-/// the previous value. Takes the same lock as `EnvVarGuard` (the env lock
-/// serializes both), so tests observing color support run serially against
-/// each other.
-pub struct ColorSupportGuard {
-    previous: bool,
-    _guard: MutexGuard<'static, ()>,
-}
-
-impl Drop for ColorSupportGuard {
-    fn drop(&mut self) {
-        *dotrift::COLOR_SUPPORT.write().unwrap() = self.previous;
-    }
-}
-
-pub fn pin_color_support(enabled: bool) -> ColorSupportGuard {
-    let guard = ENV_LOCK.lock().expect("env lock poisoned");
-    let previous = *dotrift::COLOR_SUPPORT.read().unwrap();
-    *dotrift::COLOR_SUPPORT.write().unwrap() = enabled;
-    ColorSupportGuard {
-        previous,
-        _guard: guard,
-    }
-}
-
 /// Reconciles a source tree against a target tree with `dotrift.toml` written
 /// from a setup closure. Exposes the run/twice patterns shared by the apply
 /// integration tests.
@@ -203,7 +178,12 @@ impl ApplyScenario {
     }
 
     pub fn try_run(&self) -> std::result::Result<dotrift::ExitStatus, miette::Report> {
-        dotrift::commands::apply::run(&self.source, Some(self.target.clone()), self.env.env())
+        dotrift::commands::apply::run(
+            &self.source,
+            Some(self.target.clone()),
+            self.env.env(),
+            false,
+        )
     }
 
     pub fn try_run_with_options(
@@ -215,6 +195,7 @@ impl ApplyScenario {
             Some(self.target.clone()),
             options,
             self.env.env(),
+            false,
         )
     }
 }

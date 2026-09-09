@@ -10,27 +10,35 @@ use crate::{
     state::{StateDatabase, StateLock},
 };
 
-pub fn run(source: Option<&Path>, command: ProfileCommand, env: &Environment) -> Result<()> {
+pub fn run(
+    source: Option<&Path>,
+    command: ProfileCommand,
+    env: &Environment,
+    color: bool,
+) -> Result<()> {
     match command {
         ProfileCommand::List => list(
             source.ok_or_else(|| miette!("source directory is required"))?,
             env,
+            color,
         ),
         ProfileCommand::Activate { name } => activate(
             source.ok_or_else(|| miette!("source directory is required"))?,
             &name,
             env,
+            color,
         ),
-        ProfileCommand::Deactivate { name } => deactivate(&name, env),
+        ProfileCommand::Deactivate { name } => deactivate(&name, env, color),
         ProfileCommand::Show => show(
             source.ok_or_else(|| miette!("source directory is required"))?,
             env,
+            color,
         ),
     }
 }
 
-fn list(source: &Path, env: &Environment) -> Result<()> {
-    let report = Reporter::always();
+fn list(source: &Path, env: &Environment, color: bool) -> Result<()> {
+    let report = Reporter::always(color);
     let data = DataFile::read(source)?;
     let active = crate::state::load_active_profiles(env)?;
     for name in data.profile.keys() {
@@ -47,7 +55,7 @@ fn list(source: &Path, env: &Environment) -> Result<()> {
     Ok(())
 }
 
-fn activate(source: &Path, name: &str, env: &Environment) -> Result<()> {
+fn activate(source: &Path, name: &str, env: &Environment, color: bool) -> Result<()> {
     let data = DataFile::read(source)?;
     if !data.profile.contains_key(name) {
         return Err(miette!("profile `{name}` is not defined"));
@@ -56,23 +64,23 @@ fn activate(source: &Path, name: &str, env: &Environment) -> Result<()> {
         let _lock = StateLock::acquire(env)?;
         StateDatabase::open(env)?.activate_profile(name)?;
     }
-    Reporter::always().line(format_args!("profile `{name}` activated"));
+    Reporter::always(color).line(format_args!("profile `{name}` activated"));
     Ok(())
 }
 
-fn deactivate(name: &str, env: &Environment) -> Result<()> {
+fn deactivate(name: &str, env: &Environment, color: bool) -> Result<()> {
     {
         let _lock = StateLock::acquire(env)?;
         if !StateDatabase::open(env)?.deactivate_profile(name)? {
             return Err(miette!("profile `{name}` is not active"));
         }
     }
-    Reporter::always().line(format_args!("profile `{name}` deactivated"));
+    Reporter::always(color).line(format_args!("profile `{name}` deactivated"));
     Ok(())
 }
 
-fn show(source: &Path, env: &Environment) -> Result<()> {
-    let report = Reporter::always();
+fn show(source: &Path, env: &Environment, color: bool) -> Result<()> {
+    let report = Reporter::always(color);
     let data = DataFile::read(source)?;
     let active = crate::state::load_active_profiles(env)?;
     let context = data.context(&active);

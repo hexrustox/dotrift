@@ -35,8 +35,9 @@ pub fn run(
     source: &Path,
     target_override: Option<PathBuf>,
     env: &Environment,
+    color: bool,
 ) -> Result<ExitStatus> {
-    run_with_options(source, target_override, ApplyOptions::default(), env)
+    run_with_options(source, target_override, ApplyOptions::default(), env, color)
 }
 
 pub fn run_with_options(
@@ -44,11 +45,12 @@ pub fn run_with_options(
     target_override: Option<PathBuf>,
     options: ApplyOptions,
     env: &Environment,
+    color: bool,
 ) -> Result<ExitStatus> {
     let _lock = StateLock::acquire(env)?;
     let global_config = GlobalConfig::load(env)?;
     let mut registry = RenderRegistry::acquire(env, options.dry_run);
-    let deployment = config::read(source, target_override, env)?;
+    let deployment = config::read(source, target_override, env, color)?;
     let target = &deployment.target_directory;
 
     if fs::symlink_metadata(target).is_ok()
@@ -67,7 +69,7 @@ pub fn run_with_options(
     let database = StateDatabase::open(env)?;
     let mut entries = deployment.entries.clone();
     entries.sort_by(|left, right| left.target_path.cmp(&right.target_path));
-    let report = Reporter::new(options.verbose || options.dry_run, options.quiet);
+    let report = Reporter::new(color, options.verbose || options.dry_run, options.quiet);
 
     if options.dry_run {
         for entry in &entries {

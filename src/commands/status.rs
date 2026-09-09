@@ -7,8 +7,8 @@ use crate::{
     state::StateDatabase,
 };
 
-pub fn run(env: &Environment) -> Result<()> {
-    let report = Reporter::always();
+pub fn run(env: &Environment, color: bool) -> Result<()> {
+    let report = Reporter::always(color);
     let Some(database) = StateDatabase::open_read_only(env)? else {
         return Ok(());
     };

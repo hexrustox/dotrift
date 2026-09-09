@@ -118,6 +118,7 @@ pub fn read(
     source: &Path,
     target_override: Option<PathBuf>,
     env: &Environment,
+    color: bool,
 ) -> Result<DesiredDeployment> {
     crate::ensure_source_dir(source)?;
     let data = DataFile::read(source)?;
@@ -156,7 +157,7 @@ pub fn read(
     let rules = compile_rules(&config.rule)?;
     let entries = portals
         .into_iter()
-        .map(|entry| apply_rules(entry, &rules, &target))
+        .map(|entry| apply_rules(entry, &rules, &target, color))
         .collect::<Result<Vec<_>>>()?;
     Ok(DesiredDeployment {
         target_directory: target,
@@ -374,6 +375,7 @@ fn apply_rules(
     entry: ResolvedPortal,
     rules: &indexmap::IndexMap<Pattern, RuleConfig>,
     target_root: &Path,
+    color: bool,
 ) -> Result<DeploymentEntry> {
     let mut deploy_type = DeployType::Symlink;
     let mut mode = None;
@@ -389,7 +391,7 @@ fn apply_rules(
     }
     if deploy_type == DeployType::Symlink {
         if mode.is_some() {
-            Reporter::always().warning(format_args!(
+            Reporter::always(color).warning(format_args!(
                 "ignoring `mode` for `{}`: effective `type` is `symlink`",
                 entry.target.display()
             ));

@@ -6,11 +6,15 @@ use std::os::unix::fs::symlink;
 use dotrift::hash::hash_bytes;
 use dotrift::state::{Kind, StateRecord};
 
-use common::{TestEnv, pin_color_support, snapshot_settings};
+use common::{TestEnv, snapshot_settings};
 
 fn run_status_and_take(env: &TestEnv) -> String {
+    run_colored_status_and_take(env, false)
+}
+
+fn run_colored_status_and_take(env: &TestEnv, color: bool) -> String {
     dotrift::report::clear();
-    dotrift::commands::status::run(env.env()).expect("status run failed");
+    dotrift::commands::status::run(env.env(), color).expect("status run failed");
     dotrift::report::take_output()
 }
 
@@ -134,10 +138,7 @@ fn status_layout_is_unchanged_with_color_forced() {
 
     // One self-check: the run must actually be colored, or the snapshot
     // below would pass against colorless output.
-    let colored = {
-        let _color = pin_color_support(true);
-        run_status_and_take(&env)
-    };
+    let colored = run_colored_status_and_take(&env, true);
     assert!(
         colored.contains('\u{1b}'),
         "color forcing must reach the output"

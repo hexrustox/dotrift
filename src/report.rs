@@ -39,13 +39,13 @@ pub struct Reporter {
 }
 
 impl Reporter {
-    pub fn always() -> Self {
-        Self::new(true, false)
+    pub fn always(color: bool) -> Self {
+        Self::new(color, true, false)
     }
 
-    pub fn new(outcome_enabled: bool, quiet: bool) -> Self {
+    pub fn new(color: bool, outcome_enabled: bool, quiet: bool) -> Self {
         Self {
-            color: *crate::COLOR_SUPPORT.read().unwrap(),
+            color,
             outcome_enabled,
             quiet,
         }
@@ -168,14 +168,14 @@ mod tests {
     #[test]
     fn outcome_line_is_suppressed_without_outcome_enabled() {
         clear();
-        Reporter::new(false, false).outcome_line(format_args!("deployed /opt/x/.vimrc"));
+        Reporter::new(false, false, false).outcome_line(format_args!("deployed /opt/x/.vimrc"));
         assert_eq!(take_output(), "");
     }
 
     #[test]
     fn outcome_line_prints_caller_formatted_args() {
         clear();
-        let report = Reporter::always();
+        let report = Reporter::always(false);
         report.outcome_line(format_args!(
             "{} {}",
             report.paint(Outcome::Deployed, "deployed"),
@@ -187,16 +187,17 @@ mod tests {
     #[test]
     fn summary_is_suppressed_when_quiet() {
         clear();
-        Reporter::new(true, true).summary(format_args!("deployed 1, replaced 0, skipped 0"));
+        Reporter::new(false, true, true).summary(format_args!("deployed 1, replaced 0, skipped 0"));
         assert_eq!(take_output(), "");
-        Reporter::new(true, false).summary(format_args!("deployed 1, replaced 0, skipped 0"));
+        Reporter::new(false, true, false)
+            .summary(format_args!("deployed 1, replaced 0, skipped 0"));
         assert_eq!(take_output(), "deployed 1, replaced 0, skipped 0\n");
     }
 
     #[test]
     fn warning_writes_stderr_without_touching_stdout() {
         clear();
-        Reporter::always().warning(format_args!("ignoring `mode` for `.vimrc`"));
+        Reporter::always(false).warning(format_args!("ignoring `mode` for `.vimrc`"));
         assert_eq!(take_errors(), "ignoring `mode` for `.vimrc`\n");
         assert_eq!(take_output(), "");
     }
@@ -204,15 +205,15 @@ mod tests {
     #[test]
     fn line_prints_formatted_args() {
         clear();
-        Reporter::always().line(format_args!("{} {:<8}", "a", 3));
+        Reporter::always(false).line(format_args!("{} {:<8}", "a", 3));
         assert_eq!(take_output(), "a 3       \n");
     }
 
     #[test]
     fn output_and_error_buffers_are_independent() {
         clear();
-        Reporter::always().line(format_args!("out"));
-        Reporter::always().warning(format_args!("err"));
+        Reporter::always(false).line(format_args!("out"));
+        Reporter::always(false).warning(format_args!("err"));
         assert_eq!(take_output(), "out\n");
         assert_eq!(take_errors(), "err\n");
         assert_eq!(take_output(), "");
@@ -227,7 +228,7 @@ mod tests {
 
     #[test]
     fn paint_without_color_support_keeps_plain_text() {
-        let report = Reporter::always();
+        let report = Reporter::always(false);
         assert_eq!(report.paint(Outcome::Managed, "managed"), "managed");
     }
 
