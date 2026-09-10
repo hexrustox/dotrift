@@ -14,23 +14,20 @@ testing = []
 [dependencies]
 tui = { path = "./tui" }
 templater = { path = "./templater" }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4.6.0", features = ["derive"] }
 crossterm.workspace = true
-dirs = "6"
+dirs = "6.0.0"
 glob = "0.3.3"
 ignore = "0.4.25"
-indexmap = { version = "2", features = ["serde"] }
-memmap2.workspace = true
+indexmap = { version = "2.14.0", features = ["serde"] }
 miette.workspace = true
-normalize-path = "0.2"
-rusqlite = { version = "0.39", features = ["bundled"] }
+normalize-path = "0.2.1"
+rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde.workspace = true
 strum.workspace = true
 toml.workspace = true
-toml_edit.workspace = true
-twox-hash = "2.1"
-walkdir = "2"
-libc = "0.2"
+twox-hash = "2.1.2"
+libc = "0.2.184"
 
 [dev-dependencies]
 dotrift = { path = ".", features = ["testing"] }
@@ -40,26 +37,22 @@ tempfile.workspace = true
 test-case.workspace = true
 
 [workspace.dependencies]
-criterion = { version = "0.8", default-features = false, features = [
+criterion = { version = "0.8.2", default-features = false, features = [
   "cargo_bench_support",
 ] }
 crossterm = { version = "0.29.0", default-features = false, features = [
   "events",
 ] }
-insta = { version = "1.48", features = ["filters"] }
-memmap2 = "0.9"
+insta = { version = "1.48.0", features = ["filters"] }
+memmap2 = "0.9.10"
 miette = { version = "7.6.0", features = ["fancy"] }
-ratatui = { version = "0.30", default-features = false, features = [
-  "crossterm",
-] }
-serde = { version = "1", features = ["derive"] }
-strum = { version = "0.28", features = ["derive"] }
-supports-color = "3"
-tempfile = "3"
-proptest = "1"
-rand = "0.9"
-test-case = "3"
-toml = "1"
-toml_edit = "0.25"
-thiserror = "2"
-portable-pty = "0.9"
+serde = { version = "1.0.228", features = ["derive"] }
+strum = { version = "0.28.0", features = ["derive"] }
+supports-color = "3.0.2"
+tempfile = "3.27.0"
+proptest = "1.11.0"
+rand = "0.9.4"
+test-case = "3.3.1"
+toml = "1.1.2"
+thiserror = "2.0.18"
+portable-pty = "0.9.0"

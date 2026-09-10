@@ -14,8 +14,6 @@ required-features = ["testing"]
 
 [dependencies]
 crossterm.workspace = true
-memmap2.workspace = true
-ratatui.workspace = true
 strum.workspace = true
 supports-color.workspace = true
 thiserror.workspace = true
@@ -26,4 +24,4 @@ insta.workspace = true
 portable-pty.workspace = true
 tempfile.workspace = true
 test-case.workspace = true
-vt100 = "0.16"
+vt100 = "0.16.2"
