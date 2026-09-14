@@ -12,6 +12,10 @@ The five canonical triage-role labels are used as-is. See `docs/agents/triage-la
 
 Multi-context: root `CONTEXT-MAP.md` points at per-context `CONTEXT.md` files, with ADRs in `docs/adr/`. See `docs/agents/domain.md`.
 
+### Test data
+
+See `docs/agents/test-data.md`.
+
 **Authoritative behavior contract:** `spec/**/*.md` (root) and `<workspace>/spec/*.md` (per workspace member). Consult them before changing any behavior.
 
 ## Workspace overview
