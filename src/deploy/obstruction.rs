@@ -374,6 +374,7 @@ where
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    use test_case::test_case;
 
     fn test_config_pager() -> PagerCommand {
         PagerCommand {
@@ -382,50 +383,71 @@ mod tests {
         }
     }
 
-    #[test]
-    fn pager_chain_prefers_dotrift_pager_over_config_and_env() {
-        let config = test_config_pager();
-        let selection = pager_chain(
-            Some("dotrift-pager".to_string()),
-            Some(&config),
-            Some("env-pager".to_string()),
-        );
-        assert_eq!(
-            selection,
-            PagerSelection::EnvDotrift("dotrift-pager".to_string())
-        );
+    #[derive(Debug, PartialEq, Eq)]
+    enum ExpectedPager {
+        Dotrift(String),
+        Config(String, Vec<String>),
+        Pager(String),
+        Stdout,
     }
 
-    #[test]
-    fn pager_chain_prefers_config_over_env_pager() {
-        let config = test_config_pager();
-        let selection = pager_chain(None, Some(&config), Some("env-pager".to_string()));
-        assert_eq!(selection, PagerSelection::Config(&config));
-    }
-
-    #[test]
-    fn pager_chain_uses_env_pager_when_nothing_else_set() {
-        let selection = pager_chain(None, None, Some("env-pager".to_string()));
-        assert_eq!(selection, PagerSelection::EnvPager("env-pager".to_string()));
-    }
-
-    #[test]
-    fn pager_chain_blank_dotrift_pager_falls_back_to_config() {
-        let config = test_config_pager();
-        let selection = pager_chain(Some("   ".to_string()), Some(&config), None);
-        assert_eq!(selection, PagerSelection::Config(&config));
-    }
-
-    #[test]
-    fn pager_chain_skips_empty_strings() {
-        let selection = pager_chain(Some("   ".to_string()), None, Some("".to_string()));
-        assert_eq!(selection, PagerSelection::Stdout);
-    }
-
-    #[test]
-    fn pager_chain_falls_back_to_stdout() {
-        let selection: PagerSelection<'_> = pager_chain(None, None, None);
-        assert_eq!(selection, PagerSelection::Stdout);
+    #[test_case(
+        Some("dotrift-pager".to_string()),
+        None,
+        Some("env-pager".to_string()),
+        ExpectedPager::Dotrift("dotrift-pager".to_string())
+        ; "prefers_dotrift_pager_over_config_and_env"
+    )]
+    #[test_case(
+        None,
+        Some(test_config_pager()),
+        Some("env-pager".to_string()),
+        ExpectedPager::Config("config-pager".to_string(), vec![])
+        ; "prefers_config_over_env_pager"
+    )]
+    #[test_case(
+        None,
+        None,
+        Some("env-pager".to_string()),
+        ExpectedPager::Pager("env-pager".to_string())
+        ; "uses_env_pager_when_nothing_else_set"
+    )]
+    #[test_case(
+        Some("   ".to_string()),
+        Some(test_config_pager()),
+        None,
+        ExpectedPager::Config("config-pager".to_string(), vec![])
+        ; "blank_dotrift_pager_falls_back_to_config"
+    )]
+    #[test_case(
+        Some("   ".to_string()),
+        None,
+        Some("".to_string()),
+        ExpectedPager::Stdout
+        ; "skips_empty_strings"
+    )]
+    #[test_case(
+        None,
+        None,
+        None,
+        ExpectedPager::Stdout
+        ; "falls_back_to_stdout"
+    )]
+    fn pager_chain_picks(
+        dotrift_pager: Option<String>,
+        config: Option<PagerCommand>,
+        pager: Option<String>,
+        expected: ExpectedPager,
+    ) {
+        let actual = match pager_chain(dotrift_pager, config.as_ref(), pager) {
+            PagerSelection::EnvDotrift(command) => ExpectedPager::Dotrift(command),
+            PagerSelection::Config(pager) => {
+                ExpectedPager::Config(pager.command.clone(), pager.args.clone())
+            }
+            PagerSelection::EnvPager(command) => ExpectedPager::Pager(command),
+            PagerSelection::Stdout => ExpectedPager::Stdout,
+        };
+        assert_eq!(actual, expected);
     }
 
     struct SeqPrompter {

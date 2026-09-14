@@ -630,58 +630,32 @@ mod tests {
         }
     }
 
-    #[test]
-    fn deploy_one_deploys_missing_target() {
-        use crate::platform::Environment;
-
-        let (source, target, state, registry_root) = test_harness();
-        fs::write(source.path().join("file.txt"), "new").unwrap();
-        let database = StateDatabase::open_at(state.path()).unwrap();
-        let env = Environment::test_root(registry_root.path());
-        let mut registry = RenderRegistry::acquire(&env, false);
-        let global_config = GlobalConfig::default();
-        let interaction = PanickingResolver;
-        let mut latch = ReplaceLatch::default();
-        let mut deployer = Deployer::new(
-            &database,
-            target.path(),
-            &mut registry,
-            &global_config,
-            &interaction,
-            &mut latch,
-        );
-        let entry = copy_entry(
-            &source.path().join("file.txt"),
-            &target.path().join("target.txt"),
-        );
-
-        let outcome = deployer.deploy_one(&entry, &HashMap::new()).unwrap();
-        assert_eq!(outcome, DeployOutcome::Deployed);
-        assert_eq!(
-            fs::read_to_string(target.path().join("target.txt")).unwrap(),
-            "new"
-        );
-    }
-
-    #[test]
-    fn deploy_one_replaces_managed_path_without_prompting() {
+    #[test_case(false, DeployOutcome::Deployed ; "missing_target_deploys")]
+    #[test_case(true, DeployOutcome::Replaced ; "managed_path_replaced_without_prompt")]
+    fn deploy_one_without_prompt(pre_managed: bool, expected: DeployOutcome) {
         use crate::{
             platform::Environment,
             state::{Kind, StateRecord, hash_bytes},
         };
 
         let (source, target, state, registry_root) = test_harness();
-        fs::write(source.path().join("file.txt"), "v1").unwrap();
-        fs::write(target.path().join("target.txt"), "v1").unwrap();
+        if pre_managed {
+            fs::write(source.path().join("file.txt"), "v1").unwrap();
+            fs::write(target.path().join("target.txt"), "v1").unwrap();
+        } else {
+            fs::write(source.path().join("file.txt"), "new").unwrap();
+        }
         let database = StateDatabase::open_at(state.path()).unwrap();
-        database
-            .put(&StateRecord {
-                target_path: target.path().join("target.txt"),
-                source_path: source.path().join("file.txt"),
-                kind: Kind::File,
-                content_hash: Some(hash_bytes(b"v1").into()),
-            })
-            .unwrap();
+        if pre_managed {
+            database
+                .put(&StateRecord {
+                    target_path: target.path().join("target.txt"),
+                    source_path: source.path().join("file.txt"),
+                    kind: Kind::File,
+                    content_hash: Some(hash_bytes(b"v1").into()),
+                })
+                .unwrap();
+        }
         let env = Environment::test_root(registry_root.path());
         let mut registry = RenderRegistry::acquire(&env, false);
         let global_config = GlobalConfig::default();
@@ -701,47 +675,49 @@ mod tests {
         );
 
         let outcome = deployer.deploy_one(&entry, &HashMap::new()).unwrap();
-        assert_eq!(outcome, DeployOutcome::Replaced);
-    }
-
-    #[test]
-    fn deploy_one_skip_and_cancel() {
-        use crate::platform::Environment;
-
-        for (action, expected) in [
-            (ResolveAction::Skip, DeployOutcome::Skipped),
-            (ResolveAction::Cancel, DeployOutcome::Cancelled),
-        ] {
-            let (source, target, state, registry_root) = test_harness();
-            fs::write(source.path().join("file.txt"), "new").unwrap();
-            fs::write(target.path().join("target.txt"), "old").unwrap();
-            let database = StateDatabase::open_at(state.path()).unwrap();
-            let env = Environment::test_root(registry_root.path());
-            let mut registry = RenderRegistry::acquire(&env, false);
-            let global_config = GlobalConfig::default();
-            let interaction = FakeResolver::once(action);
-            let mut latch = ReplaceLatch::default();
-            let mut deployer = Deployer::new(
-                &database,
-                target.path(),
-                &mut registry,
-                &global_config,
-                &interaction,
-                &mut latch,
-            );
-            let entry = copy_entry(
-                &source.path().join("file.txt"),
-                &target.path().join("target.txt"),
-            );
-
-            let outcome = deployer.deploy_one(&entry, &HashMap::new()).unwrap();
-            assert_eq!(outcome, expected);
-            assert_eq!(interaction.calls(), 1);
+        assert_eq!(outcome, expected);
+        if !pre_managed {
             assert_eq!(
                 fs::read_to_string(target.path().join("target.txt")).unwrap(),
-                "old"
+                "new"
             );
         }
+    }
+
+    #[test_case(ResolveAction::Skip, DeployOutcome::Skipped ; "skip_leaves_obstruction")]
+    #[test_case(ResolveAction::Cancel, DeployOutcome::Cancelled ; "cancel_leaves_obstruction")]
+    fn deploy_one_obstruction_without_replace(action: ResolveAction, expected: DeployOutcome) {
+        use crate::platform::Environment;
+
+        let (source, target, state, registry_root) = test_harness();
+        fs::write(source.path().join("file.txt"), "new").unwrap();
+        fs::write(target.path().join("target.txt"), "old").unwrap();
+        let database = StateDatabase::open_at(state.path()).unwrap();
+        let env = Environment::test_root(registry_root.path());
+        let mut registry = RenderRegistry::acquire(&env, false);
+        let global_config = GlobalConfig::default();
+        let interaction = FakeResolver::once(action);
+        let mut latch = ReplaceLatch::default();
+        let mut deployer = Deployer::new(
+            &database,
+            target.path(),
+            &mut registry,
+            &global_config,
+            &interaction,
+            &mut latch,
+        );
+        let entry = copy_entry(
+            &source.path().join("file.txt"),
+            &target.path().join("target.txt"),
+        );
+
+        let outcome = deployer.deploy_one(&entry, &HashMap::new()).unwrap();
+        assert_eq!(outcome, expected);
+        assert_eq!(interaction.calls(), 1);
+        assert_eq!(
+            fs::read_to_string(target.path().join("target.txt")).unwrap(),
+            "old"
+        );
     }
 
     #[test]

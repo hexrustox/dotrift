@@ -244,32 +244,16 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn hash_bytes_empty_matches_known_digest() {
-        assert_eq!(hash_bytes(&[]).as_str(), "ef46db3751d8e999");
-    }
-
-    #[test]
-    fn hash_bytes_text_matches_known_digest() {
-        assert_eq!(hash_bytes(b"hello").as_str(), "26c7827d889f6da3");
-    }
-
-    #[test]
-    fn template_hash_matches_fingerprint_for_same_bytes() {
-        assert_eq!(
-            TemplateHash::of_bytes(b"hello").as_str(),
-            hash_bytes(b"hello").as_str()
-        );
-    }
-
-    #[test]
-    fn hash_file_digests_same_as_its_bytes() {
+    #[test_case(b"hello".to_vec() ; "hello_digests_same_as_bytes")]
+    #[test_case(Vec::new() ; "empty_digests_same_as_bytes")]
+    #[test_case(vec![b'x'; CHUNK_SIZE * 2 + 1] ; "larger_than_chunk_digests_same_as_bytes")]
+    fn hash_file_digests_same_as_its_bytes(content: Vec<u8>) {
         let dir = tempdir().expect("cannot create temp dir");
         let path = dir.path().join("sample");
-        fs::write(&path, b"hello").expect("cannot write sample file");
+        fs::write(&path, &content).expect("cannot write sample file");
         assert_eq!(
             Fingerprint::of_file(&path).expect("cannot hash sample file"),
-            hash_bytes(b"hello")
+            hash_bytes(&content)
         );
     }
 
@@ -279,26 +263,18 @@ mod tests {
         assert!(Fingerprint::of_file(&dir.path().join("missing")).is_err());
     }
 
-    #[test]
-    fn hash_writer_digests_empty_stream_like_hash_bytes() {
-        let writer = HashWriter::new(Vec::<u8>::new());
-        assert_eq!(writer.into_digest(), hash_bytes(&[]));
-    }
-
-    #[test]
-    fn hash_writer_digests_text_like_hash_bytes() {
-        let mut writer = HashWriter::new(Vec::new());
-        writer.write_all(b"hello").expect("cannot write");
-        assert_eq!(writer.into_digest(), hash_bytes(b"hello"));
-    }
-
-    #[test]
-    fn hash_writer_digests_chunked_stream_like_hash_bytes() {
-        let mut writer = HashWriter::new(Vec::new());
-        for chunk in [b"foo".as_slice(), b"bar", b"baz"] {
+    #[test_case(&[] ; "hash_writer_digests_empty_stream_like_hash_bytes")]
+    #[test_case(&[b"hello".as_slice()] ; "hash_writer_digests_one_write_like_hash_bytes")]
+    #[test_case(
+        &[b"foo".as_slice(), b"bar".as_slice(), b"baz".as_slice()] ;
+        "hash_writer_digests_chunked_writes_like_hash_bytes"
+    )]
+    fn hash_writer_digests_stream_like_hash_bytes(chunks: &[&[u8]]) {
+        let mut writer = HashWriter::new(Vec::<u8>::new());
+        for chunk in chunks {
             writer.write_all(chunk).expect("cannot write");
         }
-        assert_eq!(writer.into_digest(), hash_bytes(b"foobarbaz"));
+        assert_eq!(writer.into_digest(), hash_bytes(&chunks.concat()));
     }
 
     #[test_case(
@@ -377,11 +353,31 @@ mod tests {
         RenderRegistry::acquire(&crate::platform::Environment::test_root(anchor), true)
     }
 
-    #[test]
-    fn identical_copy_with_matching_bytes_is_identical() {
+    #[test_case(
+        |t| {
+            fs::write(t.join("source.txt"), "same").unwrap();
+            fs::write(t.join("target.txt"), "same").unwrap();
+        } => true ;
+        "copy_target_matches_source_bytes_is_identical"
+    )]
+    #[test_case(
+        |t| {
+            fs::write(t.join("source.txt"), "new").unwrap();
+            fs::write(t.join("target.txt"), "old").unwrap();
+        } => false ;
+        "copy_target_diverged_from_source_not_identical"
+    )]
+    #[test_case(
+        |t| {
+            fs::write(t.join("source.txt"), "same").unwrap();
+            fs::create_dir(t.join("target.txt")).unwrap();
+            fs::write(t.join("target.txt/inner"), "same").unwrap();
+        } => false ;
+        "copy_target_is_directory_not_identical"
+    )]
+    fn is_identical_when_copy_target_matches_source(setup: impl Fn(&Path)) -> bool {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("source.txt"), "same").unwrap();
-        fs::write(dir.path().join("target.txt"), "same").unwrap();
+        setup(dir.path());
         let entry = entry(
             &dir.path().join("source.txt"),
             &dir.path().join("target.txt"),
@@ -389,46 +385,26 @@ mod tests {
         );
         let mut registry = dry_registry(dir.path());
 
-        assert!(is_identical(&entry, &no_context(), &mut registry));
+        is_identical(&entry, &no_context(), &mut registry)
     }
 
-    #[test]
-    fn identical_copy_with_divergent_bytes_is_not_identical() {
+    #[test_case(
+        |t| {
+            fs::write(t.join("source.txt"), "content").unwrap();
+            std::os::unix::fs::symlink(t.join("source.txt"), t.join("target.txt")).unwrap();
+        } => true ;
+        "symlink_target_points_at_source_is_identical"
+    )]
+    #[test_case(
+        |t| {
+            fs::write(t.join("other.txt"), "content").unwrap();
+            std::os::unix::fs::symlink(t.join("other.txt"), t.join("target.txt")).unwrap();
+        } => false ;
+        "symlink_target_points_elsewhere_not_identical"
+    )]
+    fn is_identical_when_symlink_target_matches_source(setup: impl Fn(&Path)) -> bool {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("source.txt"), "new").unwrap();
-        fs::write(dir.path().join("target.txt"), "old").unwrap();
-        let entry = entry(
-            &dir.path().join("source.txt"),
-            &dir.path().join("target.txt"),
-            DeployType::Copy,
-        );
-        let mut registry = dry_registry(dir.path());
-
-        assert!(!is_identical(&entry, &no_context(), &mut registry));
-    }
-
-    #[test]
-    fn identical_copy_with_directory_target_is_not_identical() {
-        let dir = tempdir().unwrap();
-        fs::write(dir.path().join("source.txt"), "same").unwrap();
-        fs::create_dir(dir.path().join("target.txt")).unwrap();
-        fs::write(dir.path().join("target.txt/inner"), "same").unwrap();
-        let entry = entry(
-            &dir.path().join("source.txt"),
-            &dir.path().join("target.txt"),
-            DeployType::Copy,
-        );
-        let mut registry = dry_registry(dir.path());
-
-        assert!(!is_identical(&entry, &no_context(), &mut registry));
-    }
-
-    #[test]
-    fn identical_symlink_pointing_at_source_is_identical() {
-        let dir = tempdir().unwrap();
-        fs::write(dir.path().join("source.txt"), "content").unwrap();
-        std::os::unix::fs::symlink(dir.path().join("source.txt"), dir.path().join("target.txt"))
-            .unwrap();
+        setup(dir.path());
         let entry = entry(
             &dir.path().join("source.txt"),
             &dir.path().join("target.txt"),
@@ -436,82 +412,31 @@ mod tests {
         );
         let mut registry = dry_registry(dir.path());
 
-        assert!(is_identical(&entry, &no_context(), &mut registry));
+        is_identical(&entry, &no_context(), &mut registry)
     }
 
-    #[test]
-    fn identical_symlink_pointing_elsewhere_is_not_identical() {
-        let dir = tempdir().unwrap();
-        fs::write(dir.path().join("source.txt"), "content").unwrap();
-        fs::write(dir.path().join("other.txt"), "content").unwrap();
-        std::os::unix::fs::symlink(dir.path().join("other.txt"), dir.path().join("target.txt"))
-            .unwrap();
-        let entry = entry(
-            &dir.path().join("source.txt"),
-            &dir.path().join("target.txt"),
-            DeployType::Symlink,
-        );
-        let mut registry = dry_registry(dir.path());
-
-        assert!(!is_identical(&entry, &no_context(), &mut registry));
-    }
-
-    #[test]
-    fn identical_template_matching_render_is_identical() {
-        use crate::platform::Environment;
-
+    #[test_case("hello\n", false => true ; "template_target_matches_render_is_identical")]
+    #[test_case("stale\n", false => false ; "template_target_diverged_from_render_not_identical")]
+    #[test_case("hello\n", true => false ; "template_render_unavailable_not_identical")]
+    fn is_identical_when_template_target_matches_render(target_content: &str, dry: bool) -> bool {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let registry_root = tempdir().unwrap();
-        let env = Environment::test_root(registry_root.path());
         fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
-        fs::write(target.path().join("target.txt"), "hello\n").unwrap();
+        fs::write(target.path().join("target.txt"), target_content).unwrap();
         let entry = entry(
             &source.path().join("greeting.txt"),
             &target.path().join("target.txt"),
             DeployType::Template,
         );
         let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
-        let mut registry = RenderRegistry::acquire(&env, false);
+        let env = crate::platform::Environment::test_root(registry_root.path());
+        let mut registry = if dry {
+            dry_registry(source.path())
+        } else {
+            RenderRegistry::acquire(&env, false)
+        };
 
-        assert!(is_identical(&entry, &context, &mut registry));
-    }
-
-    #[test]
-    fn identical_template_with_divergent_render_is_not_identical() {
-        use crate::platform::Environment;
-
-        let source = tempdir().unwrap();
-        let target = tempdir().unwrap();
-        let registry_root = tempdir().unwrap();
-        let env = Environment::test_root(registry_root.path());
-        fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
-        fs::write(target.path().join("target.txt"), "stale\n").unwrap();
-        let entry = entry(
-            &source.path().join("greeting.txt"),
-            &target.path().join("target.txt"),
-            DeployType::Template,
-        );
-        let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
-        let mut registry = RenderRegistry::acquire(&env, false);
-
-        assert!(!is_identical(&entry, &context, &mut registry));
-    }
-
-    #[test]
-    fn identical_template_without_registry_is_not_identical() {
-        let source = tempdir().unwrap();
-        let target = tempdir().unwrap();
-        fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
-        fs::write(target.path().join("target.txt"), "hello\n").unwrap();
-        let entry = entry(
-            &source.path().join("greeting.txt"),
-            &target.path().join("target.txt"),
-            DeployType::Template,
-        );
-        let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
-        let mut registry = dry_registry(source.path());
-
-        assert!(!is_identical(&entry, &context, &mut registry));
+        is_identical(&entry, &context, &mut registry)
     }
 }

@@ -538,27 +538,18 @@ mod tests {
         assert_eq!(profiles[0].0, "editor");
     }
 
-    #[test]
-    fn deactivate_profile_returns_true_for_active_profile() {
+    #[test_case(true => true ; "active_profile_deactivates")]
+    #[test_case(false => false ; "absent_profile_returns_false")]
+    fn deactivate_profile_returns_expected_result(activate_first: bool) -> bool {
         let (_dir, database) = database();
-        database
-            .activate_profile("editor")
-            .expect("cannot activate profile");
-        assert!(
+        if activate_first {
             database
-                .deactivate_profile("editor")
-                .expect("cannot deactivate profile")
-        );
-    }
-
-    #[test]
-    fn deactivate_profile_returns_false_for_absent_profile() {
-        let (_dir, database) = database();
-        assert!(
-            !database
-                .deactivate_profile("editor")
-                .expect("cannot deactivate profile")
-        );
+                .activate_profile("editor")
+                .expect("cannot activate profile");
+        }
+        database
+            .deactivate_profile("editor")
+            .expect("cannot deactivate profile")
     }
 
     #[test]

@@ -414,15 +414,21 @@ mod tests {
         assert_eq!(decision, expected(target.path()));
     }
 
-    #[test]
-    fn decides_replaced_for_identical_template_rendered_into_registry() {
+    #[test_case("hello\n", false, true ; "identical_render_replaced")]
+    #[test_case("stale\n", false, false ; "divergent_render_prompts")]
+    #[test_case("hello\n", true, false ; "identical_prompts_when_registry_unavailable")]
+    fn decides_for_template_with(
+        target_content: &str,
+        dry_registry_setup: bool,
+        expects_replaced: bool,
+    ) {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
         let registry_root = tempdir().unwrap();
         let env = Environment::test_root(registry_root.path());
         fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
-        fs::write(target.path().join("target.txt"), "hello\n").unwrap();
+        fs::write(target.path().join("target.txt"), target_content).unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let entry = entry(
             &source.path().join("greeting.txt"),
@@ -430,7 +436,11 @@ mod tests {
             DeployType::Template,
         );
         let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
-        let mut registry = RenderRegistry::acquire(&env, false);
+        let mut registry = if dry_registry_setup {
+            dry_registry(state.path())
+        } else {
+            RenderRegistry::acquire(&env, false)
+        };
 
         let decision = decide(
             &database,
@@ -443,74 +453,16 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            decision,
-            Decision::Replaced {
-                remove: target.path().join("target.txt")
-            }
-        );
-    }
-
-    #[test]
-    fn decides_prompt_for_divergent_template() {
-        let source = tempdir().unwrap();
-        let target = tempdir().unwrap();
-        let state = tempdir().unwrap();
-        let registry_root = tempdir().unwrap();
-        let env = Environment::test_root(registry_root.path());
-        fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
-        fs::write(target.path().join("target.txt"), "stale\n").unwrap();
-        let database = StateDatabase::open_at(state.path()).unwrap();
-        let entry = entry(
-            &source.path().join("greeting.txt"),
-            &target.path().join("target.txt"),
-            DeployType::Template,
-        );
-        let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
-        let mut registry = RenderRegistry::acquire(&env, false);
-
-        let decision = decide(
-            &database,
-            target.path(),
-            &entry,
-            &context,
-            &mut registry,
-            false,
-            true,
-        )
-        .unwrap();
-
-        assert_eq!(decision, Decision::Prompt(target.path().join("target.txt")));
-    }
-
-    #[test]
-    fn decides_prompt_for_identical_template_when_registry_is_unavailable() {
-        let source = tempdir().unwrap();
-        let target = tempdir().unwrap();
-        let state = tempdir().unwrap();
-        fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
-        fs::write(target.path().join("target.txt"), "hello\n").unwrap();
-        let database = StateDatabase::open_at(state.path()).unwrap();
-        let entry = entry(
-            &source.path().join("greeting.txt"),
-            &target.path().join("target.txt"),
-            DeployType::Template,
-        );
-        let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
-        let mut registry = dry_registry(state.path());
-
-        let decision = decide(
-            &database,
-            target.path(),
-            &entry,
-            &context,
-            &mut registry,
-            false,
-            true,
-        )
-        .unwrap();
-
-        assert_eq!(decision, Decision::Prompt(target.path().join("target.txt")));
+        if expects_replaced {
+            assert_eq!(
+                decision,
+                Decision::Replaced {
+                    remove: target.path().join("target.txt")
+                }
+            );
+        } else {
+            assert_eq!(decision, Decision::Prompt(target.path().join("target.txt")));
+        }
     }
 
     #[test]

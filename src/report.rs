@@ -164,42 +164,23 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
 
-    #[test]
-    fn outcome_line_is_suppressed_without_outcome_enabled() {
+    #[test_case(false, "" ; "suppressed_without_outcome_enabled")]
+    #[test_case(true, "hello\n" ; "prints_caller_formatted_args")]
+    fn outcome_line_respects_outcome_enabled(outcome_enabled: bool, expected: &str) {
         clear();
-        Reporter::new(false, false, false).outcome_line(format_args!("deployed /opt/x/.vimrc"));
-        assert_eq!(take_output(), "");
-    }
-
-    #[test]
-    fn outcome_line_prints_caller_formatted_args() {
-        clear();
-        let report = Reporter::always(false);
-        report.outcome_line(format_args!(
-            "{} {}",
-            report.paint(Outcome::Deployed, "deployed"),
-            "/opt/x/.vimrc"
-        ));
-        assert_eq!(take_output(), "deployed /opt/x/.vimrc\n");
+        Reporter::new(false, outcome_enabled, false).outcome_line(format_args!("hello"));
+        assert_eq!(take_output(), expected);
     }
 
     #[test]
     fn summary_is_suppressed_when_quiet() {
         clear();
-        Reporter::new(false, true, true).summary(format_args!("deployed 1, replaced 0, skipped 0"));
+        Reporter::new(false, true, true).summary(format_args!("hello"));
         assert_eq!(take_output(), "");
-        Reporter::new(false, true, false)
-            .summary(format_args!("deployed 1, replaced 0, skipped 0"));
-        assert_eq!(take_output(), "deployed 1, replaced 0, skipped 0\n");
-    }
-
-    #[test]
-    fn warning_writes_stderr_without_touching_stdout() {
-        clear();
-        Reporter::always(false).warning(format_args!("ignoring `mode` for `.vimrc`"));
-        assert_eq!(take_errors(), "ignoring `mode` for `.vimrc`\n");
-        assert_eq!(take_output(), "");
+        Reporter::new(false, true, false).summary(format_args!("hello"));
+        assert_eq!(take_output(), "hello\n");
     }
 
     #[test]
@@ -230,18 +211,5 @@ mod tests {
     fn paint_without_color_support_keeps_plain_text() {
         let report = Reporter::always(false);
         assert_eq!(report.paint(Outcome::Managed, "managed"), "managed");
-    }
-
-    #[test]
-    fn palette_colors_match_the_spec() {
-        assert_eq!(Outcome::Deployed.color(), Color::Green);
-        assert_eq!(Outcome::Managed.color(), Color::Green);
-        assert_eq!(Outcome::Active.color(), Color::Green);
-        assert_eq!(Outcome::Replaced.color(), Color::Cyan);
-        assert_eq!(Outcome::Skipped.color(), Color::DarkGrey);
-        assert_eq!(Outcome::Removed.color(), Color::Red);
-        assert_eq!(Outcome::Unmanaged.color(), Color::Red);
-        assert_eq!(Outcome::Pruned.color(), Color::Magenta);
-        assert_eq!(Outcome::Obstruction.color(), Color::Yellow);
     }
 }

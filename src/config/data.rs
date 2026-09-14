@@ -65,6 +65,7 @@ mod tests {
     use std::fs;
 
     use tempfile::tempdir;
+    use test_case::test_case;
 
     use super::*;
 
@@ -134,42 +135,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rejects_empty_variable_key() {
+    #[test_case("[variable]\n\"\" = \"x\"\n", "empty key in `[variable]`" ; "empty_variable_key")]
+    #[test_case("[profile.work]\n\"\" = \"x\"\n", "empty key in `[profile.work]`" ; "empty_profile_binding_key")]
+    #[test_case("[profile.\"\"]\neditor = \"nvim\"\n", "empty profile name" ; "empty_profile_name")]
+    fn rejects_empty_keys(contents: &str, expected: &str) {
         let dir = tempdir().expect("cannot create temp dir");
-        write_data_file(dir.path(), "[variable]\n\"\" = \"x\"\n");
-        let error = DataFile::read(dir.path()).expect_err("empty variable key must fail");
+        write_data_file(dir.path(), contents);
+        let error = DataFile::read(dir.path()).expect_err("empty key or name must fail");
         assert!(
             error
                 .chain()
-                .any(|cause| cause.to_string().contains("empty key in `[variable]`")),
-            "expected an error naming the empty key but got: {error:?}"
-        );
-    }
-
-    #[test]
-    fn rejects_empty_profile_binding_key() {
-        let dir = tempdir().expect("cannot create temp dir");
-        write_data_file(dir.path(), "[profile.work]\n\"\" = \"x\"\n");
-        let error = DataFile::read(dir.path()).expect_err("empty profile key must fail");
-        assert!(
-            error
-                .chain()
-                .any(|cause| cause.to_string().contains("empty key in `[profile.work]`")),
-            "expected an error naming the empty key but got: {error:?}"
-        );
-    }
-
-    #[test]
-    fn rejects_empty_profile_name() {
-        let dir = tempdir().expect("cannot create temp dir");
-        write_data_file(dir.path(), "[profile.\"\"]\neditor = \"nvim\"\n");
-        let error = DataFile::read(dir.path()).expect_err("empty profile name must fail");
-        assert!(
-            error
-                .chain()
-                .any(|cause| cause.to_string().contains("empty profile name")),
-            "expected an error naming the empty profile name but got: {error:?}"
+                .any(|cause| cause.to_string().contains(expected)),
+            "expected an error containing {expected:?} but got: {error:?}"
         );
     }
 
