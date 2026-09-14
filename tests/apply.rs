@@ -6,17 +6,13 @@ use std::{
     path::Path,
 };
 
-use common::{ApplyScenario, CancellingPrompter, QueuePrompter, TestEnv, assert_error_chain};
+use common::{ApplyScenario, Prompt, TestEnv, assert_error_chain, record_of};
 use dotrift::ExitStatus;
 use dotrift::commands::apply::ApplyOptions;
 use dotrift::deploy::ObstructionChoice;
 use dotrift::state::Kind;
 use dotrift::state::hash_bytes;
 use test_case::test_case;
-
-fn record_of(env: &TestEnv, path: &Path) -> Option<dotrift::state::StateRecord> {
-    env.database().record(path).unwrap()
-}
 
 #[test_case(
     |source: &Path, _target: &Path| {
@@ -440,7 +436,7 @@ fn unmanaged_target_obstruction_behaviors(
     let scenario = ApplyScenario::new(setup);
     let status = match choice {
         Some(choice) => {
-            let prompter = QueuePrompter::once(choice);
+            let prompter = Prompt::once(choice);
             let status = scenario
                 .try_run_with_prompter(&prompter)
                 .expect("apply failed");
@@ -448,7 +444,7 @@ fn unmanaged_target_obstruction_behaviors(
             status
         }
         None => {
-            let prompter = CancellingPrompter::new();
+            let prompter = Prompt::cancel();
             let status = scenario
                 .try_run_with_prompter(&prompter)
                 .expect("apply failed");
@@ -536,7 +532,7 @@ fn tampered_managed_target_behaviors(
 ) {
     let scenario = ApplyScenario::new(setup);
     scenario.run();
-    let prompter = QueuePrompter::once(choice);
+    let prompter = Prompt::once(choice);
     tamper(&scenario.source, &scenario.target);
 
     let status = scenario
@@ -623,7 +619,7 @@ fn obstructed_parent_path_behaviors(
     let scenario = ApplyScenario::new(setup);
     let status = match choice {
         Some(choice) => {
-            let prompter = QueuePrompter::once(choice);
+            let prompter = Prompt::once(choice);
             let status = scenario
                 .try_run_with_prompter(&prompter)
                 .expect("apply failed");
@@ -937,7 +933,7 @@ fn skipped_entry_blocks_clean_up_for_that_run() {
     scenario
         .write_config("[portal]\n\"a.txt\" = \"a.txt\"\n[rule]\n\"a.txt\" = { type = \"copy\" }\n");
 
-    let skip = QueuePrompter::once(ObstructionChoice::Skip);
+    let skip = Prompt::once(ObstructionChoice::Skip);
     let status = scenario
         .try_run_with_options_and_prompter(
             ApplyOptions {
@@ -953,7 +949,7 @@ fn skipped_entry_blocks_clean_up_for_that_run() {
     assert!(scenario.target.join("b.txt").is_symlink());
     assert!(record_of(&scenario.env, &scenario.target.join("b.txt")).is_some());
 
-    let replace = QueuePrompter::once(ObstructionChoice::Replace);
+    let replace = Prompt::once(ObstructionChoice::Replace);
     let status = scenario
         .try_run_with_options_and_prompter(
             ApplyOptions {

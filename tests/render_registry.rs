@@ -2,15 +2,10 @@ mod common;
 
 use std::{fs, path::Path, path::PathBuf};
 
-use common::{ApplyScenario, QueuePrompter, TestEnv, assert_error_chain};
+use common::{ApplyScenario, Prompt, TestEnv, assert_error_chain, record_of};
 use dotrift::commands::apply::ApplyOptions;
 use dotrift::deploy::ObstructionChoice;
-use dotrift::state::StateRecord;
 use dotrift::state::hash_bytes;
-
-fn record_of(env: &TestEnv, path: &Path) -> Option<StateRecord> {
-    env.database().record(path).unwrap()
-}
 
 fn registry_dir(env: &TestEnv) -> PathBuf {
     env.path("render-registry/registry")
@@ -122,7 +117,7 @@ fn dry_run_leaves_a_preexisting_registry_untouched() {
 fn view_diff_fails_when_the_registry_is_unavailable() {
     let scenario = ApplyScenario::new(obstructed_template_setup);
     fs::write(scenario.env.path("render-registry"), b"").unwrap();
-    let prompter = QueuePrompter::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+    let prompter = Prompt::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
 
     let error = scenario.try_run_with_prompter(&prompter).unwrap_err();
 
@@ -156,8 +151,7 @@ fn template_deploy_falls_back_when_the_registry_is_unavailable() {
 #[test]
 fn view_diff_then_replace_deploys_the_shared_render() {
     let scenario = ApplyScenario::new(obstructed_template_setup);
-    let prompter =
-        QueuePrompter::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Replace]);
+    let prompter = Prompt::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Replace]);
 
     scenario.run_with_prompter(&prompter);
 

@@ -4,7 +4,7 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::Path;
 
-use common::{ApplyScenario, QueuePrompter, assert_error_chain};
+use common::{ApplyScenario, Prompt, assert_error_chain};
 use dotrift::commands::apply::ApplyOptions;
 use dotrift::deploy::ObstructionChoice;
 use test_case::test_case;
@@ -20,7 +20,7 @@ fn missing_config_file_leaves_apply_behavior_unchanged() {
     let scenario = ApplyScenario::new(obstruction_setup);
     scenario.env.write_global_config("");
 
-    let prompter = QueuePrompter::once(ObstructionChoice::Skip);
+    let prompter = Prompt::once(ObstructionChoice::Skip);
     let status = scenario
         .try_run_with_prompter(&prompter)
         .expect("apply failed");
@@ -99,7 +99,7 @@ fn valid_config_is_accepted(toml: &str) {
     let scenario = ApplyScenario::new(obstruction_setup);
     scenario.env.write_global_config(toml);
 
-    let prompter = QueuePrompter::once(ObstructionChoice::Skip);
+    let prompter = Prompt::once(ObstructionChoice::Skip);
     let status = scenario
         .try_run_with_prompter(&prompter)
         .expect("apply failed");
@@ -133,7 +133,7 @@ fn dangling_symlink_at_config_path_counts_as_missing() {
     fs::remove_file(&path).unwrap();
     symlink("nowhere", &path).unwrap();
 
-    let prompter = QueuePrompter::once(ObstructionChoice::Skip);
+    let prompter = Prompt::once(ObstructionChoice::Skip);
     let status = scenario
         .try_run_with_prompter(&prompter)
         .expect("apply failed");

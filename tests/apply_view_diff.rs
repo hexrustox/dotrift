@@ -1,83 +1,19 @@
 mod common;
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use common::{ApplyScenario, EnvVarGuard, QueuePrompter, TestEnv, snapshot_settings, test_name};
+use common::{
+    ApplyScenario, PagerChoice, Prompt, argv_capture_script, capture_script, capture_script_named,
+    config_pager_toml, resolve_pager, snapshot_settings, test_name,
+};
 use dotrift::deploy::ObstructionChoice;
 use test_case::test_case;
-
-fn capture_script_named(env: &TestEnv, name: &str) -> (PathBuf, PathBuf) {
-    let output = env.path(format!("{name}.txt"));
-    let script = env.path(format!("capture-{name}.sh"));
-    fs::write(&script, format!("#!/bin/sh\ncat > {}\n", output.display())).unwrap();
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-    (script, output)
-}
-
-fn capture_script(env: &TestEnv) -> (PathBuf, PathBuf) {
-    capture_script_named(env, "pager")
-}
-
-/// A pager capture script that also records its arguments, one per line,
-/// before the diff.
-fn argv_capture_script(env: &TestEnv) -> (PathBuf, PathBuf) {
-    let output = env.path("pager-argv.txt");
-    let script = env.path("capture-argv-pager.sh");
-    fs::write(
-        &script,
-        format!(
-            "#!/bin/sh\nfor arg in \"$@\"; do printf '%s\\n' \"$arg\" >> {}; done\ncat >> {}\n",
-            output.display(),
-            output.display()
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-    (script, output)
-}
-
-fn config_pager_toml(command: &Path, args: &[&str]) -> String {
-    let args = args
-        .iter()
-        .map(|arg| format!("'{arg}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    if args.is_empty() {
-        format!("[pager]\ncommand = '{}'\n", command.display())
-    } else {
-        format!(
-            "[pager]\ncommand = '{}'\nargs = [{args}]\n",
-            command.display()
-        )
-    }
-}
 
 fn copy_diff_setup(source: &Path, target: &Path) -> &'static str {
     fs::write(source.join("file.txt"), b"new content\n").unwrap();
     fs::write(target.join("target.txt"), b"old content\n").unwrap();
     "[portal]\n\"file.txt\" = \"target.txt\"\n[rule]\n\"target.txt\" = { type = \"copy\" }\n"
-}
-
-enum PagerChoice {
-    CaptureScript,
-    MissingBinary,
-    Unset,
-}
-
-fn resolve_pager(choice: PagerChoice, env: &TestEnv) -> (Option<String>, Option<PathBuf>) {
-    match choice {
-        PagerChoice::CaptureScript => {
-            let (script, output) = capture_script(env);
-            (Some(script.to_str().unwrap().to_owned()), Some(output))
-        }
-        PagerChoice::MissingBinary => (
-            Some(env.path("no-such-pager").to_string_lossy().into_owned()),
-            None,
-        ),
-        PagerChoice::Unset => (None, None),
-    }
 }
 
 #[test_case(copy_diff_setup ; "shows_single_line_copy_diff")]
@@ -93,11 +29,11 @@ fn resolve_pager(choice: PagerChoice, env: &TestEnv) -> (Option<String>, Option<
 fn view_diff_prompt_output(setup: impl Fn(&Path, &Path) -> &'static str) {
     let scenario = ApplyScenario::new(setup);
     let (script, output) = capture_script(&scenario.env);
-    let _guard = EnvVarGuard::set([
+    let _guard = scenario.env.set_vars([
         ("DOTRIFT_PAGER", Some(script.to_str().unwrap())),
         ("PAGER", Some("")),
     ]);
-    let prompter = QueuePrompter::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+    let prompter = Prompt::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
     scenario.run_with_prompter(&prompter);
     let diff = fs::read_to_string(output).unwrap();
     snapshot_settings(&scenario.env).bind(|| {
@@ -112,11 +48,11 @@ fn view_diff_prompt_output(setup: impl Fn(&Path, &Path) -> &'static str) {
 fn pager_fallback(dotrift_pager: Option<&str>, pager: PagerChoice) {
     let scenario = ApplyScenario::new(copy_diff_setup);
     let (pager_value, output) = resolve_pager(pager, &scenario.env);
-    let _guard = EnvVarGuard::set([
+    let _guard = scenario.env.set_vars([
         ("DOTRIFT_PAGER", dotrift_pager),
         ("PAGER", pager_value.as_deref()),
     ]);
-    let prompter = QueuePrompter::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+    let prompter = Prompt::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
     dotrift::report::clear();
     scenario.run_with_prompter(&prompter);
     let diff = match output {
@@ -132,11 +68,11 @@ fn pager_fallback(dotrift_pager: Option<&str>, pager: PagerChoice) {
 fn failing_dotrift_pager_raises_error() {
     let scenario = ApplyScenario::new(copy_diff_setup);
     let (pager_value, _) = resolve_pager(PagerChoice::MissingBinary, &scenario.env);
-    let _guard = EnvVarGuard::set([
+    let _guard = scenario.env.set_vars([
         ("DOTRIFT_PAGER", pager_value.as_deref()),
         ("PAGER", Some("")),
     ]);
-    let prompter = QueuePrompter::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+    let prompter = Prompt::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
     let error = scenario.try_run_with_prompter(&prompter).unwrap_err();
     let rendered = format!("{error}");
     assert!(rendered.contains("cannot run DOTRIFT_PAGER"), "{rendered}");
@@ -150,8 +86,10 @@ fn config_pager_used_when_dotrift_pager_unset() {
     scenario
         .env
         .write_global_config(&config_pager_toml(&config_script, &[]));
-    let _guard = EnvVarGuard::set([("PAGER", Some(env_pager_script.to_str().unwrap()))]);
-    let prompter = QueuePrompter::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+    let _guard = scenario
+        .env
+        .set_vars([("PAGER", Some(env_pager_script.to_str().unwrap()))]);
+    let prompter = Prompt::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
 
     scenario.run_with_prompter(&prompter);
 
@@ -171,11 +109,11 @@ fn dotrift_pager_overrides_config_pager() {
     scenario
         .env
         .write_global_config(&config_pager_toml(&config_script, &[]));
-    let _guard = EnvVarGuard::set([
+    let _guard = scenario.env.set_vars([
         ("DOTRIFT_PAGER", Some(env_pager_script.to_str().unwrap())),
         ("PAGER", None),
     ]);
-    let prompter = QueuePrompter::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+    let prompter = Prompt::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
 
     scenario.run_with_prompter(&prompter);
 
@@ -193,8 +131,10 @@ fn empty_config_command_falls_through_to_pager() {
     let (env_pager_script, env_pager_output) = capture_script(&scenario.env);
     let config_output = scenario.env.path("unused-config-out.txt");
     scenario.env.write_global_config("[pager]\ncommand = ''\n");
-    let _guard = EnvVarGuard::set([("PAGER", Some(env_pager_script.to_str().unwrap()))]);
-    let prompter = QueuePrompter::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+    let _guard = scenario
+        .env
+        .set_vars([("PAGER", Some(env_pager_script.to_str().unwrap()))]);
+    let prompter = Prompt::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
 
     scenario.run_with_prompter(&prompter);
 
@@ -213,8 +153,8 @@ fn config_pager_args_are_literal() {
     scenario
         .env
         .write_global_config(&config_pager_toml(&script, &["one two", "three", "-R"]));
-    let _guard = EnvVarGuard::set([("PAGER", None)]);
-    let prompter = QueuePrompter::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+    let _guard = scenario.env.set_vars([("PAGER", None)]);
+    let prompter = Prompt::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
 
     scenario.run_with_prompter(&prompter);
 
@@ -232,8 +172,10 @@ fn failing_config_pager_fails_the_run_without_falling_back() {
     scenario
         .env
         .write_global_config(&config_pager_toml(&missing, &[]));
-    let _guard = EnvVarGuard::set([("PAGER", Some(env_pager_script.to_str().unwrap()))]);
-    let prompter = QueuePrompter::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
+    let _guard = scenario
+        .env
+        .set_vars([("PAGER", Some(env_pager_script.to_str().unwrap()))]);
+    let prompter = Prompt::sequence([ObstructionChoice::ViewDiff, ObstructionChoice::Skip]);
 
     let error = scenario.try_run_with_prompter(&prompter).unwrap_err();
 

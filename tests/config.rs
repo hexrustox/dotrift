@@ -13,7 +13,7 @@ use dotrift::{
 use templater::value::Value;
 use test_case::test_case;
 
-use common::{EnvVarGuard, TestEnv, assert_error_chain};
+use common::{TestEnv, assert_error_chain};
 
 #[test]
 fn read_assembles_desired_deployment_from_config_and_data() {
@@ -343,7 +343,7 @@ fn home_fallback_when_no_override_and_no_configured_target() {
     let env = TestEnv::new();
     let source = env.source_dir();
     let home = env.path("home");
-    let _guard = EnvVarGuard::set([("HOME", Some(home.to_str().unwrap()))]);
+    let _guard = env.set_vars([("HOME", Some(home.to_str().unwrap()))]);
     env.write_config("");
     let deployment =
         config::read(&source, None, env.env(), false).expect("cannot read configuration");

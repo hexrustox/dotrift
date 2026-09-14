@@ -4,7 +4,7 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 
-use common::{ApplyScenario, QueuePrompter, TestEnv};
+use common::{ApplyScenario, Prompt, record_of};
 use dotrift::ExitStatus;
 use dotrift::commands::apply::ApplyOptions;
 use dotrift::deploy::ObstructionChoice;
@@ -13,10 +13,6 @@ use dotrift::state::hash_bytes;
 use test_case::test_case;
 
 const REPLACE_IDENTICAL: &str = "[apply]\nreplace-identical = true\n";
-
-fn record_of(env: &TestEnv, path: &Path) -> Option<dotrift::state::StateRecord> {
-    env.database().record(path).unwrap()
-}
 
 fn symlink_setup(identical: bool) -> impl Fn(&Path, &Path) -> &'static str {
     move |source: &Path, target: &Path| {
@@ -56,7 +52,7 @@ fn symlink_obstruction_behaviors(
     scenario.env.write_global_config(REPLACE_IDENTICAL);
     let status = match choice {
         Some(choice) => {
-            let prompter = QueuePrompter::once(choice);
+            let prompter = Prompt::once(choice);
             let status = scenario
                 .try_run_with_prompter(&prompter)
                 .expect("apply failed");
@@ -122,7 +118,7 @@ fn copy_obstruction_behaviors(
     scenario.env.write_global_config(REPLACE_IDENTICAL);
     let status = match choice {
         Some(choice) => {
-            let prompter = QueuePrompter::once(choice);
+            let prompter = Prompt::once(choice);
             let status = scenario
                 .try_run_with_prompter(&prompter)
                 .expect("apply failed");
@@ -170,7 +166,7 @@ fn template_obstruction_behaviors(
     scenario.env.write_global_config(REPLACE_IDENTICAL);
     let status = match choice {
         Some(choice) => {
-            let prompter = QueuePrompter::once(choice);
+            let prompter = Prompt::once(choice);
             let status = scenario
                 .try_run_with_prompter(&prompter)
                 .expect("apply failed");
@@ -194,7 +190,7 @@ fn parent_obstruction_still_prompts() {
         "[portal]\n\"file.txt\" = \"a/b.txt\"\n"
     });
     scenario.env.write_global_config(REPLACE_IDENTICAL);
-    let prompter = QueuePrompter::once(ObstructionChoice::Replace);
+    let prompter = Prompt::once(ObstructionChoice::Replace);
 
     let status = scenario
         .try_run_with_prompter(&prompter)
@@ -215,7 +211,7 @@ fn replace_all_latch_subsumes_the_identical_check() {
         "[portal]\n\"a.txt\" = \"a.txt\"\n\"b.txt\" = \"b.txt\"\n"
     });
     scenario.env.write_global_config(REPLACE_IDENTICAL);
-    let prompter = QueuePrompter::once(ObstructionChoice::ReplaceAll);
+    let prompter = Prompt::once(ObstructionChoice::ReplaceAll);
 
     let status = scenario
         .try_run_with_prompter(&prompter)
