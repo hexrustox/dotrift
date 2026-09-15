@@ -232,179 +232,178 @@ mod tests {
     #[test_case(|_t| portal_map!() => resolved_list!(); "empty_portals_produce_no_entries")]
     #[test_case(
         |t| {
-            fs::write(t.join("vimrc"), b"set").unwrap();
-            portal_map!("vimrc" => ".vimrc")
-        } => resolved_list!("vimrc" => ".vimrc");
+            fs::write(t.join("file1"), b"content1").unwrap();
+            portal_map!("file1" => "target1")
+        } => resolved_list!("file1" => "target1");
         "literal_file_maps_to_exact_target"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("a")).unwrap();
-            fs::create_dir_all(t.join("sub/a")).unwrap();
-            fs::write(t.join("a/b"), b"a").unwrap();
-            fs::write(t.join("sub/a/b"), b"b").unwrap();
-            portal_map!("a/b" => "dir")
+            fs::create_dir_all(t.join("dir1/sub1")).unwrap();
+            fs::write(t.join("dir1/file1"), b"content1").unwrap();
+            fs::write(t.join("dir1/sub1/file1"), b"content2").unwrap();
+            portal_map!("dir1/file1" => "dir2")
         } => resolved_list!(
-            "a/b" => "dir",
+            "dir1/file1" => "dir2",
         );
         "literal_portal_is_anchored_does_not_match_nested_path"
     )]
     #[test_case(
         |t| {
-            fs::write(t.join("vimrc"), b"set").unwrap();
-            portal_map!("./vimrc" => "./.vimrc")
-        } => resolved_list!("vimrc" => ".vimrc");
+            fs::write(t.join("file1"), b"content1").unwrap();
+            portal_map!("./file1" => "./target1")
+        } => resolved_list!("file1" => "target1");
         "dot_slash_prefix_is_stripped"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("nvim/lua")).unwrap();
-            fs::write(t.join("nvim/init.lua"), b"-- lua").unwrap();
-            fs::write(t.join("nvim/lua/mappings.lua"), b"-- mappings").unwrap();
-            portal_map!("nvim" => ".config/nvim")
+            fs::create_dir_all(t.join("dir1/sub1")).unwrap();
+            fs::write(t.join("dir1/file1"), b"content1").unwrap();
+            fs::write(t.join("dir1/sub1/file2"), b"content2").unwrap();
+            portal_map!("dir1" => "dir2")
         } => resolved_list!(
-            "nvim/init.lua" => ".config/nvim/init.lua",
-            "nvim/lua/mappings.lua" => ".config/nvim/lua/mappings.lua"
+            "dir1/file1" => "dir2/file1",
+            "dir1/sub1/file2" => "dir2/sub1/file2"
         );
         "directory_portal_appends_relative_suffix"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("config/sub")).unwrap();
-            fs::write(t.join("config/one.toml"), b"a").unwrap();
-            fs::write(t.join("config/sub/two.toml"), b"b").unwrap();
-            portal_map!("config/*.toml" => ".config")
+            fs::create_dir_all(t.join("dir1/sub1")).unwrap();
+            fs::write(t.join("dir1/file1.conf"), b"content1").unwrap();
+            fs::write(t.join("dir1/sub1/file2"), b"content2").unwrap();
+            portal_map!("dir1/*.conf" => "dir2")
         } => resolved_list!(
-            "config/one.toml" => ".config/one.toml"
+            "dir1/file1.conf" => "dir2/file1.conf"
         );
         "wildcard_pattern_does_not_cross_directory"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("config/sub")).unwrap();
-            fs::write(t.join("config/one.toml"), b"a").unwrap();
-            fs::write(t.join("config/sub/two.toml"), b"b").unwrap();
-            portal_map!("config/**/*.toml" => ".config")
+            fs::create_dir_all(t.join("dir1/sub1")).unwrap();
+            fs::write(t.join("dir1/file1.conf"), b"content1").unwrap();
+            fs::write(t.join("dir1/sub1/file2.conf"), b"content2").unwrap();
+            portal_map!("dir1/**/*.conf" => "dir2")
         } => resolved_list!(
-            "config/one.toml" => ".config/one.toml",
-            "config/sub/two.toml" => ".config/sub/two.toml"
+            "dir1/file1.conf" => "dir2/file1.conf",
+            "dir1/sub1/file2.conf" => "dir2/sub1/file2.conf"
         );
         "recursive_wildcard_pattern_appends_remainder"
     )]
     #[test_case(
         |t| {
-            fs::create_dir(t.join("empty")).unwrap();
-            portal_map!("empty" => ".config/empty")
+            fs::create_dir(t.join("dir1")).unwrap();
+            portal_map!("dir1" => "dir2/dir1")
         } => resolved_list!();
         "empty_directory_expands_to_nothing"
     )]
     #[test_case(
         |t| {
-            fs::write(t.join("real"), b"content").unwrap();
-            std::os::unix::fs::symlink(t.join("real"), t.join("link")).unwrap();
-            portal_map!("link" => ".link")
-        } => resolved_list!("link" => ".link");
+            fs::write(t.join("file1"), b"content1").unwrap();
+            std::os::unix::fs::symlink(t.join("file1"), t.join("link1")).unwrap();
+            portal_map!("link1" => "target1")
+        } => resolved_list!("link1" => "target1");
         "symlink_to_file_maps_to_exact_target"
     )]
     #[test_case(
         |t| {
-            fs::create_dir(t.join("real")).unwrap();
-            fs::write(t.join("real/a"), b"a").unwrap();
-            fs::write(t.join("real/b"), b"b").unwrap();
-            std::os::unix::fs::symlink(t.join("real"), t.join("dirlink")).unwrap();
-            portal_map!("dirlink" => ".config")
+            fs::create_dir(t.join("dir1")).unwrap();
+            fs::write(t.join("dir1/file1"), b"content1").unwrap();
+            fs::write(t.join("dir1/file2"), b"content2").unwrap();
+            std::os::unix::fs::symlink(t.join("dir1"), t.join("link1")).unwrap();
+            portal_map!("link1" => "dir2")
         } => resolved_list!(
-            "dirlink/a" => ".config/a",
-            "dirlink/b" => ".config/b"
+            "link1/file1" => "dir2/file1",
+            "link1/file2" => "dir2/file2"
         );
         "symlink_to_directory_maps_contents"
     )]
     #[test_case(
         |t| {
-            fs::write(t.join("data"), b"content").unwrap();
-            std::os::unix::fs::symlink(t.join("data"), t.join("link.lnk")).unwrap();
-            portal_map!("*.lnk" => ".dots")
-        } => resolved_list!("link.lnk" => ".dots/link.lnk");
+            fs::write(t.join("file1"), b"content1").unwrap();
+            std::os::unix::fs::symlink(t.join("file1"), t.join("link1.lnk")).unwrap();
+            portal_map!("*.lnk" => "dir2")
+        } => resolved_list!("link1.lnk" => "dir2/link1.lnk");
         "symlink_file_matched_by_wildcard"
     )]
     #[test_case(
         |t| {
-            fs::write(t.join("a.conf"), b"a").unwrap();
+            fs::write(t.join("file1.conf"), b"content1").unwrap();
             portal_map!("*.conf" => ".")
-        } => resolved_list!("a.conf" => "a.conf");
+        } => resolved_list!("file1.conf" => "file1.conf");
         "glob_root_destination_normalizes_to_plain_target"
     )]
     #[test_case(
         |t| {
-            fs::create_dir(t.join("dir")).unwrap();
-            fs::write(t.join("dir/a"), b"a").unwrap();
-            portal_map!("dir" => ".")
-        } => resolved_list!("dir/a" => "a");
+            fs::create_dir(t.join("dir1")).unwrap();
+            fs::write(t.join("dir1/file1"), b"content1").unwrap();
+            portal_map!("dir1" => ".")
+        } => resolved_list!("dir1/file1" => "file1");
         "literal_directory_root_destination_normalizes_to_plain_target"
     )]
     #[test_case(
         |t| {
-            fs::write(t.join("a.txt"), b"a").unwrap();
-            portal_map!("a.txt" => ".")
+            fs::write(t.join("file1"), b"content1").unwrap();
+            portal_map!("file1" => ".")
         } => panics "cannot target `.`";
         "literal_file_root_destination_is_rejected"
     )]
-    #[test_case(|_t| portal_map!("" => ".vimrc") => panics "invalid portal source path"; "empty_source_is_rejected")]
-    #[test_case(|_t| portal_map!("vimrc" => "/home/.vimrc") => panics "invalid portal target path"; "absolute_target_is_rejected")]
-    #[test_case(|_t| portal_map!("a//b" => ".a") => panics "invalid portal source path"; "double_slash_in_source_is_rejected")]
-    #[test_case(|_t| portal_map!("sub/" => ".sub") => panics "invalid portal source path"; "trailing_slash_in_source_is_rejected")]
-    #[test_case(|_t| portal_map!("a" => ".b//c") => panics "invalid portal target path"; "double_slash_in_target_is_rejected")]
-    #[test_case(|_t| portal_map!("a" => ".sub/") => panics "invalid portal target path"; "trailing_slash_in_target_is_rejected")]
-    #[test_case(|_t| portal_map!("a/../vimrc" => ".vimrc") => panics "a/../vimrc"; "parent_component_in_source_is_rejected")]
-    #[test_case(|_t| portal_map!("{a,b}" => ".a") => panics "in portal source"; "brace_expansion_in_source_is_rejected")]
-    #[test_case(|_t| portal_map!("a" => ".{a,b}") => panics "in portal target"; "brace_expansion_in_target_is_rejected")]
-    #[test_case(|_t| portal_map!("a" => "*.conf") => panics "cannot contain glob syntax"; "wildcard_target_is_rejected")]
-    #[test_case(|_t| portal_map!("missing" => ".missing") => panics "does not exist"; "missing_literal_source_is_rejected")]
+    #[test_case(|_t| portal_map!("" => "target1") => panics "invalid portal source path"; "empty_source_is_rejected")]
+    #[test_case(|_t| portal_map!("dir1//file1" => "target1") => panics "invalid portal source path"; "double_slash_in_source_is_rejected")]
+    #[test_case(|_t| portal_map!("dir1/" => "target1") => panics "invalid portal source path"; "trailing_slash_in_source_is_rejected")]
+    #[test_case(|_t| portal_map!("file1" => "/target") => panics "invalid portal target path"; "absolute_target_is_rejected")]
+    #[test_case(|_t| portal_map!("file1" => "dir1//dir2") => panics "invalid portal target path"; "double_slash_in_target_is_rejected")]
+    #[test_case(|_t| portal_map!("file1" => "dir1/") => panics "invalid portal target path"; "trailing_slash_in_target_is_rejected")]
+    #[test_case(|_t| portal_map!("dir1/../file1" => "target1") => panics "dir1/../file1"; "parent_component_in_source_is_rejected")]
+    #[test_case(|_t| portal_map!("{a,b}" => "dir1") => panics "in portal source"; "brace_expansion_in_source_is_rejected")]
+    #[test_case(|_t| portal_map!("file1" => "{a,b}") => panics "in portal target"; "brace_expansion_in_target_is_rejected")]
+    #[test_case(|_t| portal_map!("file1" => "*.conf") => panics "cannot contain glob syntax"; "wildcard_target_is_rejected")]
+    #[test_case(|_t| portal_map!("file1" => "target1") => panics "does not exist"; "missing_literal_source_is_rejected")]
     #[test_case(
         |t| {
-            std::os::unix::fs::symlink(t.join("nowhere"), t.join("link")).unwrap();
-            portal_map!("link" => "link")
+            std::os::unix::fs::symlink(t.join("link2"), t.join("link1")).unwrap();
+            portal_map!("link1" => "link1")
         } => panics "dangling symlink";
         "dangling_literal_source_is_rejected"
     )]
     #[test_case(
         |t| {
-            fs::create_dir(t.join("dir")).unwrap();
-            fs::write(t.join("dir/ok"), b"ok").unwrap();
-            std::os::unix::fs::symlink(t.join("nowhere"), t.join("dir/broken")).unwrap();
-            portal_map!("dir" => ".config")
+            fs::create_dir(t.join("dir1")).unwrap();
+            fs::write(t.join("dir1/file1"), b"content1").unwrap();
+            std::os::unix::fs::symlink(t.join("link2"), t.join("dir1/link1")).unwrap();
+            portal_map!("dir1" => "dir2")
         } => panics "dangling symlink";
         "dangling_symlink_within_directory_is_rejected"
     )]
     #[test_case(
         |t| {
-            fs::write(t.join("ok"), b"ok").unwrap();
-            std::os::unix::fs::symlink(t.join("nowhere"), t.join("broken")).unwrap();
-            portal_map!("*" => ".dots")
+            fs::write(t.join("file1"), b"content1").unwrap();
+            std::os::unix::fs::symlink(t.join("link2"), t.join("link1")).unwrap();
+            portal_map!("*" => "dir1")
         } => panics "dangling symlink";
         "dangling_symlink_matched_by_wildcard_is_rejected"
     )]
     #[test_case(
         |t| {
-            std::os::unix::fs::symlink(t.join("a"), t.join("a")).unwrap();
-            portal_map!("a" => ".a")
+            std::os::unix::fs::symlink(t.join("link1"), t.join("link1")).unwrap();
+            portal_map!("link1" => "dir1")
         } => panics "cannot inspect source path";
         "self_referential_symlink_is_rejected"
     )]
     #[test_case(
         |t| {
-            std::os::unix::fs::symlink(t.join("b"), t.join("a")).unwrap();
-            std::os::unix::fs::symlink(t.join("a"), t.join("b")).unwrap();
-            portal_map!("a" => ".a")
+            std::os::unix::fs::symlink(t.join("link2"), t.join("link1")).unwrap();
+            std::os::unix::fs::symlink(t.join("link1"), t.join("link2")).unwrap();
+            portal_map!("link1" => "dir1")
         } => panics "cannot inspect source path";
         "mutual_symlink_cycle_is_rejected"
     )]
     #[test_case(
         |t| {
-            fs::create_dir(t.join("dir")).unwrap();
-            fs::write(t.join("dir/real"), b"x").unwrap();
-            std::os::unix::fs::symlink(t.join("dir"), t.join("dir/loop")).unwrap();
-            portal_map!("dir" => ".config")
+            fs::create_dir(t.join("dir1")).unwrap();
+            fs::write(t.join("dir1/file1"), b"content1").unwrap();
+            std::os::unix::fs::symlink(t.join("dir1"), t.join("dir1/link1")).unwrap();
+            portal_map!("dir1" => "dir2")
         } => panics "symlink cycle detected";
         "symlink_cycle_within_directory_is_rejected"
     )]

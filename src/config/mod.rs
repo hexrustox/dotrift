@@ -490,53 +490,53 @@ mod tests {
 
     #[test_case(
         |t| {
-            fs::create_dir(t.join("a")).expect("cannot create temp dir");
-            fs::create_dir(t.join("b")).expect("cannot create temp dir");
-            (t.join("a"), t.join("b"))
+            fs::create_dir(t.join("dir1")).expect("cannot create temp dir");
+            fs::create_dir(t.join("dir2")).expect("cannot create temp dir");
+            (t.join("dir1"), t.join("dir2"))
         } => true;
         "disjoint_sibling_roots_do_not_overlap"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("target/source")).expect("cannot create temp dirs");
-            (t.join("target/source"), t.join("target"))
+            fs::create_dir_all(t.join("dir1/sub1")).expect("cannot create temp dirs");
+            (t.join("dir1/sub1"), t.join("dir1"))
         } => true;
         "source_nested_inside_target_does_not_overlap"
     )]
     #[test_case(
         |t| {
-            fs::create_dir(t.join("root")).expect("cannot create temp dir");
-            (t.join("root"), t.join("root"))
+            fs::create_dir(t.join("dir1")).expect("cannot create temp dir");
+            (t.join("dir1"), t.join("dir1"))
         } => false;
         "equal_roots_overlap"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("root/target")).expect("cannot create temp dirs");
-            (t.join("root"), t.join("root/target"))
+            fs::create_dir_all(t.join("dir1/sub1")).expect("cannot create temp dirs");
+            (t.join("dir1"), t.join("dir1/sub1"))
         } => false;
         "target_inside_source_overlaps"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("root/x/y/z")).expect("cannot create temp dirs");
-            (t.join("root"), t.join("root/x/y/z"))
+            fs::create_dir_all(t.join("dir1/sub1/dir2/sub2")).expect("cannot create temp dirs");
+            (t.join("dir1"), t.join("dir1/sub1/dir2/sub2"))
         } => false;
         "deeply_nested_target_inside_source_overlaps"
     )]
     #[test_case(
         |t| {
-            fs::create_dir(t.join("real")).expect("cannot create temp dir");
-            std::os::unix::fs::symlink(t.join("real"), t.join("link")).expect("cannot create symlink");
-            (t.join("real"), t.join("link"))
+            fs::create_dir(t.join("dir1")).expect("cannot create temp dir");
+            std::os::unix::fs::symlink(t.join("dir1"), t.join("link1")).expect("cannot create symlink");
+            (t.join("dir1"), t.join("link1"))
         } => false;
         "target_symlinked_onto_source_overlaps"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("real/nested")).expect("cannot create temp dirs");
-            std::os::unix::fs::symlink(t.join("real/nested"), t.join("link")).expect("cannot create symlink");
-            (t.join("real"), t.join("link"))
+            fs::create_dir_all(t.join("dir1/sub1")).expect("cannot create temp dirs");
+            std::os::unix::fs::symlink(t.join("dir1/sub1"), t.join("link1")).expect("cannot create symlink");
+            (t.join("dir1"), t.join("link1"))
         } => false;
         "target_symlink_pointing_into_source_overlaps"
     )]

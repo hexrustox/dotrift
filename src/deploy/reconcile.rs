@@ -145,52 +145,52 @@ mod tests {
         RenderRegistry::acquire(&Environment::test_root(anchor), true)
     }
 
-    #[test_case(|t| t.join("file") => None ; "target_directly_below_root_reports_no_obstruction")]
+    #[test_case(|t| t.join("file1") => None ; "target_directly_below_root_reports_no_obstruction")]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("a/b")).unwrap();
-            t.join("a/b/file")
+            fs::create_dir_all(t.join("dir1/sub1")).unwrap();
+            t.join("dir1/sub1/file1")
         } => None;
         "directory_parents_report_no_obstruction"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("a")).unwrap();
-            t.join("a/b/file")
+            fs::create_dir_all(t.join("dir1")).unwrap();
+            t.join("dir1/sub1/file1")
         } => None;
         "missing_parent_component_reports_no_obstruction"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("a")).unwrap();
-            fs::write(t.join("a/b"), "occupied").unwrap();
-            t.join("a/b/file")
-        } => Some(PathBuf::from("a/b"));
+            fs::create_dir_all(t.join("dir1")).unwrap();
+            fs::write(t.join("dir1/sub1"), "content1").unwrap();
+            t.join("dir1/sub1/file1")
+        } => Some(PathBuf::from("dir1/sub1"));
         "file_parent_reported_as_obstruction"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("a/b")).unwrap();
-            fs::write(t.join("a/b/f"), "content").unwrap();
-            std::os::unix::fs::symlink(t.join("a/b/f"), t.join("a/b/link")).unwrap();
-            t.join("a/b/link/file")
-        } => Some(PathBuf::from("a/b/link"));
+            fs::create_dir_all(t.join("dir1/sub1")).unwrap();
+            fs::write(t.join("dir1/sub1/file1"), "content1").unwrap();
+            std::os::unix::fs::symlink(t.join("dir1/sub1/file1"), t.join("dir1/sub1/link1")).unwrap();
+            t.join("dir1/sub1/link1/file1")
+        } => Some(PathBuf::from("dir1/sub1/link1"));
         "symlink_to_file_parent_reported_as_obstruction"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("a/real")).unwrap();
-            std::os::unix::fs::symlink(t.join("a/real"), t.join("a/dirlink")).unwrap();
-            t.join("a/dirlink/file")
+            fs::create_dir_all(t.join("dir1/dir2")).unwrap();
+            std::os::unix::fs::symlink(t.join("dir1/dir2"), t.join("dir1/link1")).unwrap();
+            t.join("dir1/link1/file1")
         } => None;
         "symlink_to_directory_parent_reports_no_obstruction"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("a")).unwrap();
-            std::os::unix::fs::symlink(t.join("a/nowhere"), t.join("a/broken")).unwrap();
-            t.join("a/broken/file")
-        } => Some(PathBuf::from("a/broken"));
+            fs::create_dir_all(t.join("dir1")).unwrap();
+            std::os::unix::fs::symlink(t.join("dir1/file1"), t.join("dir1/link1")).unwrap();
+            t.join("dir1/link1/file1")
+        } => Some(PathBuf::from("dir1/link1"));
         "dangling_symlink_parent_reported_as_obstruction"
     )]
     #[test_case(|_t| PathBuf::from("/unrelated/nested/target") => panics "outside target directory" ; "target_outside_target_root_is_rejected")]
@@ -207,12 +207,12 @@ mod tests {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
-        fs::write(source.path().join("file.txt"), "new").unwrap();
+        fs::write(source.path().join("file1"), "content1").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let env = Environment::test_root(state.path());
         let entry = entry(
-            &source.path().join("file.txt"),
-            &target.path().join("target.txt"),
+            &source.path().join("file1"),
+            &target.path().join("target1"),
             DeployType::Copy,
         );
         let mut registry = RenderRegistry::acquire(&env, true);
@@ -238,24 +238,24 @@ mod tests {
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
-        let target_path = target.path().join("target.txt");
+        let target_path = target.path().join("target1");
         let record = match deploy_type {
             DeployType::Copy => {
-                fs::write(source.path().join("file.txt"), "v1").unwrap();
-                fs::write(&target_path, "v1").unwrap();
+                fs::write(source.path().join("file1"), "content1").unwrap();
+                fs::write(&target_path, "content1").unwrap();
                 StateRecord {
                     target_path: target_path.clone(),
-                    source_path: source.path().join("file.txt"),
+                    source_path: source.path().join("file1"),
                     kind: Kind::File,
-                    content_hash: Some(hash_bytes(b"v1").into()),
+                    content_hash: Some(hash_bytes(b"content1").into()),
                 }
             }
             DeployType::Symlink => {
-                fs::write(source.path().join("file.txt"), "v1").unwrap();
-                symlink(source.path().join("file.txt"), &target_path).unwrap();
+                fs::write(source.path().join("file1"), "content1").unwrap();
+                symlink(source.path().join("file1"), &target_path).unwrap();
                 StateRecord {
                     target_path: target_path.clone(),
-                    source_path: source.path().join("file.txt"),
+                    source_path: source.path().join("file1"),
                     kind: Kind::Symlink,
                     content_hash: None,
                 }
@@ -263,7 +263,7 @@ mod tests {
             DeployType::Template => unreachable!("template is covered by its own tests"),
         };
         database.put(&record).unwrap();
-        let entry = entry(&source.path().join("file.txt"), &target_path, deploy_type);
+        let entry = entry(&source.path().join("file1"), &target_path, deploy_type);
         let mut registry = dry_registry(state.path());
 
         let decision = decide(
@@ -290,12 +290,12 @@ mod tests {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
-        fs::write(source.path().join("file.txt"), "new").unwrap();
-        fs::write(target.path().join("target.txt"), "old").unwrap();
+        fs::write(source.path().join("file1"), "content1").unwrap();
+        fs::write(target.path().join("target1"), "content2").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let entry = entry(
-            &source.path().join("file.txt"),
-            &target.path().join("target.txt"),
+            &source.path().join("file1"),
+            &target.path().join("target1"),
             DeployType::Copy,
         );
         let mut registry = dry_registry(state.path());
@@ -311,11 +311,11 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(decision, Decision::Prompt(target.path().join("target.txt")));
+        assert_eq!(decision, Decision::Prompt(target.path().join("target1")));
     }
 
-    #[test_case(true, |target: &Path| Decision::Replaced { remove: target.join("target.txt") } ; "identical_copy_is_replaced_when_replace_identical")]
-    #[test_case(false, |target: &Path| Decision::Prompt(target.join("target.txt")) ; "identical_copy_prompts_without_replace_identical")]
+    #[test_case(true, |target: &Path| Decision::Replaced { remove: target.join("target1") } ; "identical_copy_is_replaced_when_replace_identical")]
+    #[test_case(false, |target: &Path| Decision::Prompt(target.join("target1")) ; "identical_copy_prompts_without_replace_identical")]
     fn decides_for_identical_copy_with(
         replace_identical: bool,
         expected: impl Fn(&Path) -> Decision,
@@ -323,12 +323,12 @@ mod tests {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
-        fs::write(source.path().join("file.txt"), "same").unwrap();
-        fs::write(target.path().join("target.txt"), "same").unwrap();
+        fs::write(source.path().join("file1"), "content1").unwrap();
+        fs::write(target.path().join("target1"), "content1").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let entry = entry(
-            &source.path().join("file.txt"),
-            &target.path().join("target.txt"),
+            &source.path().join("file1"),
+            &target.path().join("target1"),
             DeployType::Copy,
         );
         let mut registry = dry_registry(state.path());
@@ -352,12 +352,12 @@ mod tests {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
-        fs::write(source.path().join("file.txt"), "new").unwrap();
-        fs::write(target.path().join("target.txt"), "old").unwrap();
+        fs::write(source.path().join("file1"), "content1").unwrap();
+        fs::write(target.path().join("target1"), "content2").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let entry = entry(
-            &source.path().join("file.txt"),
-            &target.path().join("target.txt"),
+            &source.path().join("file1"),
+            &target.path().join("target1"),
             DeployType::Copy,
         );
         let mut registry = dry_registry(state.path());
@@ -376,13 +376,13 @@ mod tests {
         assert_eq!(
             decision,
             Decision::Replaced {
-                remove: target.path().join("target.txt")
+                remove: target.path().join("target1")
             }
         );
     }
 
-    #[test_case(false, |root: &Path| Decision::Prompt(root.join("a")) ; "parent_obstruction_prompts")]
-    #[test_case(true, |root: &Path| Decision::Replaced { remove: root.join("a") } ; "parent_obstruction_is_replaced_under_replace_all")]
+    #[test_case(false, |root: &Path| Decision::Prompt(root.join("dir1")) ; "parent_obstruction_prompts")]
+    #[test_case(true, |root: &Path| Decision::Replaced { remove: root.join("dir1") } ; "parent_obstruction_is_replaced_under_replace_all")]
     fn decides_for_parent_obstruction_with(
         replace_all: bool,
         expected: impl Fn(&Path) -> Decision,
@@ -390,12 +390,12 @@ mod tests {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
-        fs::write(source.path().join("file.txt"), "new").unwrap();
-        fs::write(target.path().join("a"), "occupied").unwrap();
+        fs::write(source.path().join("file1"), "content1").unwrap();
+        fs::write(target.path().join("dir1"), "content2").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let entry = entry(
-            &source.path().join("file.txt"),
-            &target.path().join("a/b.txt"),
+            &source.path().join("file1"),
+            &target.path().join("dir1/target1"),
             DeployType::Copy,
         );
         let mut registry = dry_registry(state.path());
@@ -414,9 +414,9 @@ mod tests {
         assert_eq!(decision, expected(target.path()));
     }
 
-    #[test_case("hello\n", false, true ; "identical_render_replaced")]
-    #[test_case("stale\n", false, false ; "divergent_render_prompts")]
-    #[test_case("hello\n", true, false ; "identical_prompts_when_registry_unavailable")]
+    #[test_case("str\n", false, true ; "identical_render_replaced")]
+    #[test_case("content1\n", false, false ; "divergent_render_prompts")]
+    #[test_case("str\n", true, false ; "identical_prompts_when_registry_unavailable")]
     fn decides_for_template_with(
         target_content: &str,
         dry_registry_setup: bool,
@@ -427,15 +427,15 @@ mod tests {
         let state = tempdir().unwrap();
         let registry_root = tempdir().unwrap();
         let env = Environment::test_root(registry_root.path());
-        fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
-        fs::write(target.path().join("target.txt"), target_content).unwrap();
+        fs::write(source.path().join("file1"), "{{ str }}\n").unwrap();
+        fs::write(target.path().join("target1"), target_content).unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let entry = entry(
-            &source.path().join("greeting.txt"),
-            &target.path().join("target.txt"),
+            &source.path().join("file1"),
+            &target.path().join("target1"),
             DeployType::Template,
         );
-        let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
+        let context = HashMap::from([("str".to_string(), Value::Str("str".into()))]);
         let mut registry = if dry_registry_setup {
             dry_registry(state.path())
         } else {
@@ -457,11 +457,11 @@ mod tests {
             assert_eq!(
                 decision,
                 Decision::Replaced {
-                    remove: target.path().join("target.txt")
+                    remove: target.path().join("target1")
                 }
             );
         } else {
-            assert_eq!(decision, Decision::Prompt(target.path().join("target.txt")));
+            assert_eq!(decision, Decision::Prompt(target.path().join("target1")));
         }
     }
 
@@ -470,17 +470,13 @@ mod tests {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
-        fs::write(source.path().join("file.txt"), "new").unwrap();
-        fs::write(target.path().join("other.txt"), "new").unwrap();
-        symlink(
-            target.path().join("other.txt"),
-            target.path().join("target.txt"),
-        )
-        .unwrap();
+        fs::write(source.path().join("file1"), "content1").unwrap();
+        fs::write(target.path().join("file2"), "content1").unwrap();
+        symlink(target.path().join("file2"), target.path().join("target1")).unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let entry = entry(
-            &source.path().join("file.txt"),
-            &target.path().join("target.txt"),
+            &source.path().join("file1"),
+            &target.path().join("target1"),
             DeployType::Copy,
         );
         let mut registry = dry_registry(state.path());
@@ -499,7 +495,7 @@ mod tests {
         assert_eq!(
             decision,
             Decision::Replaced {
-                remove: target.path().join("target.txt")
+                remove: target.path().join("target1")
             }
         );
     }
@@ -509,13 +505,13 @@ mod tests {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
-        fs::write(source.path().join("file.txt"), "same").unwrap();
-        fs::create_dir(target.path().join("target.txt")).unwrap();
-        fs::write(target.path().join("target.txt/inner"), "same").unwrap();
+        fs::write(source.path().join("file1"), "content1").unwrap();
+        fs::create_dir(target.path().join("target1")).unwrap();
+        fs::write(target.path().join("target1/file1"), "content1").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let entry = entry(
-            &source.path().join("file.txt"),
-            &target.path().join("target.txt"),
+            &source.path().join("file1"),
+            &target.path().join("target1"),
             DeployType::Copy,
         );
         let mut registry = dry_registry(state.path());
@@ -531,7 +527,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(decision, Decision::Prompt(target.path().join("target.txt")));
+        assert_eq!(decision, Decision::Prompt(target.path().join("target1")));
     }
 
     #[test]
@@ -539,20 +535,20 @@ mod tests {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let state = tempdir().unwrap();
-        fs::write(source.path().join("file.txt"), "v2").unwrap();
-        fs::write(target.path().join("target.txt"), "v2").unwrap();
+        fs::write(source.path().join("file1"), "content2").unwrap();
+        fs::write(target.path().join("target1"), "content2").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         database
             .put(&StateRecord {
-                target_path: target.path().join("target.txt"),
-                source_path: source.path().join("file.txt"),
+                target_path: target.path().join("target1"),
+                source_path: source.path().join("file1"),
                 kind: Kind::File,
-                content_hash: Some(hash_bytes(b"v2").into()),
+                content_hash: Some(hash_bytes(b"content2").into()),
             })
             .unwrap();
         let entry = entry(
-            &source.path().join("file.txt"),
-            &target.path().join("target.txt"),
+            &source.path().join("file1"),
+            &target.path().join("target1"),
             DeployType::Copy,
         );
         let mut registry = dry_registry(state.path());
@@ -571,7 +567,7 @@ mod tests {
         assert_eq!(
             decision,
             Decision::Replaced {
-                remove: target.path().join("target.txt")
+                remove: target.path().join("target1")
             }
         );
     }

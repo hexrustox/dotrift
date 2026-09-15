@@ -244,7 +244,7 @@ mod tests {
 
     use super::*;
 
-    #[test_case(b"hello".to_vec() ; "hello_digests_same_as_bytes")]
+    #[test_case(b"content1".to_vec() ; "content1_digests_same_as_bytes")]
     #[test_case(Vec::new() ; "empty_digests_same_as_bytes")]
     #[test_case(vec![b'x'; CHUNK_SIZE * 2 + 1] ; "larger_than_chunk_digests_same_as_bytes")]
     fn hash_file_digests_same_as_its_bytes(content: Vec<u8>) {
@@ -260,11 +260,11 @@ mod tests {
     #[test]
     fn hash_file_errs_on_missing_path() {
         let dir = tempdir().expect("cannot create temp dir");
-        assert!(Fingerprint::of_file(&dir.path().join("missing")).is_err());
+        assert!(Fingerprint::of_file(&dir.path().join("file1")).is_err());
     }
 
     #[test_case(&[] ; "hash_writer_digests_empty_stream_like_hash_bytes")]
-    #[test_case(&[b"hello".as_slice()] ; "hash_writer_digests_one_write_like_hash_bytes")]
+    #[test_case(&[b"content1".as_slice()] ; "hash_writer_digests_one_write_like_hash_bytes")]
     #[test_case(
         &[b"foo".as_slice(), b"bar".as_slice(), b"baz".as_slice()] ;
         "hash_writer_digests_chunked_writes_like_hash_bytes"
@@ -278,53 +278,53 @@ mod tests {
     }
 
     #[test_case(
-        |t| fs::write(t.join("file"), "hello").unwrap(),
-        |t| crate::record!(f, t.join("file"), hash_bytes(b"hello")) => true;
+        |t| fs::write(t.join("file1"), "content1").unwrap(),
+        |t| crate::record!(f, t.join("file1"), hash_bytes(b"content1")) => true;
         "file_content_matches_record_is_managed"
     )]
     #[test_case(
-        |t| fs::write(t.join("file"), "hello").unwrap(),
-        |t| crate::record!(f, t.join("file"), hash_bytes(b"world")) => false;
+        |t| fs::write(t.join("file1"), "content1").unwrap(),
+        |t| crate::record!(f, t.join("file1"), hash_bytes(b"content2")) => false;
         "file_content_diverged_from_record_not_managed"
     )]
     #[test_case(
         |_| {},
-        |t| crate::record!(f, t.join("file"), hash_bytes(b"hello")) => false;
+        |t| crate::record!(f, t.join("file1"), hash_bytes(b"content1")) => false;
         "file_record_target_missing_not_managed"
     )]
     #[test_case(
-        |t| std::os::unix::fs::symlink(t.join("elsewhere"), t.join("file")).unwrap(),
-        |t| crate::record!(f, t.join("file"), hash_bytes(b"hello")) => false;
+        |t| std::os::unix::fs::symlink(t.join("target2"), t.join("file1")).unwrap(),
+        |t| crate::record!(f, t.join("file1"), hash_bytes(b"content1")) => false;
         "file_record_target_is_symlink_not_managed"
     )]
     #[test_case(
-        |t| fs::create_dir(t.join("dir")).unwrap(),
-        |t| crate::record!(f, t.join("dir"), hash_bytes(b"hello")) => false;
+        |t| fs::create_dir(t.join("dir1")).unwrap(),
+        |t| crate::record!(f, t.join("dir1"), hash_bytes(b"content1")) => false;
         "file_record_target_is_directory_not_managed"
     )]
     #[test_case(
-        |t| fs::write(t.join("file"), "").unwrap(),
-        |t| crate::record!(f, t.join("file"), hash_bytes(b"")) => true;
+        |t| fs::write(t.join("file1"), "").unwrap(),
+        |t| crate::record!(f, t.join("file1"), hash_bytes(b"")) => true;
         "empty_file_matches_empty_record_is_managed"
     )]
     #[test_case(
-        |t| fs::write(t.join("file"), "hello").unwrap(),
-        |t| crate::record!(s, t.join("file"), t.join("target")) => false;
+        |t| fs::write(t.join("file1"), "content1").unwrap(),
+        |t| crate::record!(s, t.join("file1"), t.join("target1")) => false;
         "symlink_record_target_is_regular_file_not_managed"
     )]
     #[test_case(
-        |t| std::os::unix::fs::symlink(t.join("elsewhere"), t.join("link")).unwrap(),
-        |t| crate::record!(s, t.join("link"), t.join("elsewhere")) => true;
+        |t| std::os::unix::fs::symlink(t.join("target1"), t.join("link1")).unwrap(),
+        |t| crate::record!(s, t.join("link1"), t.join("target1")) => true;
         "symlink_to_recorded_source_path_is_managed"
     )]
     #[test_case(
-        |t| std::os::unix::fs::symlink(t.join("elsewhere"), t.join("link")).unwrap(),
-        |t| crate::record!(s, t.join("link"), t.join("other")) => false;
+        |t| std::os::unix::fs::symlink(t.join("target1"), t.join("link1")).unwrap(),
+        |t| crate::record!(s, t.join("link1"), t.join("target2")) => false;
         "symlink_to_other_source_path_not_managed"
     )]
     #[test_case(
         |_| {},
-        |t| crate::record!(s, t.join("link"), t.join("elsewhere")) => false;
+        |t| crate::record!(s, t.join("link1"), t.join("target1")) => false;
         "symlink_record_target_missing_not_managed"
     )]
     fn is_managed_when_target_matches_record(
@@ -355,23 +355,23 @@ mod tests {
 
     #[test_case(
         |t| {
-            fs::write(t.join("source.txt"), "same").unwrap();
-            fs::write(t.join("target.txt"), "same").unwrap();
+            fs::write(t.join("file1"), "content1").unwrap();
+            fs::write(t.join("target1"), "content1").unwrap();
         } => true ;
         "copy_target_matches_source_bytes_is_identical"
     )]
     #[test_case(
         |t| {
-            fs::write(t.join("source.txt"), "new").unwrap();
-            fs::write(t.join("target.txt"), "old").unwrap();
+            fs::write(t.join("file1"), "content1").unwrap();
+            fs::write(t.join("target1"), "content2").unwrap();
         } => false ;
         "copy_target_diverged_from_source_not_identical"
     )]
     #[test_case(
         |t| {
-            fs::write(t.join("source.txt"), "same").unwrap();
-            fs::create_dir(t.join("target.txt")).unwrap();
-            fs::write(t.join("target.txt/inner"), "same").unwrap();
+            fs::write(t.join("file1"), "content1").unwrap();
+            fs::create_dir(t.join("target1")).unwrap();
+            fs::write(t.join("target1/file1"), "content1").unwrap();
         } => false ;
         "copy_target_is_directory_not_identical"
     )]
@@ -379,8 +379,8 @@ mod tests {
         let dir = tempdir().unwrap();
         setup(dir.path());
         let entry = entry(
-            &dir.path().join("source.txt"),
-            &dir.path().join("target.txt"),
+            &dir.path().join("file1"),
+            &dir.path().join("target1"),
             DeployType::Copy,
         );
         let mut registry = dry_registry(dir.path());
@@ -390,15 +390,15 @@ mod tests {
 
     #[test_case(
         |t| {
-            fs::write(t.join("source.txt"), "content").unwrap();
-            std::os::unix::fs::symlink(t.join("source.txt"), t.join("target.txt")).unwrap();
+            fs::write(t.join("file1"), "content1").unwrap();
+            std::os::unix::fs::symlink(t.join("file1"), t.join("target1")).unwrap();
         } => true ;
         "symlink_target_points_at_source_is_identical"
     )]
     #[test_case(
         |t| {
-            fs::write(t.join("other.txt"), "content").unwrap();
-            std::os::unix::fs::symlink(t.join("other.txt"), t.join("target.txt")).unwrap();
+            fs::write(t.join("file2"), "content1").unwrap();
+            std::os::unix::fs::symlink(t.join("file2"), t.join("target1")).unwrap();
         } => false ;
         "symlink_target_points_elsewhere_not_identical"
     )]
@@ -406,8 +406,8 @@ mod tests {
         let dir = tempdir().unwrap();
         setup(dir.path());
         let entry = entry(
-            &dir.path().join("source.txt"),
-            &dir.path().join("target.txt"),
+            &dir.path().join("file1"),
+            &dir.path().join("target1"),
             DeployType::Symlink,
         );
         let mut registry = dry_registry(dir.path());
@@ -415,21 +415,21 @@ mod tests {
         is_identical(&entry, &no_context(), &mut registry)
     }
 
-    #[test_case("hello\n", false => true ; "template_target_matches_render_is_identical")]
-    #[test_case("stale\n", false => false ; "template_target_diverged_from_render_not_identical")]
-    #[test_case("hello\n", true => false ; "template_render_unavailable_not_identical")]
+    #[test_case("str\n", false => true ; "template_target_matches_render_is_identical")]
+    #[test_case("content1\n", false => false ; "template_target_diverged_from_render_not_identical")]
+    #[test_case("str\n", true => false ; "template_render_unavailable_not_identical")]
     fn is_identical_when_template_target_matches_render(target_content: &str, dry: bool) -> bool {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let registry_root = tempdir().unwrap();
-        fs::write(source.path().join("greeting.txt"), "{{ message }}\n").unwrap();
-        fs::write(target.path().join("target.txt"), target_content).unwrap();
+        fs::write(source.path().join("file1"), "{{ str }}\n").unwrap();
+        fs::write(target.path().join("target1"), target_content).unwrap();
         let entry = entry(
-            &source.path().join("greeting.txt"),
-            &target.path().join("target.txt"),
+            &source.path().join("file1"),
+            &target.path().join("target1"),
             DeployType::Template,
         );
-        let context = HashMap::from([("message".to_string(), Value::Str("hello".into()))]);
+        let context = HashMap::from([("str".to_string(), Value::Str("str".into()))]);
         let env = crate::platform::Environment::test_root(registry_root.path());
         let mut registry = if dry {
             dry_registry(source.path())

@@ -86,26 +86,23 @@ mod tests {
         let dir = tempdir().expect("cannot create temp dir");
         write_data_file(
             dir.path(),
-            "[variable]\nname = \"dotrift\"\ncount = 3\n[profile.home]\neditor = \"nvim\"\n",
+            "[variable]\nstr = \"str\"\nnum = 1\n[profile.profile1]\nnum2 = 2\n",
         );
         let data = DataFile::read(dir.path()).expect("cannot read data file");
-        assert_eq!(
-            data.variable.get("name"),
-            Some(&Value::Str("dotrift".into()))
-        );
-        assert_eq!(data.variable.get("count"), Some(&Value::Int(3)));
+        assert_eq!(data.variable.get("str"), Some(&Value::Str("str".into())));
+        assert_eq!(data.variable.get("num"), Some(&Value::Int(1)));
         assert_eq!(
             data.profile
-                .get("home")
-                .and_then(|entry| entry.get("editor")),
-            Some(&Value::Str("nvim".into()))
+                .get("profile1")
+                .and_then(|entry| entry.get("num2")),
+            Some(&Value::Int(2))
         );
     }
 
     #[test]
     fn rejects_missing_source_directory() {
         let dir = tempdir().expect("cannot create temp dir");
-        assert!(DataFile::read(&dir.path().join("missing")).is_err());
+        assert!(DataFile::read(&dir.path().join("file1")).is_err());
     }
 
     #[test]
@@ -135,9 +132,9 @@ mod tests {
         );
     }
 
-    #[test_case("[variable]\n\"\" = \"x\"\n", "empty key in `[variable]`" ; "empty_variable_key")]
-    #[test_case("[profile.work]\n\"\" = \"x\"\n", "empty key in `[profile.work]`" ; "empty_profile_binding_key")]
-    #[test_case("[profile.\"\"]\neditor = \"nvim\"\n", "empty profile name" ; "empty_profile_name")]
+    #[test_case("[variable]\n\"\" = \"str\"\n", "empty key in `[variable]`" ; "empty_variable_key")]
+    #[test_case("[profile.profile1]\n\"\" = \"str\"\n", "empty key in `[profile.profile1]`" ; "empty_profile_binding_key")]
+    #[test_case("[profile.\"\"]\nstr = \"str\"\n", "empty profile name" ; "empty_profile_name")]
     fn rejects_empty_keys(contents: &str, expected: &str) {
         let dir = tempdir().expect("cannot create temp dir");
         write_data_file(dir.path(), contents);
@@ -155,26 +152,25 @@ mod tests {
         let dir = tempdir().expect("cannot create temp dir");
         write_data_file(
             dir.path(),
-            "[variable]\n\"a-b\" = \"x\"\n\n[profile.work]\n\"a-b\" = \"y\"\n",
+            "[variable]\n\"a-b\" = \"str\"\n\n[profile.profile1]\n\"a-b\" = \"str2\"\n",
         );
         let data = DataFile::read(dir.path()).expect("non-bare keys must remain valid");
-        assert_eq!(data.variable.get("a-b"), Some(&Value::Str("x".into())));
+        assert_eq!(data.variable.get("a-b"), Some(&Value::Str("str".into())));
         assert_eq!(
             data.profile
-                .get("work")
+                .get("profile1")
                 .and_then(|bindings| bindings.get("a-b")),
-            Some(&Value::Str("y".into()))
+            Some(&Value::Str("str2".into()))
         );
     }
 
     #[test]
     fn context_without_active_profiles_contains_only_variables() {
         let mut data = DataFile::default();
-        data.variable
-            .insert("name".into(), Value::Str("dotrift".into()));
+        data.variable.insert("str".into(), Value::Str("str".into()));
         assert_eq!(
             data.context(&[]),
-            BTreeMap::from([("name".into(), Value::Str("dotrift".into()))])
+            BTreeMap::from([("str".into(), Value::Str("str".into()))])
         );
     }
 
@@ -183,44 +179,38 @@ mod tests {
         let mut data = DataFile::default();
         data.variable.insert("a".into(), Value::Int(1));
         data.profile.insert(
-            "work".into(),
-            BTreeMap::from([
-                ("a".into(), Value::Int(2)),
-                ("zone".into(), Value::Str("work".into())),
-            ]),
+            "profile2".into(),
+            BTreeMap::from([("a".into(), Value::Int(2))]),
         );
         data.profile.insert(
-            "home".into(),
-            BTreeMap::from([
-                ("a".into(), Value::Int(3)),
-                ("zone".into(), Value::Str("home".into())),
-            ]),
+            "profile1".into(),
+            BTreeMap::from([("a".into(), Value::Int(4)), ("num".into(), Value::Int(1))]),
         );
-        let context = data.context(&[("work".to_string(), 1), ("home".to_string(), 2)]);
-        assert_eq!(context.get("a"), Some(&Value::Int(3)));
-        assert_eq!(context.get("zone"), Some(&Value::Str("home".into())));
+        let context = data.context(&[("profile2".to_string(), 1), ("profile1".to_string(), 2)]);
+        assert_eq!(context.get("a"), Some(&Value::Int(4)));
+        assert_eq!(context.get("num"), Some(&Value::Int(1)));
     }
 
     #[test]
     fn context_tie_breaks_equal_priority_profiles_by_name() {
         let mut data = DataFile::default();
         data.profile.insert(
-            "work".into(),
-            BTreeMap::from([("zone".into(), Value::Str("work".into()))]),
+            "profile2".into(),
+            BTreeMap::from([("num".into(), Value::Int(2))]),
         );
         data.profile.insert(
-            "home".into(),
-            BTreeMap::from([("zone".into(), Value::Str("home".into()))]),
+            "profile1".into(),
+            BTreeMap::from([("num".into(), Value::Int(1))]),
         );
-        let context = data.context(&[("work".to_string(), 1), ("home".to_string(), 1)]);
-        assert_eq!(context.get("zone"), Some(&Value::Str("work".into())));
+        let context = data.context(&[("profile2".to_string(), 1), ("profile1".to_string(), 1)]);
+        assert_eq!(context.get("num"), Some(&Value::Int(2)));
     }
 
     #[test]
     fn context_ignores_undefined_active_profiles() {
         let mut data = DataFile::default();
         data.variable.insert("a".into(), Value::Int(1));
-        let context = data.context(&[("gone".to_string(), 1)]);
+        let context = data.context(&[("profile3".to_string(), 1)]);
         assert_eq!(context, BTreeMap::from([("a".into(), Value::Int(1))]));
     }
 }

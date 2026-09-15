@@ -154,7 +154,7 @@ mod tests {
     use templater::value::Value;
 
     fn context() -> HashMap<String, Value> {
-        HashMap::from([("greeting".to_string(), Value::Str("hello".into()))])
+        HashMap::from([("str".to_string(), Value::Str("str".into()))])
     }
 
     #[test]
@@ -164,8 +164,8 @@ mod tests {
         let env =
             Environment::test_root(root.path()).with_registry_dir(root.path().join("blocked"));
 
-        let template = root.path().join("greeting.txt");
-        fs::write(&template, b"{{ greeting }}\n").expect("cannot write template");
+        let template = root.path().join("file1");
+        fs::write(&template, b"{{ str }}\n").expect("cannot write template");
         let mut registry = RenderRegistry::acquire(&env, false);
 
         assert!(
@@ -182,15 +182,15 @@ mod tests {
         let env = Environment::test_root(root.path());
         let mut registry = RenderRegistry::acquire(&env, false);
 
-        let template = root.path().join("greeting.txt");
-        fs::write(&template, b"{{ greeting }}\n").expect("cannot write template");
+        let template = root.path().join("file1");
+        fs::write(&template, b"{{ str }}\n").expect("cannot write template");
         let rendered = registry
             .ensure_rendered(&template, &context())
             .expect("cannot render into the registry")
             .expect("the registry must hold the render");
 
         let bytes = fs::read(&rendered.path).expect("cannot read registry entry");
-        assert_eq!(bytes, b"hello\n");
+        assert_eq!(bytes, b"str\n");
         assert_eq!(
             fs::symlink_metadata(&rendered.path)
                 .expect("cannot stat registry entry")

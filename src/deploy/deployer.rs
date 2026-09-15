@@ -469,23 +469,23 @@ mod tests {
 
     #[test_case(|_t| vec![] => true ; "empty_directory_reports_empty")]
     #[test_case(|t| {
-        fs::write(t.join("file"), "content").unwrap();
+        fs::write(t.join("file1"), b"content1").unwrap();
         vec![]
     } => false ; "directory_with_unremoved_file_reports_not_empty")]
     #[test_case(|t| {
-        fs::write(t.join("a"), "content").unwrap();
-        fs::write(t.join("b"), "content").unwrap();
-        vec![t.join("a"), t.join("b")]
+        fs::write(t.join("file1"), b"content1").unwrap();
+        fs::write(t.join("file2"), b"content2").unwrap();
+        vec![t.join("file1"), t.join("file2")]
     } => true ; "directory_with_all_files_removed_reports_empty")]
     #[test_case(|t| {
-        fs::write(t.join("a"), "content").unwrap();
-        fs::write(t.join("b"), "content").unwrap();
-        vec![t.join("a")]
+        fs::write(t.join("file1"), b"content1").unwrap();
+        fs::write(t.join("file2"), b"content2").unwrap();
+        vec![t.join("file1")]
     } => false ; "directory_with_some_files_kept_reports_not_empty")]
     #[test_case(|t| {
-        fs::create_dir_all(t.join("sub")).unwrap();
-        fs::write(t.join("sub/file"), "content").unwrap();
-        vec![t.join("sub")]
+        fs::create_dir_all(t.join("dir1/sub1")).unwrap();
+        fs::write(t.join("dir1/sub1/file1"), b"content1").unwrap();
+        vec![t.join("dir1"), t.join("dir1/sub1")]
     } => true ; "directory_with_subdir_removed_reports_empty")]
     fn reports_would_be_empty_for(setup: impl Fn(&Path) -> Vec<PathBuf>) -> bool {
         let dir = tempdir().expect("cannot create temp dir");
@@ -494,56 +494,56 @@ mod tests {
 
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("a")).unwrap();
-            t.join("a/file")
+            fs::create_dir_all(t.join("dir1")).unwrap();
+            t.join("dir1/file1")
         },
-        |t| assert!(!t.join("a").exists())
+        |t| assert!(!t.join("dir1").exists())
         ; "empty_parent_pruned"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("a/b")).unwrap();
-            t.join("a/b/file")
+            fs::create_dir_all(t.join("dir1/sub1")).unwrap();
+            t.join("dir1/sub1/file1")
         },
         |t| {
-            assert!(!t.join("a/b").exists());
-            assert!(!t.join("a").exists());
+            assert!(!t.join("dir1/sub1").exists());
+            assert!(!t.join("dir1").exists());
         }
         ; "nested_empty_parents_pruned_up_to_root"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("a/b")).unwrap();
-            fs::write(t.join("a/keep"), "content").unwrap();
-            t.join("a/b/file")
+            fs::create_dir_all(t.join("dir1/sub1")).unwrap();
+            fs::write(t.join("dir1/file2"), b"content1").unwrap();
+            t.join("dir1/sub1/file1")
         },
         |t| {
-            assert!(!t.join("a/b").exists());
-            assert!(t.join("a").exists());
-            assert!(t.join("a/keep").exists());
+            assert!(!t.join("dir1/sub1").exists());
+            assert!(t.join("dir1").exists());
+            assert!(t.join("dir1/file2").exists());
         }
         ; "pruning_stops_at_non_empty_parent"
     )]
     #[test_case(
         |t| {
-            fs::write(t.join("a"), "occupied").unwrap();
-            t.join("a/x")
+            fs::write(t.join("file1"), "content1").unwrap();
+            t.join("file1/target1")
         },
-        |t| assert_eq!(fs::read_to_string(t.join("a")).unwrap(), "occupied")
+        |t| assert_eq!(fs::read_to_string(t.join("file1")).unwrap(), "content1")
         ; "non_directory_parent_stops_pruning"
     )]
     #[test_case(
         |t| {
-            fs::create_dir_all(t.join("real")).unwrap();
-            std::os::unix::fs::symlink(t.join("real"), t.join("link")).unwrap();
-            t.join("link/file")
+            fs::create_dir_all(t.join("dir1")).unwrap();
+            std::os::unix::fs::symlink(t.join("dir1"), t.join("link1")).unwrap();
+            t.join("link1/file1")
         },
         |t| {
-            assert!(fs::symlink_metadata(t.join("link"))
+            assert!(fs::symlink_metadata(t.join("link1"))
                 .unwrap()
                 .file_type()
                 .is_symlink());
-            assert!(t.join("real").exists());
+            assert!(t.join("dir1").exists());
         }
         ; "symlink_parent_stops_pruning"
     )]
@@ -640,19 +640,19 @@ mod tests {
 
         let (source, target, state, registry_root) = test_harness();
         if pre_managed {
-            fs::write(source.path().join("file.txt"), "v1").unwrap();
-            fs::write(target.path().join("target.txt"), "v1").unwrap();
+            fs::write(source.path().join("file1"), "content1").unwrap();
+            fs::write(target.path().join("target1"), "content1").unwrap();
         } else {
-            fs::write(source.path().join("file.txt"), "new").unwrap();
+            fs::write(source.path().join("file1"), "content1").unwrap();
         }
         let database = StateDatabase::open_at(state.path()).unwrap();
         if pre_managed {
             database
                 .put(&StateRecord {
-                    target_path: target.path().join("target.txt"),
-                    source_path: source.path().join("file.txt"),
+                    target_path: target.path().join("target1"),
+                    source_path: source.path().join("file1"),
                     kind: Kind::File,
-                    content_hash: Some(hash_bytes(b"v1").into()),
+                    content_hash: Some(hash_bytes(b"content1").into()),
                 })
                 .unwrap();
         }
@@ -669,17 +669,14 @@ mod tests {
             &interaction,
             &mut latch,
         );
-        let entry = copy_entry(
-            &source.path().join("file.txt"),
-            &target.path().join("target.txt"),
-        );
+        let entry = copy_entry(&source.path().join("file1"), &target.path().join("target1"));
 
         let outcome = deployer.deploy_one(&entry, &HashMap::new()).unwrap();
         assert_eq!(outcome, expected);
         if !pre_managed {
             assert_eq!(
-                fs::read_to_string(target.path().join("target.txt")).unwrap(),
-                "new"
+                fs::read_to_string(target.path().join("target1")).unwrap(),
+                "content1"
             );
         }
     }
@@ -690,8 +687,8 @@ mod tests {
         use crate::platform::Environment;
 
         let (source, target, state, registry_root) = test_harness();
-        fs::write(source.path().join("file.txt"), "new").unwrap();
-        fs::write(target.path().join("target.txt"), "old").unwrap();
+        fs::write(source.path().join("file1"), "content1").unwrap();
+        fs::write(target.path().join("target1"), "content2").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let env = Environment::test_root(registry_root.path());
         let mut registry = RenderRegistry::acquire(&env, false);
@@ -706,17 +703,14 @@ mod tests {
             &interaction,
             &mut latch,
         );
-        let entry = copy_entry(
-            &source.path().join("file.txt"),
-            &target.path().join("target.txt"),
-        );
+        let entry = copy_entry(&source.path().join("file1"), &target.path().join("target1"));
 
         let outcome = deployer.deploy_one(&entry, &HashMap::new()).unwrap();
         assert_eq!(outcome, expected);
         assert_eq!(interaction.calls(), 1);
         assert_eq!(
-            fs::read_to_string(target.path().join("target.txt")).unwrap(),
-            "old"
+            fs::read_to_string(target.path().join("target1")).unwrap(),
+            "content2"
         );
     }
 
@@ -725,10 +719,10 @@ mod tests {
         use crate::platform::Environment;
 
         let (source, target, state, registry_root) = test_harness();
-        fs::write(source.path().join("a.txt"), "new-a").unwrap();
-        fs::write(source.path().join("b.txt"), "new-b").unwrap();
-        fs::write(target.path().join("a.txt"), "old-a").unwrap();
-        fs::write(target.path().join("b.txt"), "old-b").unwrap();
+        fs::write(source.path().join("file1"), "content1").unwrap();
+        fs::write(source.path().join("file2"), "content2").unwrap();
+        fs::write(target.path().join("file1"), "content3").unwrap();
+        fs::write(target.path().join("file2"), "content4").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let env = Environment::test_root(registry_root.path());
         let mut registry = RenderRegistry::acquire(&env, false);
@@ -738,8 +732,8 @@ mod tests {
             calls: std::cell::RefCell::new(0),
         };
         let mut latch = ReplaceLatch::default();
-        let first = copy_entry(&source.path().join("a.txt"), &target.path().join("a.txt"));
-        let second = copy_entry(&source.path().join("b.txt"), &target.path().join("b.txt"));
+        let first = copy_entry(&source.path().join("file1"), &target.path().join("file1"));
+        let second = copy_entry(&source.path().join("file2"), &target.path().join("file2"));
         {
             let mut deployer = Deployer::new(
                 &database,
@@ -767,7 +761,7 @@ mod tests {
         use crate::platform::Environment;
 
         let (source, target, state, registry_root) = test_harness();
-        fs::write(source.path().join("bad.txt"), "{{ unclosed").unwrap();
+        fs::write(source.path().join("file1"), "{{ str1").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let env = Environment::test_root(registry_root.path());
         let mut registry = RenderRegistry::acquire(&env, false);
@@ -783,13 +777,13 @@ mod tests {
             &mut latch,
         );
         let entry = config::DeploymentEntry {
-            source_path: source.path().join("bad.txt"),
-            target_path: target.path().join("target.txt"),
+            source_path: source.path().join("file1"),
+            target_path: target.path().join("target1"),
             deploy_type: DeployType::Template,
             mode: None,
         };
 
         assert!(deployer.deploy_one(&entry, &HashMap::new()).is_err());
-        assert!(!target.path().join("target.txt").exists());
+        assert!(!target.path().join("target1").exists());
     }
 }

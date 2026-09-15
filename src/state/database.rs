@@ -355,8 +355,8 @@ mod tests {
         Kind::parse(value)
     }
 
-    #[test_case(crate::record!(f, "/home/user/.gitconfig", "abc123"); "file_record_round_trips")]
-    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"); "symlink_record_round_trips")]
+    #[test_case(crate::record!(f, "target1", "hash1"); "file_record_round_trips")]
+    #[test_case(crate::record!(s, "target2", "source1"); "symlink_record_round_trips")]
     fn put_round_trips_record(record: StateRecord) {
         let (_dir, database) = database();
         database.put(&record).expect("cannot store record");
@@ -367,13 +367,13 @@ mod tests {
     }
 
     #[test_case(
-        crate::record!(f, "/home/user/.gitconfig", "abc123"),
-        crate::record!(s, "/home/user/.gitconfig", "dotfiles/git/global");
+        crate::record!(f, "target1", "hash1"),
+        crate::record!(s, "target1", "source1");
         "file_record_overwritten_by_symlink"
     )]
     #[test_case(
-        crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"),
-        crate::record!(f, "/home/user/.bashrc", "deadbeef");
+        crate::record!(s, "target1", "source1"),
+        crate::record!(f, "target1", "hash2");
         "symlink_record_overwritten_by_file"
     )]
     fn put_overwrites_record_at_same_target_path(original: StateRecord, replacement: StateRecord) {
@@ -392,8 +392,8 @@ mod tests {
 
     #[test_case(
         StateRecord {
-            target_path: PathBuf::from("/home/user/x"),
-            source_path: PathBuf::from("dotfiles/x"),
+            target_path: PathBuf::from("target1"),
+            source_path: PathBuf::from("source1"),
             kind: Kind::File,
             content_hash: None,
         };
@@ -401,10 +401,10 @@ mod tests {
     )]
     #[test_case(
         StateRecord {
-            target_path: PathBuf::from("/home/user/y"),
-            source_path: PathBuf::from("dotfiles/y"),
+            target_path: PathBuf::from("target2"),
+            source_path: PathBuf::from("source2"),
             kind: Kind::Symlink,
-            content_hash: Some("abc".into()),
+            content_hash: Some("hash1".into()),
         };
         "symlink_record_with_content_hash_rejected"
     )]
@@ -416,8 +416,8 @@ mod tests {
     #[test]
     fn managed_paths_returns_every_stored_record() {
         let (_dir, database) = database();
-        let first = crate::record!(f, "/home/user/.gitconfig", "abc123");
-        let second = crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc");
+        let first = crate::record!(f, "target1", "hash1");
+        let second = crate::record!(s, "target2", "source1");
         database.put(&first).expect("cannot store first record");
         database.put(&second).expect("cannot store second record");
         let mut records = database.managed_paths().expect("cannot read records");
@@ -427,8 +427,8 @@ mod tests {
         assert_eq!(records, expected);
     }
 
-    #[test_case(crate::record!(f, "/home/user/.gitconfig", "abc123"); "file_record_found_by_target_path")]
-    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"); "symlink_record_found_by_target_path")]
+    #[test_case(crate::record!(f, "target1", "hash1"); "file_record_found_by_target_path")]
+    #[test_case(crate::record!(s, "target2", "source1"); "symlink_record_found_by_target_path")]
     fn record_lookup_returns_stored_record(record: StateRecord) {
         let (_dir, database) = database();
         database.put(&record).expect("cannot store record");
@@ -445,7 +445,7 @@ mod tests {
         let (_dir, database) = database();
         assert_eq!(
             database
-                .record(Path::new("/home/user/.nonexistent"))
+                .record(Path::new("target1"))
                 .expect("cannot read record"),
             None
         );
@@ -465,14 +465,14 @@ mod tests {
                      content_hash TEXT
                  );
                  INSERT INTO managed_paths VALUES
-                     ('/home/user/.gitconfig', 'dotfiles/git/config', 'link', 'abc123');",
+                     ('target1', 'source1', 'link', 'hash1');",
             )
             .expect("cannot seed corrupt record");
-        assert!(database.record(Path::new("/home/user/.gitconfig")).is_err());
+        assert!(database.record(Path::new("target1")).is_err());
     }
 
-    #[test_case(crate::record!(f, "/home/user/.gitconfig", "abc123"); "file_record_deleted")]
-    #[test_case(crate::record!(s, "/home/user/.bashrc", "dotfiles/bash/bashrc"); "symlink_record_deleted")]
+    #[test_case(crate::record!(f, "target1", "hash1"); "file_record_deleted")]
+    #[test_case(crate::record!(s, "target2", "source1"); "symlink_record_deleted")]
     fn remove_deletes_stored_record(record: StateRecord) {
         let (_dir, database) = database();
         database.put(&record).expect("cannot store record");
@@ -489,7 +489,7 @@ mod tests {
     fn remove_succeeds_for_unknown_target_path() {
         let (_dir, database) = database();
         database
-            .remove(Path::new("/home/user/.nonexistent"))
+            .remove(Path::new("missing"))
             .expect("cannot remove absent record");
     }
 
@@ -506,13 +506,13 @@ mod tests {
     fn active_profiles_orders_by_activation_then_name() {
         let (_dir, database) = database();
         database
-            .activate_profile("editor")
+            .activate_profile("profile2")
             .expect("cannot activate profile");
         database
-            .activate_profile("shell")
+            .activate_profile("profile1")
             .expect("cannot activate profile");
         database
-            .activate_profile("editor")
+            .activate_profile("profile2")
             .expect("cannot reactivate profile");
         let profiles = database.active_profiles().expect("cannot read profiles");
         assert_eq!(
@@ -520,7 +520,7 @@ mod tests {
                 .iter()
                 .map(|(name, _)| name.as_str())
                 .collect::<Vec<_>>(),
-            vec!["shell", "editor"]
+            vec!["profile1", "profile2"]
         );
     }
 
@@ -528,14 +528,14 @@ mod tests {
     fn activate_profile_updates_timestamp_without_duplicate_row() {
         let (_dir, database) = database();
         database
-            .activate_profile("editor")
+            .activate_profile("profile1")
             .expect("cannot activate profile");
         database
-            .activate_profile("editor")
+            .activate_profile("profile1")
             .expect("cannot reactivate profile");
         let profiles = database.active_profiles().expect("cannot read profiles");
         assert_eq!(profiles.len(), 1);
-        assert_eq!(profiles[0].0, "editor");
+        assert_eq!(profiles[0].0, "profile1");
     }
 
     #[test_case(true => true ; "active_profile_deactivates")]
@@ -544,11 +544,11 @@ mod tests {
         let (_dir, database) = database();
         if activate_first {
             database
-                .activate_profile("editor")
+                .activate_profile("profile1")
                 .expect("cannot activate profile");
         }
         database
-            .deactivate_profile("editor")
+            .deactivate_profile("profile1")
             .expect("cannot deactivate profile")
     }
 
