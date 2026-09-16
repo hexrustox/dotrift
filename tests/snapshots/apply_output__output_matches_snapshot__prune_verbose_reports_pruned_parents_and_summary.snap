@@ -1,0 +1,8 @@
+---
+source: tests/apply_output.rs
+expression: captured
+---
+removed <root>/target/dir1/sub1/file1
+pruned <root>/target/dir1/sub1
+pruned <root>/target/dir1
+deployed 0, replaced 0, skipped 0, removed 1, pruned 2

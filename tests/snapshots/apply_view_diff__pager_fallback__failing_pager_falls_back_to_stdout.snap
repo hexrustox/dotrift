@@ -1,0 +1,10 @@
+---
+source: tests/apply_view_diff.rs
+expression: diff
+---
+--- <root>/target/file2
++++ <root>/source/file1
+@@ -1 +1 @@
+-content1
++content2
+deployed 0, replaced 0, skipped 1

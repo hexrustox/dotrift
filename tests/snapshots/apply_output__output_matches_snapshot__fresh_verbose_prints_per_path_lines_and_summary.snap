@@ -1,0 +1,7 @@
+---
+source: tests/apply_output.rs
+expression: captured
+---
+deployed <root>/target/file1
+deployed <root>/target/file2
+deployed 2, replaced 0, skipped 0
