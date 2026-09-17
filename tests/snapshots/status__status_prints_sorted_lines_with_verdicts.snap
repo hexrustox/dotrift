@@ -1,0 +1,7 @@
+---
+source: tests/status.rs
+expression: output
+---
+unmanaged  symlink  <root>/target/dir1/file1 <- <root>/source/dir1/file1
+managed    symlink  <root>/target/file1 <- <root>/source/file1
+unmanaged  file     <root>/target/file2 <- <root>/source/file2

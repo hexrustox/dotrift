@@ -1,0 +1,7 @@
+---
+source: tests/status.rs
+expression: colored
+---
+[38;5;9munmanaged [39m symlink  <root>/target/dir1/file1 <- <root>/source/dir1/file1
+[38;5;10mmanaged   [39m symlink  <root>/target/file1 <- <root>/source/file1
+[38;5;9munmanaged [39m file     <root>/target/file2 <- <root>/source/file2

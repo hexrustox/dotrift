@@ -1,0 +1,9 @@
+---
+source: tests/profile.rs
+expression: captured
+---
+flag    true
+list1   [1, "str", true]
+map1    {"num": 1, "str": "str"}
+num     1
+str     str
