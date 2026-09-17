@@ -12,15 +12,21 @@
 - Use `legacy/` (in this root, `templater/legacy/`, and `tui/legacy/`) as
   read-only reference when behavior questions aren't answered by `spec/`;
   never copy code from it into current sources — it predates the rewrite
-  and doesn't meet current standards. `TEST-REWRITE-PLAN.md` tracks the
-  port; done with a legacy lookup when the spec answer supersedes it.
+  and doesn't meet current standards.
 - `spec/` is the behavioral contract. Use `spec/CONTEXT.md` for domain terms
   and `spec/commands/<command>.md` when changing that command; `templater/`
   and `tui/` carry their own specs in their own dirs.
 
-## Decisions
+## Agent skills
 
-- Use `docs/adr/` before changing apply, preflight, or template semantics;
-  ADRs explain non-obvious rules there (render-before-parse, apply-never-prunes,
-  preflight best-effort). Done when the change matches the relevant ADR or
-  an update to it is included.
+### Issue tracker
+
+Issues live as GitHub issues, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage-role labels are used verbatim. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Multi-context: `CONTEXT-MAP.md` points at per-context `CONTEXT.md` files; ADRs in `docs/adr/`. See `docs/agents/domain.md`.
