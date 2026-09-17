@@ -176,12 +176,18 @@ impl<P: Prompter, D: Differ> ObstructionResolver for Interaction<'_, P, D> {
     }
 }
 
+/// Whether the diff choice makes sense: only for two present regular files.
+fn offers_diff(source: &Path, obstruction: &Path) -> bool {
+    use std::fs;
+
+    fs::metadata(source).is_ok_and(|metadata| metadata.is_file())
+        && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file())
+}
+
 pub(crate) fn prompt_for_obstruction(
     entry: &config::DeploymentEntry,
     obstruction: &Path,
 ) -> std::result::Result<ObstructionChoice, PromptError> {
-    use std::fs;
-
     use crossterm::style::Color;
 
     use crate::platform::prettify_path;
@@ -197,9 +203,7 @@ pub(crate) fn prompt_for_obstruction(
         done_question: Color::Grey,
         ..Default::default()
     };
-    let should_show_diff = fs::metadata(&entry.source_path)
-        .is_ok_and(|metadata| metadata.is_file())
-        && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file());
+    let should_show_diff = offers_diff(&entry.source_path, obstruction);
     tui::prompt::SelectPrompt::new()
         .question(question)
         .style(style)
@@ -372,9 +376,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::cell::RefCell;
+    use std::fs;
+
+    use tempfile::{TempDir, tempdir};
     use test_case::test_case;
+
+    use super::*;
+    use crate::platform::Environment;
 
     fn test_config_pager() -> PagerCommand {
         PagerCommand {
@@ -450,6 +459,8 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
+    /// Scripted prompter: pops one choice per prompt; cancels once the queue
+    /// is empty.
     struct SeqPrompter {
         choices: RefCell<Vec<ObstructionChoice>>,
         calls: RefCell<usize>,
@@ -462,7 +473,24 @@ mod tests {
             _obstruction: &Path,
         ) -> std::result::Result<ObstructionChoice, PromptError> {
             *self.calls.borrow_mut() += 1;
-            Ok(self.choices.borrow_mut().pop().expect("choices exhausted"))
+            self.choices
+                .borrow_mut()
+                .pop()
+                .ok_or(PromptError::Cancelled)
+        }
+    }
+
+    struct FailingPrompter;
+
+    impl Prompter for FailingPrompter {
+        fn prompt(
+            &self,
+            _: &config::DeploymentEntry,
+            _: &Path,
+        ) -> std::result::Result<ObstructionChoice, PromptError> {
+            Err(PromptError::Io(std::io::Error::from(
+                std::io::ErrorKind::NotFound,
+            )))
         }
     }
 
@@ -484,27 +512,31 @@ mod tests {
         }
     }
 
-    #[test]
-    fn view_diff_then_replace_shows_once_and_replaces() {
-        use tempfile::tempdir;
-
-        use crate::platform::Environment;
-
-        let state = tempdir().unwrap();
+    fn fixture() -> (TempDir, GlobalConfig, RenderRegistry) {
+        let state = tempdir().expect("cannot create temp dir");
         let env = Environment::test_root(state.path());
-        let global_config = GlobalConfig::default();
-        let mut registry = RenderRegistry::acquire(&env, true);
-        let entry = config::DeploymentEntry {
-            source_path: state.path().join("src"),
-            target_path: state.path().join("dst"),
+        let registry = RenderRegistry::acquire(&env, true);
+        (state, GlobalConfig::default(), registry)
+    }
+
+    fn resolve_entry(state: &Path) -> config::DeploymentEntry {
+        config::DeploymentEntry {
+            source_path: state.join("src"),
+            target_path: state.join("dst"),
             deploy_type: DeployType::Copy,
             mode: None,
-        };
+        }
+    }
+
+    #[test]
+    fn a_viewdiff_then_replace_shows_once_and_replaces() {
+        let (state, global_config, mut registry) = fixture();
+        let entry = resolve_entry(state.path());
         let interaction = Interaction {
             global_config: &global_config,
             prompter: SeqPrompter {
-                // Popped: ViewDiff first, then Replace.
                 choices: RefCell::new(vec![
+                    // Popped from the end: ViewDiff first, then Replace.
                     ObstructionChoice::Replace,
                     ObstructionChoice::ViewDiff,
                 ]),
@@ -516,9 +548,144 @@ mod tests {
         };
         let action = interaction
             .resolve_obstruction(&entry, &entry.target_path, &HashMap::new(), &mut registry)
-            .unwrap();
+            .expect("resolution succeeds");
         assert_eq!(action, ResolveAction::Replace { latch_all: false });
         assert_eq!(*interaction.prompter.calls.borrow(), 2);
         assert_eq!(*interaction.differ.calls.borrow(), 1);
+    }
+
+    #[test]
+    fn a_skip_resolves_to_a_skip_action() {
+        let (state, global_config, mut registry) = fixture();
+        let entry = resolve_entry(state.path());
+        let interaction = Interaction {
+            global_config: &global_config,
+            prompter: SeqPrompter {
+                choices: RefCell::new(vec![ObstructionChoice::Skip]),
+                calls: RefCell::new(0),
+            },
+            differ: CountingDiffer {
+                calls: RefCell::new(0),
+            },
+        };
+        let action = interaction
+            .resolve_obstruction(&entry, &entry.target_path, &HashMap::new(), &mut registry)
+            .expect("resolution succeeds");
+        assert_eq!(action, ResolveAction::Skip);
+        assert_eq!(*interaction.differ.calls.borrow(), 0);
+    }
+
+    #[test]
+    fn a_replace_all_resolves_to_a_latched_replace() {
+        let (state, global_config, mut registry) = fixture();
+        let entry = resolve_entry(state.path());
+        let interaction = Interaction {
+            global_config: &global_config,
+            prompter: SeqPrompter {
+                choices: RefCell::new(vec![ObstructionChoice::ReplaceAll]),
+                calls: RefCell::new(0),
+            },
+            differ: CountingDiffer {
+                calls: RefCell::new(0),
+            },
+        };
+        let action = interaction
+            .resolve_obstruction(&entry, &entry.target_path, &HashMap::new(), &mut registry)
+            .expect("resolution succeeds");
+        assert_eq!(action, ResolveAction::Replace { latch_all: true });
+    }
+
+    #[test]
+    fn a_cancelled_prompt_parks_as_a_cancel_action() {
+        // The queue is empty, so the prompter cancels on the first prompt.
+        let (state, global_config, mut registry) = fixture();
+        let entry = resolve_entry(state.path());
+        let interaction = Interaction {
+            global_config: &global_config,
+            prompter: SeqPrompter {
+                choices: RefCell::new(vec![]),
+                calls: RefCell::new(0),
+            },
+            differ: CountingDiffer {
+                calls: RefCell::new(0),
+            },
+        };
+        let action = interaction
+            .resolve_obstruction(&entry, &entry.target_path, &HashMap::new(), &mut registry)
+            .expect("resolution succeeds");
+        assert_eq!(action, ResolveAction::Cancel);
+        assert_eq!(*interaction.prompter.calls.borrow(), 1);
+    }
+
+    #[test]
+    fn a_failing_prompt_is_reported_as_an_error() {
+        let (state, global_config, mut registry) = fixture();
+        let entry = resolve_entry(state.path());
+        let interaction = Interaction {
+            global_config: &global_config,
+            prompter: FailingPrompter,
+            differ: CountingDiffer {
+                calls: RefCell::new(0),
+            },
+        };
+        let error = interaction
+            .resolve_obstruction(&entry, &entry.target_path, &HashMap::new(), &mut registry)
+            .expect_err("the prompt failure must surface");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot display obstruction prompt"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_prompter_behind_a_reference_resolves_through_the_blanket() {
+        let (state, global_config, mut registry) = fixture();
+        let entry = resolve_entry(state.path());
+        let prompter = SeqPrompter {
+            choices: RefCell::new(vec![ObstructionChoice::Skip]),
+            calls: RefCell::new(0),
+        };
+        let interaction = Interaction {
+            global_config: &global_config,
+            prompter: &prompter,
+            differ: CountingDiffer {
+                calls: RefCell::new(0),
+            },
+        };
+        let action = interaction
+            .resolve_obstruction(&entry, &entry.target_path, &HashMap::new(), &mut registry)
+            .expect("resolution succeeds");
+        assert_eq!(action, ResolveAction::Skip);
+    }
+
+    #[test]
+    fn the_diff_choice_gates_on_two_regular_files() {
+        let state = tempdir().expect("cannot create temp dir");
+        let source = state.path().join("file1");
+        fs::write(&source, b"content1").expect("cannot write file");
+        let obstruction = state.path().join("file2");
+        fs::write(&obstruction, b"content2").expect("cannot write file");
+        assert!(offers_diff(&source, &obstruction));
+    }
+
+    #[test]
+    fn the_diff_choice_gates_on_a_directory_obstruction() {
+        let state = tempdir().expect("cannot create temp dir");
+        let source = state.path().join("file1");
+        fs::write(&source, b"content1").expect("cannot write file");
+        let obstruction = state.path().join("dir1");
+        fs::create_dir(&obstruction).expect("cannot create dir");
+        assert!(!offers_diff(&source, &obstruction));
+    }
+
+    #[test]
+    fn the_diff_choice_gates_on_a_missing_path() {
+        let state = tempdir().expect("cannot create temp dir");
+        let source = state.path().join("file1");
+        fs::write(&source, b"content1").expect("cannot write file");
+        assert!(!offers_diff(&source, &state.path().join("missing1")));
+        assert!(!offers_diff(&state.path().join("missing1"), &source));
     }
 }

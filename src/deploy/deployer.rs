@@ -225,15 +225,13 @@ fn write_deployed_file(
     let mut writer = HashWriter::new(BufWriter::new(file));
     let outcome = match entry.deploy_type {
         DeployType::Template => render_template_to(&entry.source_path, context, &mut writer),
-        DeployType::Copy => {
-            let mut source = fs::File::open(&entry.source_path)
+        DeployType::Copy => match fs::File::open(&entry.source_path) {
+            Ok(mut source) => io::copy(&mut source, &mut writer)
+                .map(|_| ())
                 .map_err(|error| miette!(error))
-                .wrap_err("cannot read copy source")?;
-            io::copy(&mut source, &mut writer)
-                .map_err(|error| miette!(error))
-                .wrap_err("cannot write target file")?;
-            Ok(())
-        }
+                .wrap_err("cannot write target file"),
+            Err(error) => Err(miette!(error).wrap_err("cannot read copy source")),
+        },
         DeployType::Symlink => Err(miette!("symlink entries do not deploy as files")),
     };
     let content_hash = writer.into_digest();
@@ -435,6 +433,8 @@ pub(crate) fn remove_path(database: &StateDatabase, path: &Path) -> Result<()> {
 mod tests {
     use std::path::PathBuf;
 
+    use crate::{platform::Environment, state::hash_bytes};
+
     use super::*;
     use tempfile::tempdir;
     use test_case::test_case;
@@ -633,11 +633,6 @@ mod tests {
     #[test_case(false, DeployOutcome::Deployed ; "missing_target_deploys")]
     #[test_case(true, DeployOutcome::Replaced ; "managed_path_replaced_without_prompt")]
     fn deploy_one_without_prompt(pre_managed: bool, expected: DeployOutcome) {
-        use crate::{
-            platform::Environment,
-            state::{Kind, StateRecord, hash_bytes},
-        };
-
         let (source, target, state, registry_root) = test_harness();
         if pre_managed {
             fs::write(source.path().join("file1"), "content1").unwrap();
@@ -684,8 +679,6 @@ mod tests {
     #[test_case(ResolveAction::Skip, DeployOutcome::Skipped ; "skip_leaves_obstruction")]
     #[test_case(ResolveAction::Cancel, DeployOutcome::Cancelled ; "cancel_leaves_obstruction")]
     fn deploy_one_obstruction_without_replace(action: ResolveAction, expected: DeployOutcome) {
-        use crate::platform::Environment;
-
         let (source, target, state, registry_root) = test_harness();
         fs::write(source.path().join("file1"), "content1").unwrap();
         fs::write(target.path().join("target1"), "content2").unwrap();
@@ -716,8 +709,6 @@ mod tests {
 
     #[test]
     fn deploy_one_latch_suppresses_second_prompt() {
-        use crate::platform::Environment;
-
         let (source, target, state, registry_root) = test_harness();
         fs::write(source.path().join("file1"), "content1").unwrap();
         fs::write(source.path().join("file2"), "content2").unwrap();
@@ -785,5 +776,49 @@ mod tests {
 
         assert!(deployer.deploy_one(&entry, &HashMap::new()).is_err());
         assert!(!target.path().join("target1").exists());
+    }
+
+    #[test]
+    fn remove_path_recurses_into_managed_directories() {
+        let (source, target, state, _registry_root) = test_harness();
+        let root = target.path().join("dir1");
+        let nested = root.join("sub1");
+        let file = nested.join("file1");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(&file, "content1").unwrap();
+        let database = StateDatabase::open_at(state.path()).unwrap();
+        database
+            .put(&StateRecord {
+                target_path: file.clone(),
+                source_path: source.path().join("file1"),
+                kind: Kind::File,
+                content_hash: Some(hash_bytes(b"content1").into()),
+            })
+            .unwrap();
+
+        remove_path(&database, &root).expect("removal succeeds");
+
+        assert!(!root.exists());
+        assert!(database.record(&file).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_failed_copy_leaves_the_target_absent() {
+        let (source, target, state, registry_root) = test_harness();
+        let env = Environment::test_root(registry_root.path());
+        let mut registry = RenderRegistry::acquire(&env, false);
+        let entry = copy_entry(
+            &source.path().join("missing1"),
+            &target.path().join("target1"),
+        );
+
+        let error = write_deployed_file(&entry, &HashMap::new(), &mut registry)
+            .expect_err("the missing copy source must fail");
+        assert!(
+            error.to_string().contains("cannot read copy source"),
+            "{error}"
+        );
+        assert!(!target.path().join("target1").exists());
+        let _ = &state;
     }
 }

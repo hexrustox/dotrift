@@ -112,3 +112,152 @@ impl Environment {
         dirs::home_dir().ok_or_else(|| miette!("`HOME` is unset or empty"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Mutex, MutexGuard};
+
+    use super::*;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct VarGuard {
+        previous: Vec<(&'static str, Option<String>)>,
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl VarGuard {
+        fn set<'a>(vars: impl IntoIterator<Item = (&'static str, Option<&'a str>)>) -> Self {
+            let _guard = ENV_LOCK.lock().expect("env lock poisoned");
+            let previous = vars
+                .into_iter()
+                .map(|(name, value)| {
+                    let previous = std::env::var(name).ok();
+                    unsafe {
+                        match value {
+                            Some(value) => std::env::set_var(name, value),
+                            None => std::env::remove_var(name),
+                        }
+                    }
+                    (name, previous)
+                })
+                .collect();
+            Self { previous, _guard }
+        }
+    }
+
+    impl Drop for VarGuard {
+        fn drop(&mut self) {
+            for (name, previous) in &self.previous {
+                unsafe {
+                    match previous {
+                        Some(previous) => std::env::set_var(name, previous),
+                        None => std::env::remove_var(name),
+                    }
+                }
+            }
+        }
+    }
+
+    fn temp_dir_with_name(name: &'static str) -> PathBuf {
+        tempfile::tempdir()
+            .expect("cannot create temp dir")
+            .keep()
+            .join(name)
+    }
+
+    fn temporary_home() -> String {
+        tempfile::tempdir()
+            .expect("cannot create temp dir")
+            .keep()
+            .display()
+            .to_string()
+    }
+
+    #[test]
+    fn test_root_overrides_the_private_locations() {
+        let root = tempfile::tempdir().expect("cannot create temp dir");
+        let env = Environment::test_root(root.path());
+        assert_eq!(env.state_dir().unwrap(), root.path().join("state"));
+        assert_eq!(
+            env.registry_dir(),
+            root.path().join("render-registry").join("registry")
+        );
+        assert_eq!(
+            env.global_config_path().unwrap(),
+            root.path()
+                .join("config-home")
+                .join("dotrift")
+                .join("config.toml")
+        );
+    }
+
+    #[test]
+    fn with_registry_dir_overrides_the_registry_location() {
+        let env = Environment::default().with_registry_dir(PathBuf::from("file1"));
+        assert_eq!(env.registry_dir(), PathBuf::from("file1"));
+    }
+
+    #[test]
+    fn registry_dir_defaults_to_the_temporary_directory() {
+        let _guard = VarGuard::set([]);
+        let expected = std::env::temp_dir().join("dotrift-render").join("registry");
+        assert_eq!(Environment::default().registry_dir(), expected);
+    }
+
+    #[test]
+    fn state_dir_prefers_the_state_home() {
+        let state = temp_dir_with_name("1");
+        let _guard = VarGuard::set([("XDG_STATE_HOME", Some(state.to_str().unwrap()))]);
+        assert_eq!(
+            Environment::default().state_dir().unwrap(),
+            state.join("dotrift")
+        );
+    }
+
+    #[test]
+    fn state_dir_falls_back_to_the_home_state_directory() {
+        let home = temporary_home();
+        let _guard = VarGuard::set([("XDG_STATE_HOME", None), ("HOME", Some(home.as_str()))]);
+        assert_eq!(
+            Environment::default().state_dir().unwrap(),
+            PathBuf::from(&home)
+                .join(".local")
+                .join("state")
+                .join("dotrift")
+        );
+    }
+
+    #[test]
+    fn global_config_path_prefers_the_config_home() {
+        let config = temp_dir_with_name("1");
+        let _guard = VarGuard::set([
+            ("XDG_CONFIG_HOME", Some(config.to_str().unwrap())),
+            ("HOME", None),
+        ]);
+        assert_eq!(
+            Environment::default().global_config_path().unwrap(),
+            config.join("dotrift").join("config.toml")
+        );
+    }
+
+    #[test]
+    fn default_source_dir_uses_the_data_home() {
+        let data = temp_dir_with_name("1");
+        let _guard = VarGuard::set([("XDG_DATA_HOME", Some(data.to_str().unwrap()))]);
+        assert_eq!(
+            Environment::default().default_source_dir().unwrap(),
+            data.join("dotfiles")
+        );
+    }
+
+    #[test]
+    fn default_target_dir_is_the_home_directory() {
+        let home = tempfile::tempdir().expect("cannot create temp dir");
+        let _guard = VarGuard::set([("HOME", Some(home.path().to_str().unwrap()))]);
+        assert_eq!(
+            Environment::default().default_target_dir().unwrap(),
+            home.path()
+        );
+    }
+}

@@ -884,3 +884,122 @@ fn target_inside_source_rejected_as_overlapping() {
     assert_error_chain(&error, "overlap");
     assert!(scenario.env.database().managed_paths().unwrap().is_empty());
 }
+
+#[test]
+fn a_rule_cannot_mix_symlink_with_a_mode() {
+    let scenario = ApplyScenario::new(|source, _target| {
+        fs::write(source.join("file1"), "content1").unwrap();
+        r#"
+[portal]
+"file1" = "file1"
+
+[rule]
+"file1" = { type = "symlink", mode = "600" }
+"#
+    });
+
+    let error = config::read(
+        &scenario.source,
+        Some(scenario.target.clone()),
+        scenario.env.env(),
+        false,
+    )
+    .unwrap_err();
+
+    assert_error_chain(&error, "`mode` cannot be used with `type` `symlink`");
+}
+
+fn make_fifo(path: &std::path::Path) {
+    use std::ffi::CString;
+
+    let name = CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+}
+
+#[test]
+fn a_literal_directory_portal_rejects_a_special_child() {
+    let scenario = ApplyScenario::new(|source, _target| {
+        fs::write(source.join("file1"), "content1").unwrap();
+        fs::create_dir(source.join("dir1")).unwrap();
+        make_fifo(&source.join("dir1/fifo1"));
+        r#"
+[portal]
+"dir1" = "dir1"
+"#
+    });
+
+    let error = config::read(
+        &scenario.source,
+        Some(scenario.target.clone()),
+        scenario.env.env(),
+        false,
+    )
+    .unwrap_err();
+
+    assert_error_chain(
+        &error,
+        format!(
+            "source path `{}` is not a regular file",
+            scenario.source.join("dir1/fifo1").display()
+        )
+        .as_str(),
+    );
+}
+
+#[test]
+fn a_wildcard_portal_rejects_a_special_match() {
+    let scenario = ApplyScenario::new(|source, _target| {
+        fs::write(source.join("file1"), "content1").unwrap();
+        make_fifo(&source.join("fifo2"));
+        r#"
+[portal]
+"*" = "target1"
+"#
+    });
+
+    let error = config::read(
+        &scenario.source,
+        Some(scenario.target.clone()),
+        scenario.env.env(),
+        false,
+    )
+    .unwrap_err();
+
+    assert_error_chain(
+        &error,
+        format!(
+            "source path `{}` is not a regular file",
+            scenario.source.join("fifo2").display()
+        )
+        .as_str(),
+    );
+}
+
+#[test]
+fn a_literal_portal_rejects_a_special_source() {
+    let scenario = ApplyScenario::new(|source, _target| {
+        fs::write(source.join("file1"), "content1").unwrap();
+        make_fifo(&source.join("fifo1"));
+        r#"
+[portal]
+"fifo1" = "fifo1"
+"#
+    });
+
+    let error = config::read(
+        &scenario.source,
+        Some(scenario.target.clone()),
+        scenario.env.env(),
+        false,
+    )
+    .unwrap_err();
+
+    assert_error_chain(
+        &error,
+        format!(
+            "source path `{}` is not a regular file",
+            scenario.source.join("fifo1").display()
+        )
+        .as_str(),
+    );
+}

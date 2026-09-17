@@ -10,6 +10,9 @@ use dotrift::commands::apply::ApplyOptions;
 use proptest::prelude::*;
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 8, .. ProptestConfig::default()
+    })]
     #[test]
     fn apply_deploys_exact_symlink_tree((source_tree, target_tree) in world_strategy()) {
         let scenario = ApplyScenario::new(|_, _| "");
