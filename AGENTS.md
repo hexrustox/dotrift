@@ -1,55 +1,26 @@
-## Agent skills
-
-### Issue tracker
-
-Issues are tracked in GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-The five canonical triage-role labels are used as-is. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Multi-context: root `CONTEXT-MAP.md` points at per-context `CONTEXT.md` files, with ADRs in `docs/adr/`. See `docs/agents/domain.md`.
-
-### Test data
-
-See `docs/agents/test-data.md`.
-
-**Authoritative behavior contract:** `spec/**/*.md` (root) and `<workspace>/spec/*.md` (per workspace member). Consult them before changing any behavior.
-
-## Workspace overview
-
-Cargo workspace (Cargo.toml):
-- `dotrift` (root, bin): `src/main.rs` entrypoint.
-- `tui` (member): interactive prompt library.
-- `templater` (member): the standalone template engine.
-- `demo` (member): `prompt` bin exercising the interactive apply prompt.
-
-### Legacy code
-
-Source files under `legacy/` are archived from a prior implementation. New code
-may read them for reference but must never copy from them. The same applies to
-specs archived under `legacy/` — reference only, never authoritative; new specs
-live in `spec/`.
-
-## Directory conventions
-
-- Modules, all crates (root or workspace): independent/shared modules live
-  flat at `src/*.rs`; related modules group in `src/<group>/*.rs` with a
-  `<group>/mod.rs`. Never use the `<group>.rs` + `<group>/*.rs` layout.
-- Integration tests sit in root `tests/`, one file per command/behavior;
-  shared helpers in `tests/common/mod.rs`, insta snapshots in
-  `tests/snapshots/`.
-- Workspace members are self-contained in their directory (`tui/`,
-  `templater/`, `demo/`): same `src/` + `tests/` split, plus a per-crate
-  `spec/` (authoritative) and `legacy/` archive. Benches only exist in
-  `templater/benches/`.
-- Extra binaries go in `<crate>/src/bin/` (e.g., `demo/src/bin/prompt.rs`).
-
 ## Commands
 
-- Build / check / run: `cargo build`, `cargo check`, `cargo run -- <args>`
-- Tests: `cargo test` (all workspace); `cargo test -p templater` or `-p tui`
-  for a single crate; `cargo test --test apply` for one integration file.
-- Lint/format: `cargo fmt`, `cargo clippy`
+- Run the affected tests, fix failures caused by the requested change, and
+  rerun them without asking at each step. Done when they pass. The suite uses
+  disposable fixtures and touches nothing outside `target/`; fixture rules
+  live in `docs/agents/test-data.md`.
+- Snapshot tests use `insta`; accept changed snapshots with `cargo insta review`.
+
+## Scope
+
+- Operate inside this repo; `target/` is generated and never edited.
+- Use `legacy/` (in this root, `templater/legacy/`, and `tui/legacy/`) as
+  read-only reference when behavior questions aren't answered by `spec/`;
+  never copy code from it into current sources — it predates the rewrite
+  and doesn't meet current standards. `TEST-REWRITE-PLAN.md` tracks the
+  port; done with a legacy lookup when the spec answer supersedes it.
+- `spec/` is the behavioral contract. Use `spec/CONTEXT.md` for domain terms
+  and `spec/commands/<command>.md` when changing that command; `templater/`
+  and `tui/` carry their own specs in their own dirs.
+
+## Decisions
+
+- Use `docs/adr/` before changing apply, preflight, or template semantics;
+  ADRs explain non-obvious rules there (render-before-parse, apply-never-prunes,
+  preflight best-effort). Done when the change matches the relevant ADR or
+  an update to it is included.
