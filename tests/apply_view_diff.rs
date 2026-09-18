@@ -4,8 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use common::{
-    ApplyScenario, PagerChoice, Prompt, argv_capture_script, capture_script, capture_script_named,
-    config_pager_toml, resolve_pager, snapshot_settings, test_name,
+    ApplyScenario, PagerChoice, Prompt, argv_capture_script, argv_diff_script, capture_script,
+    capture_script_named, config_diff_toml, config_pager_toml, diff_script, resolve_pager,
+    snapshot_settings, test_name,
 };
 use dotrift::deploy::ObstructionChoice;
 use test_case::test_case;
@@ -43,6 +44,14 @@ const DIFF_PROMPTS: [ObstructionChoice; 2] = [ObstructionChoice::ViewDiff, Obstr
 
 fn script_string(path: &Path) -> String {
     path.to_str().unwrap().to_owned()
+}
+
+fn argv_lines(output: &Path) -> Vec<String> {
+    fs::read_to_string(output)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect()
 }
 
 fn view_diff_and_skip(scenario: &ApplyScenario) {
@@ -202,4 +211,236 @@ fn failing_configured_pager_fails_the_run_without_falling_back() {
         "{rendered}"
     );
     assert!(!env_output.exists());
+}
+
+#[test]
+fn configured_diff_command_receives_substituted_placeholders() {
+    let scenario = ApplyScenario::new(copy_setup);
+    let (script, output) = argv_diff_script(&scenario.env);
+    scenario.env.write_global_config(&config_diff_toml(
+        &script,
+        &[
+            "t:${target}",
+            "s:${source}",
+            "tl:${target-label}",
+            "sl:${source-label}",
+        ],
+    ));
+    let _guard = scenario
+        .env
+        .set_vars([("DOTRIFT_PAGER", None), ("PAGER", None)]);
+    view_diff_and_skip(&scenario);
+
+    let target = scenario.target.join("file2");
+    let source = scenario.source.join("file1");
+    assert_eq!(
+        argv_lines(&output),
+        [
+            format!("t:{}", target.display()),
+            format!("s:{}", source.display()),
+            format!("tl:{}", target.display()),
+            format!("sl:{}", source.display()),
+        ]
+    );
+}
+
+#[test]
+fn configured_diff_command_appends_both_paths_when_args_name_neither() {
+    let scenario = ApplyScenario::new(copy_setup);
+    let (script, output) = argv_diff_script(&scenario.env);
+    scenario
+        .env
+        .write_global_config(&config_diff_toml(&script, &["-u"]));
+    let _guard = scenario
+        .env
+        .set_vars([("DOTRIFT_PAGER", None), ("PAGER", None)]);
+    view_diff_and_skip(&scenario);
+
+    let target = scenario.target.join("file2");
+    let source = scenario.source.join("file1");
+    assert_eq!(
+        argv_lines(&output),
+        [
+            "-u".to_owned(),
+            target.to_string_lossy().into_owned(),
+            source.to_string_lossy().into_owned(),
+        ]
+    );
+}
+
+#[test]
+fn configured_diff_command_keeps_embedded_form_as_one_argument() {
+    let scenario = ApplyScenario::new(copy_setup);
+    let (script, output) = argv_diff_script(&scenario.env);
+    scenario
+        .env
+        .write_global_config(&config_diff_toml(&script, &["--pair=${target}:${source}"]));
+    let _guard = scenario
+        .env
+        .set_vars([("DOTRIFT_PAGER", None), ("PAGER", None)]);
+    view_diff_and_skip(&scenario);
+
+    let target = scenario.target.join("file2");
+    let source = scenario.source.join("file1");
+    assert_eq!(
+        argv_lines(&output),
+        [format!("--pair={}:{}", target.display(), source.display())]
+    );
+}
+
+#[test]
+fn configured_diff_command_gets_raw_labels_and_rendered_source_for_a_template() {
+    let scenario = ApplyScenario::new(template_setup);
+    let script = diff_script(
+        &scenario.env,
+        "script1",
+        "for arg in \"$@\"; do\n  printf '%s\\n' \"$arg\"\n  if [ -f \"$arg\" ]; then cat \"$arg\"; fi\ndone\n",
+    );
+    scenario.env.write_global_config(&config_diff_toml(
+        &script,
+        &[
+            "${target-label}",
+            "${source-label}",
+            "${target}",
+            "${source}",
+        ],
+    ));
+    let (pager, pager_output) = capture_script(&scenario.env);
+    let pager_value = script_string(&pager);
+    let _guard = scenario.env.set_vars([
+        ("DOTRIFT_PAGER", Some(pager_value.as_str())),
+        ("PAGER", None),
+    ]);
+    view_diff_and_skip(&scenario);
+
+    let paged = fs::read_to_string(&pager_output).unwrap();
+    let target = scenario.target.join("file2");
+    let source = scenario.source.join("file1");
+    // Each path is followed by its content: the labels point at the raw
+    // target and the template source, while `${source}` is the rendered
+    // output.
+    let rendered_path = paged.lines().nth(6).unwrap().to_owned();
+    assert_eq!(
+        paged.lines().collect::<Vec<_>>(),
+        &[
+            target.to_str().unwrap(),
+            "content1",
+            source.to_str().unwrap(),
+            "{{ str }}",
+            target.to_str().unwrap(),
+            "content1",
+            rendered_path.as_str(),
+            "str",
+        ][..],
+        "{paged}"
+    );
+    assert_ne!(rendered_path, source.to_str().unwrap());
+}
+
+#[test]
+fn configured_diff_command_flows_through_the_configured_pager() {
+    let scenario = ApplyScenario::new(copy_setup);
+    let (pager, pager_output) = capture_script(&scenario.env);
+    let diff = diff_script(&scenario.env, "script2", "printf 'DIFF-OUTPUT\\n'\n");
+    scenario.env.write_global_config(&format!(
+        "{}\n{}",
+        config_pager_toml(&pager, &[]),
+        config_diff_toml(&diff, &[])
+    ));
+    let _guard = scenario
+        .env
+        .set_vars([("DOTRIFT_PAGER", None), ("PAGER", None)]);
+    view_diff_and_skip(&scenario);
+
+    let paged = fs::read_to_string(&pager_output).unwrap();
+    assert_eq!(paged, "DIFF-OUTPUT\n", "{paged}");
+}
+
+#[test]
+fn empty_configured_diff_command_uses_the_builtin_diff() {
+    let scenario = ApplyScenario::new(copy_setup);
+    let (pager, pager_output) = capture_script(&scenario.env);
+    let pager_value = script_string(&pager);
+    let _guard = scenario.env.set_vars([
+        ("DOTRIFT_PAGER", Some(pager_value.as_str())),
+        ("PAGER", None),
+    ]);
+    scenario
+        .env
+        .write_global_config("[diff]\ncommand = ''\nargs = ['--bogus-flag']\n");
+    view_diff_and_skip(&scenario);
+
+    let paged = fs::read_to_string(&pager_output).unwrap();
+    assert!(
+        paged.contains("-content1") && paged.contains("+content2"),
+        "{paged}"
+    );
+    assert!(!paged.contains("--bogus-flag"), "{paged}");
+}
+
+#[test]
+fn failing_configured_diff_command_fails_the_run() {
+    let scenario = ApplyScenario::new(copy_setup);
+    let missing = scenario.env.path("file3");
+    let (pager, pager_output) = capture_script(&scenario.env);
+    scenario
+        .env
+        .write_global_config(&config_diff_toml(&missing, &[]));
+    let pager_value = script_string(&pager);
+    let _guard = scenario.env.set_vars([
+        ("DOTRIFT_PAGER", Some(pager_value.as_str())),
+        ("PAGER", None),
+    ]);
+
+    let prompter = Prompt::sequence(DIFF_PROMPTS);
+    let error = scenario.try_run_with_prompter(&prompter).unwrap_err();
+
+    let rendered = format!("{error}");
+    assert!(
+        rendered.contains("cannot run the configured diff"),
+        "{rendered}"
+    );
+    assert!(!pager_output.exists());
+}
+
+#[test]
+fn exit_2_from_configured_diff_command_fails_the_run() {
+    let scenario = ApplyScenario::new(copy_setup);
+    let script = diff_script(&scenario.env, "script3", "exit 2\n");
+    scenario
+        .env
+        .write_global_config(&config_diff_toml(&script, &[]));
+    let _guard = scenario
+        .env
+        .set_vars([("DOTRIFT_PAGER", None), ("PAGER", None)]);
+
+    let prompter = Prompt::sequence(DIFF_PROMPTS);
+    let error = scenario.try_run_with_prompter(&prompter).unwrap_err();
+
+    let rendered = format!("{error}");
+    assert!(rendered.contains("exited with an error"), "{rendered}");
+}
+
+#[test]
+fn exit_1_from_configured_diff_command_is_normal() {
+    let scenario = ApplyScenario::new(copy_setup);
+    let script = diff_script(
+        &scenario.env,
+        "script4",
+        "printf 'DIFF-OUTPUT\\n'\nexit 1\n",
+    );
+    scenario
+        .env
+        .write_global_config(&config_diff_toml(&script, &[]));
+    let (pager, pager_output) = capture_script(&scenario.env);
+    let pager_value = script_string(&pager);
+    let _guard = scenario.env.set_vars([
+        ("DOTRIFT_PAGER", Some(pager_value.as_str())),
+        ("PAGER", None),
+    ]);
+
+    view_diff_and_skip(&scenario);
+
+    let paged = fs::read_to_string(&pager_output).unwrap();
+    assert_eq!(paged, "DIFF-OUTPUT\n", "{paged}");
 }

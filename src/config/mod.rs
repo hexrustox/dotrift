@@ -21,7 +21,7 @@ pub mod global;
 mod portals;
 
 pub(crate) use data::DataFile;
-pub use global::{GlobalConfig, PagerCommand};
+pub use global::{DiffCommand, GlobalConfig, PagerCommand};
 
 const GLOB_MATCH_OPTIONS: MatchOptions = MatchOptions {
     case_sensitive: true,

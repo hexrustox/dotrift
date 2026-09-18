@@ -19,7 +19,7 @@ use templater::value::Value;
 use tui::prompt::{PromptError, PromptOption};
 
 use crate::{
-    config::{self, DeployType, GlobalConfig, PagerCommand},
+    config::{self, DeployType, DiffCommand, GlobalConfig, PagerCommand},
     render::RenderRegistry,
     report::diff_sink,
 };
@@ -107,7 +107,8 @@ impl Prompter for RealPrompter {
     }
 }
 
-/// Real differ backed by `diff -u` plus the pager chain.
+/// Real differ backed by the configured diff command (or the built-in
+/// `diff -u`) plus the pager chain.
 #[derive(Debug, Default)]
 pub(crate) struct RealDiffer;
 
@@ -277,6 +278,7 @@ pub(crate) fn view_diff(
     let source = rendered
         .as_ref()
         .map_or(entry.source_path.as_path(), |path| path.as_path());
+    let diff = global_config.diff();
 
     std::io::stdout().flush().map_err(|error| miette!(error))?;
 
@@ -288,33 +290,39 @@ pub(crate) fn view_diff(
         PagerSelection::EnvDotrift(command) => {
             let child = spawn_pager(&command)
                 .map_err(|error| miette!(error).wrap_err("cannot run DOTRIFT_PAGER"))?;
-            diff_through(child, target, &entry.source_path, source)
+            diff_through(child, target, &entry.source_path, source, diff)
         }
         PagerSelection::Config(pager) => {
             let child = spawn_config_pager(pager)
                 .map_err(|error| miette!(error).wrap_err("cannot run the configured pager"))?;
-            diff_through(child, target, &entry.source_path, source)
+            diff_through(child, target, &entry.source_path, source, diff)
         }
         PagerSelection::EnvPager(command) => match spawn_pager(&command) {
-            Ok(child) => diff_through(child, target, &entry.source_path, source),
+            Ok(child) => diff_through(child, target, &entry.source_path, source, diff),
             Err(_) => {
                 let mut output = diff_sink();
-                run_diff_into(target, &entry.source_path, source, &mut output)
+                run_diff_into(target, &entry.source_path, source, diff, &mut output)
             }
         },
         PagerSelection::Stdout => {
             let mut output = diff_sink();
-            run_diff_into(target, &entry.source_path, source, &mut output)
+            run_diff_into(target, &entry.source_path, source, diff, &mut output)
         }
     }
 }
 
-fn diff_through(mut child: Child, target: &Path, source_label: &Path, source: &Path) -> Result<()> {
+fn diff_through(
+    mut child: Child,
+    target: &Path,
+    source_label: &Path,
+    source: &Path,
+    diff: Option<&DiffCommand>,
+) -> Result<()> {
     let mut stdin = child
         .stdin
         .take()
         .ok_or_else(|| miette!("pager stdin is unavailable"))?;
-    run_diff_into(target, source_label, source, &mut stdin)?;
+    run_diff_into(target, source_label, source, diff, &mut stdin)?;
     drop(stdin);
     child.wait().map_err(|error| miette!(error))?;
     Ok(())
@@ -324,28 +332,111 @@ fn run_diff_into<W: std::io::Write>(
     target: &Path,
     source_label: &Path,
     source: &Path,
+    diff: Option<&DiffCommand>,
     dest: &mut W,
 ) -> Result<()> {
-    let mut child = Command::new("diff")
-        .arg("-u")
-        .arg("--label")
-        .arg(target)
-        .arg("--label")
-        .arg(source_label)
-        .arg(target)
-        .arg(source)
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|error| miette!(error).wrap_err("cannot run diff"))?;
+    let mut child = match diff {
+        Some(diff) => {
+            let args = substitute_diff_args(&diff.args, target, source_label, source);
+            Command::new(&diff.command)
+                .args(args)
+                .stdout(Stdio::piped())
+                .spawn()
+                .map_err(|error| {
+                    miette!(error).wrap_err(format!(
+                        "cannot run the configured diff command `{}`",
+                        diff.command
+                    ))
+                })?
+        }
+        None => Command::new("diff")
+            .arg("-u")
+            .arg("--label")
+            .arg(target)
+            .arg("--label")
+            .arg(source_label)
+            .arg(target)
+            .arg(source)
+            .stdout(Stdio::piped())
+            .spawn()
+            .map_err(|error| miette!(error).wrap_err("cannot run diff"))?,
+    };
     let mut stdout = child
         .stdout
         .take()
         .ok_or_else(|| miette!("diff stdout is unavailable"))?;
     std::io::copy(&mut stdout, dest).map_err(|error| miette!(error))?;
-    if child.wait().map_err(|error| miette!(error))?.code() == Some(2) {
-        return Err(miette!("diff exited with an error"));
+    let status = child.wait().map_err(|error| miette!(error))?;
+    if status.code() == Some(2) {
+        return Err(match diff {
+            Some(diff) => miette!(
+                "the configured diff command `{}` exited with an error",
+                diff.command
+            ),
+            None => miette!("diff exited with an error"),
+        });
     }
     Ok(())
+}
+
+/// Substitutes the diff placeholders textually, keeping each element a single
+/// argument, and appends the compared paths when args name neither of them
+/// (`spec/global-config.md § Placeholder substitution`).
+fn substitute_diff_args(
+    args: &[String],
+    target: &Path,
+    source_label: &Path,
+    source: &Path,
+) -> Vec<String> {
+    let target = target.to_string_lossy();
+    let source_label = source_label.to_string_lossy();
+    let source = source.to_string_lossy();
+    let mut names_compared_files = false;
+    let substituted = args
+        .iter()
+        .map(|arg| {
+            // One pass over the original text, so a substituted path is never
+            // itself rescanned for placeholders.
+            let mut result = String::with_capacity(arg.len());
+            let mut rest = arg.as_str();
+            while let Some(start) = rest.find("${") {
+                result.push_str(&rest[..start]);
+                let after = &rest[start + 2..];
+                let Some(end) = after.find('}') else {
+                    // Unreachable for validated args: `validate_placeholders`
+                    // rejects an unterminated `${` at config load.
+                    result.push_str(&rest[start..]);
+                    break;
+                };
+                let name = &after[..end];
+                match name {
+                    "target" => {
+                        result.push_str(&target);
+                        names_compared_files = true;
+                    }
+                    "source" => {
+                        result.push_str(&source);
+                        names_compared_files = true;
+                    }
+                    "target-label" => result.push_str(&target),
+                    "source-label" => result.push_str(&source_label),
+                    // Unreachable for validated args; pass the raw text
+                    // through rather than guess a replacement.
+                    _ => result.push_str(&rest[start..start + 2 + end + 1]),
+                }
+                rest = &after[end + 1..];
+            }
+            result.push_str(rest);
+            result
+        })
+        .collect::<Vec<_>>();
+    if names_compared_files {
+        return substituted;
+    }
+    substituted
+        .into_iter()
+        .chain([target.into_owned(), source.into_owned()])
+        .collect()
 }
 
 fn spawn_pager(command: &str) -> std::io::Result<Child> {

@@ -222,6 +222,222 @@ fn empty_pager_table_is_rejected_before_any_change() {
 }
 
 #[test]
+fn diff_table_with_command_and_args_is_accepted() {
+    let scenario = new_file_scenario();
+    scenario
+        .env
+        .write_global_config("[diff]\ncommand = \"file1\"\nargs = [\"-u\"]\n");
+
+    scenario.run();
+
+    assert_deployed_as_symlink(&scenario);
+}
+
+#[test]
+fn diff_table_alone_is_accepted() {
+    let scenario = new_file_scenario();
+    scenario
+        .env
+        .write_global_config("[diff]\ncommand = \"file1\"\n");
+
+    scenario.run();
+
+    assert_deployed_as_symlink(&scenario);
+}
+
+#[test]
+fn diff_label_placeholders_alone_are_accepted() {
+    let scenario = new_file_scenario();
+    scenario.env.write_global_config(
+        "[diff]\ncommand = \"file1\"\nargs = [\"${target-label}\", \"${source-label}\"]\n",
+    );
+
+    scenario.run();
+
+    assert_deployed_as_symlink(&scenario);
+}
+
+#[test]
+fn diff_embedded_placeholders_are_accepted() {
+    let scenario = new_file_scenario();
+    scenario.env.write_global_config(
+        "[diff]\ncommand = \"file1\"\nargs = [\"--pair=${target}:${source}\"]\n",
+    );
+
+    scenario.run();
+
+    assert_deployed_as_symlink(&scenario);
+}
+
+#[test]
+fn empty_diff_command_counts_as_unset_and_is_not_validated() {
+    let scenario = new_file_scenario();
+    scenario
+        .env
+        .write_global_config("[diff]\ncommand = \"\"\nargs = [\"${bogus}\"]\n");
+
+    scenario.run();
+
+    assert_deployed_as_symlink(&scenario);
+}
+
+#[test]
+fn whitespace_diff_command_counts_as_unset_and_is_not_validated() {
+    let scenario = new_file_scenario();
+    scenario
+        .env
+        .write_global_config("[diff]\ncommand = \"   \"\nargs = [\"${bogus}\"]\n");
+
+    scenario.run();
+
+    assert_deployed_as_symlink(&scenario);
+}
+
+#[test]
+fn unknown_diff_property_fails_run_before_any_change() {
+    let scenario = new_file_scenario();
+    scenario
+        .env
+        .write_global_config("[diff]\ncommand = \"file1\"\nstr = \"str\"\n");
+
+    let error = scenario.try_run().unwrap_err();
+
+    assert_error_chain(&error, "cannot parse");
+    assert_error_chain(&error, "unknown field");
+    assert_nothing_deployed(&scenario);
+}
+
+#[test]
+fn unknown_diff_key_fails_run_before_any_change() {
+    let scenario = new_file_scenario();
+    scenario.env.write_global_config("diff = \"str\"\n");
+
+    let error = scenario.try_run().unwrap_err();
+
+    assert_error_chain(&error, "cannot parse");
+    assert_error_chain(&error, "invalid type");
+    assert_nothing_deployed(&scenario);
+}
+
+#[test]
+fn empty_diff_table_is_rejected_before_any_change() {
+    let scenario = new_file_scenario();
+    scenario.env.write_global_config("[diff]\n");
+
+    let error = scenario.try_run().unwrap_err();
+
+    assert_error_chain(&error, "cannot parse");
+    assert_error_chain(&error, "missing field");
+    assert_nothing_deployed(&scenario);
+}
+
+#[test]
+fn diff_args_without_command_are_rejected_before_any_change() {
+    let scenario = new_file_scenario();
+    scenario
+        .env
+        .write_global_config("[diff]\nargs = [\"-u\"]\n");
+
+    let error = scenario.try_run().unwrap_err();
+
+    assert_error_chain(&error, "cannot parse");
+    assert_error_chain(&error, "missing field");
+    assert_nothing_deployed(&scenario);
+}
+
+#[test]
+fn non_string_diff_command_is_rejected_before_any_change() {
+    let scenario = new_file_scenario();
+    scenario.env.write_global_config("[diff]\ncommand = 1\n");
+
+    let error = scenario.try_run().unwrap_err();
+
+    assert_error_chain(&error, "cannot parse");
+    assert_error_chain(&error, "invalid type");
+    assert_nothing_deployed(&scenario);
+}
+
+#[test]
+fn diff_args_as_string_are_rejected_before_any_change() {
+    let scenario = new_file_scenario();
+    scenario
+        .env
+        .write_global_config("[diff]\ncommand = \"file1\"\nargs = \"str\"\n");
+
+    let error = scenario.try_run().unwrap_err();
+
+    assert_error_chain(&error, "cannot parse");
+    assert_error_chain(&error, "invalid type");
+    assert_nothing_deployed(&scenario);
+}
+
+#[test]
+fn non_string_diff_arg_is_rejected_before_any_change() {
+    let scenario = new_file_scenario();
+    scenario
+        .env
+        .write_global_config("[diff]\ncommand = \"file1\"\nargs = [\"str\", 1]\n");
+
+    let error = scenario.try_run().unwrap_err();
+
+    assert_error_chain(&error, "cannot parse");
+    assert_error_chain(&error, "invalid type");
+    assert_nothing_deployed(&scenario);
+}
+
+#[test]
+fn unknown_diff_placeholder_fails_run_before_any_change() {
+    let scenario = new_file_scenario();
+    scenario
+        .env
+        .write_global_config("[diff]\ncommand = \"file1\"\nargs = [\"${bogus}\"]\n");
+
+    let error = scenario.try_run().unwrap_err();
+
+    assert_error_chain(&error, "unknown placeholder");
+    assert_nothing_deployed(&scenario);
+}
+
+#[test]
+fn unterminated_diff_placeholder_fails_run_before_any_change() {
+    let scenario = new_file_scenario();
+    scenario
+        .env
+        .write_global_config("[diff]\ncommand = \"file1\"\nargs = [\"${target\"]\n");
+
+    let error = scenario.try_run().unwrap_err();
+
+    assert_error_chain(&error, "unterminated placeholder");
+    assert_nothing_deployed(&scenario);
+}
+
+#[test]
+fn diff_args_with_only_target_placeholder_fail_run_before_any_change() {
+    let scenario = new_file_scenario();
+    scenario
+        .env
+        .write_global_config("[diff]\ncommand = \"file1\"\nargs = [\"${target}\"]\n");
+
+    let error = scenario.try_run().unwrap_err();
+
+    assert_error_chain(&error, "must reference");
+    assert_nothing_deployed(&scenario);
+}
+
+#[test]
+fn diff_args_with_only_source_placeholder_fail_run_before_any_change() {
+    let scenario = new_file_scenario();
+    scenario
+        .env
+        .write_global_config("[diff]\ncommand = \"file1\"\nargs = [\"${source}\"]\n");
+
+    let error = scenario.try_run().unwrap_err();
+
+    assert_error_chain(&error, "must reference");
+    assert_nothing_deployed(&scenario);
+}
+
+#[test]
 fn pager_and_apply_together_are_accepted() {
     let scenario = new_file_scenario();
     scenario.env.write_global_config(

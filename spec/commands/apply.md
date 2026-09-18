@@ -207,10 +207,21 @@ fallback. For mixed file/directory kinds,
 symlinks resolving to directories, or special objects, `view diff` is omitted
 because no further useful information can be shown.
 
-The diff is produced by the external `diff -u` command, with the raw
-(unprettified) target and source paths as the diff labels. A `diff` exit
-status of 1 — differences found — is normal; exit status 2 fails the run;
-failure to start `diff` fails the run. The diff is displayed through the
+By default the diff is produced by the external `diff -u` command, with the
+raw (unprettified) target and source paths as the diff labels. The global
+config's `[diff]` table replaces this invocation outright: the configured
+`command` runs verbatim with its `args`, in which the placeholders
+`${target}`, `${source}`, `${target-label}`, and `${source-label}` are
+substituted textually before spawning (see `spec/global-config.md §
+[diff]`), and the target and source paths are appended as the final two
+arguments when `args` names neither of the two files. A configured command
+receives no `-u` flag and no `--label` arguments; a tool that wants the
+display names uses the label placeholders. A `diff` exit status of 1 —
+differences found — is normal; exit status 2 fails the run; failure to
+start the diff command fails the run. The same exit-status semantics apply
+to a configured diff command, which dotrift treats as a diff-compatible
+tool: exit status 1 is normal, exit status 2 is an error. The diff is
+displayed through the
 pager named by `$DOTRIFT_PAGER` when set, otherwise the pager configured in
 the global config (see `spec/global-config.md § [pager]`), otherwise `$PAGER`,
 otherwise printed to standard output. An empty or whitespace-only environment

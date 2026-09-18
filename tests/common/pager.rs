@@ -34,20 +34,24 @@ pub fn argv_capture_script(env: &TestEnv) -> (PathBuf, PathBuf) {
     (script, output)
 }
 
-pub fn config_pager_toml(command: &std::path::Path, args: &[&str]) -> String {
+pub(super) fn config_table_toml(table: &str, command: &std::path::Path, args: &[&str]) -> String {
     let args = args
         .iter()
         .map(|arg| format!("'{arg}'"))
         .collect::<Vec<_>>()
         .join(", ");
     if args.is_empty() {
-        format!("[pager]\ncommand = '{}'\n", command.display())
+        format!("[{table}]\ncommand = '{}'\n", command.display())
     } else {
         format!(
-            "[pager]\ncommand = '{}'\nargs = [{args}]\n",
+            "[{table}]\ncommand = '{}'\nargs = [{args}]\n",
             command.display()
         )
     }
+}
+
+pub fn config_pager_toml(command: &std::path::Path, args: &[&str]) -> String {
+    config_table_toml("pager", command, args)
 }
 
 pub enum PagerChoice {
