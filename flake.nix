@@ -6,7 +6,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-parts.url = "github:hercules-ci/flake-parts";
-    nix-capsule.url = "github:hexrustox/nix-capsule?ref=v0.10.3";
+    nix-capsule.url = "github:hexrustox/nix-capsule?ref=v0.11.1";
   };
 
   outputs =
