@@ -82,7 +82,10 @@ impl Reporter {
 
     /// Prints to standard error, never colored and never suppressed.
     pub fn warning(&self, args: fmt::Arguments) {
-        imp::emit_stderr(&format!("{args}\n"));
+        imp::emit_stderr(&format!(
+            "{} {args}\n",
+            apply_color("WARNING", Color::Yellow, self.color)
+        ));
     }
 }
 
@@ -196,7 +199,7 @@ mod tests {
         Reporter::always(false).line(format_args!("out"));
         Reporter::always(false).warning(format_args!("err"));
         assert_eq!(take_output(), "out\n");
-        assert_eq!(take_errors(), "err\n");
+        assert_eq!(take_errors(), "WARNING err\n");
         assert_eq!(take_output(), "");
     }
 

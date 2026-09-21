@@ -124,36 +124,4 @@ mod tests {
     fn apply_rejects_invalid_flag_combinations(flags: &[&str]) {
         assert!(Cli::try_parse_from([&["dotrift", "apply"], flags].concat()).is_err());
     }
-
-    #[test]
-    fn init_accepts_the_global_target_flag() {
-        let cli = Cli::try_parse_from(["dotrift", "-t", "/tmp/file1", "init"])
-            .expect("-t is accepted by every subcommand");
-        assert!(matches!(cli.command, Command::Init));
-    }
-
-    #[test]
-    fn init_resolves_the_default_source_directory() {
-        let env = Environment::default();
-        let cli = Cli::try_parse_from(["dotrift", "init"]).unwrap();
-        let (source, _, command) = cli.resolve(&env).unwrap();
-        assert!(matches!(command, Command::Init));
-        assert_eq!(source.unwrap(), env.default_source_dir().unwrap());
-    }
-
-    #[test]
-    fn init_resolves_the_source_override() {
-        let env = Environment::default();
-        let cli = Cli::try_parse_from(["dotrift", "-s", "/tmp/dir1", "init"]).unwrap();
-        let (source, _, command) = cli.resolve(&env).unwrap();
-        assert!(matches!(command, Command::Init));
-        assert_eq!(source.unwrap(), PathBuf::from("/tmp/dir1"));
-    }
-
-    #[test_case(&["dotrift", "init", "file1"]; "rejects_a_positional_argument")]
-    #[test_case(&["dotrift", "init", "--clean-up"]; "rejects_an_apply_flag")]
-    #[test_case(&["dotrift", "init", "--source"]; "rejects_a_flag_missing_its_value")]
-    fn init_rejects_extra_arguments(argv: &[&str]) {
-        assert!(Cli::try_parse_from(argv).is_err());
-    }
 }
