@@ -1,4 +1,3 @@
-// TODO add doc comments
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -6,33 +5,60 @@ use miette::Result;
 
 use crate::platform::{Environment, ensure_absolute};
 
+/// Deploy your dotfiles from a source directory to a target directory.
 #[derive(Debug, Parser)]
-#[command(name = "dotrift")]
+#[command(about, version)]
 pub struct Cli {
+    /// Directory holding your dotfiles and `dotrift.toml`.
+    ///
+    /// Defaults to `$XDG_DATA_HOME/dotfiles` (or `$HOME/.local/share/dotfiles`).
+    /// Relative paths resolve against the current directory.
     #[arg(short, long)]
     pub source: Option<PathBuf>,
+
+    /// Directory to deploy into.
+    ///
+    /// Overrides `target-directory` in `dotrift.toml`.
+    /// Relative paths resolve against the current directory.
     #[arg(short, long)]
     pub target: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Command,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Put your dotfiles in place in the target directory.
     Apply {
+        /// Remove files dotrift no longer deploys.
         #[arg(long)]
         clean_up: bool,
+
+        /// Also remove empty directories left behind (requires `--clean-up`).
         #[arg(long, requires = "clean_up")]
         prune_empty_dirs: bool,
+
+        /// Show what would happen without changing anything.
         #[arg(long, conflicts_with_all = ["verbose", "quiet"])]
         dry_run: bool,
+
+        /// Don't print the summary line.
         #[arg(long, conflicts_with = "verbose")]
         quiet: bool,
+
+        /// Print one line per file as it is processed.
         #[arg(long, conflicts_with = "quiet")]
         verbose: bool,
     },
+
+    /// Check the state of the files dotrift manages.
     Status,
+
+    /// Create a new source directory with example config files.
     Init,
+
+    /// Manage sets of template variables.
     Profile {
         #[command(subcommand)]
         command: ProfileCommand,
@@ -41,9 +67,22 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum ProfileCommand {
+    /// List all profiles, marking active ones.
     List,
-    Activate { name: String },
-    Deactivate { name: String },
+
+    /// Activate a profile.
+    Activate {
+        /// Name of the profile.
+        name: String,
+    },
+
+    /// Deactivate a profile.
+    Deactivate {
+        /// Name of the profile.
+        name: String,
+    },
+
+    /// Print the final variable values used by templates.
     Show,
 }
 
