@@ -15,7 +15,8 @@ by active profiles (see `spec/dotrift-data-toml.md § Profile resolution`).
 The context is resolved once per run and is the same context deployed
 templates receive. The render pipeline, in order:
 
-1. Read `dotrift_data.toml` (plain TOML; see `spec/dotrift-data-toml.md`).
+1. Read `dotrift_data.toml` (plain TOML; see
+   `spec/dotrift-data-toml.md § dotrift_data.toml`).
 2. Read the active-profile selectors from the state database (read-only; a
    missing database contributes no active profiles; a database error halts).
 3. Build the variable context.
@@ -53,7 +54,7 @@ target-directory = "/absolute/path"
 No other root-level keys are defined. Unknown keys and sections are rejected
 as configuration errors. There is no `version` field and no `ignore` field;
 ignored paths are configured in a separate `.dotriftignore` file (see
-`spec/dotriftignore.md`).
+`spec/dotriftignore.md § .dotriftignore`).
 
 ## `[portal]`
 

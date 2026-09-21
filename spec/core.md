@@ -113,7 +113,7 @@ CREATE TABLE active_profiles (
 
 Rows are read in ascending `activated_at` order, ties broken lexicographically
 by name. Activation and deactivation are performed by the `profile` command
-(see `spec/commands/profile.md`). The variable-context precedence algorithm is
+(see `spec/commands/profile.md § profile`). The variable-context precedence algorithm is
 defined in `spec/dotrift-data-toml.md § Profile resolution`; this table is
 only its storage.
 
@@ -121,7 +121,7 @@ only its storage.
 
 The read-only comparison answering "does the on-disk state of a target path
 match what the database last recorded dotrift writing there?" It is the
-shared logic behind the *managed path* term defined in `spec/CONTEXT.md`.
+shared logic behind the *managed path* term defined in `spec/CONTEXT.md § Language`.
 
 Given a target path on disk and a record keyed by that path:
 

@@ -3,8 +3,9 @@
 Manages template profiles: selecting, deselecting, listing, and previewing the
 resolved variable context. The profile definition format and the layering
 algorithm are specified in `spec/dotrift-data-toml.md § Profile resolution`;
-the `active_profiles` storage schema is defined in `spec/core.md`; the global
-CLI conventions are defined in `spec/commands/global.md`.
+the `active_profiles` storage schema is defined in `spec/core.md §
+active_profiles Table`; the global CLI conventions are defined in
+`spec/commands/global.md § CLI conventions`.
 
 **Usage:** `dotrift profile <SUBCOMMAND>`
 
@@ -36,7 +37,7 @@ the current data file — are not shown; they remain removable via
 2. Acquire the state lock (see `spec/core.md § State lock`).
 3. `INSERT OR REPLACE` into `active_profiles` with a fresh `activated_at`
    timestamp, strictly greater than every stored one (see `spec/core.md §
-   `spec/core.md § active_profiles Table`). Re-activating an
+   active_profiles Table`). Re-activating an
    already-active profile updates
    its timestamp, moving it to the end of the precedence order.
 4. Release the state lock.

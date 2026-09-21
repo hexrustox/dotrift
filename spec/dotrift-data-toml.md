@@ -38,7 +38,8 @@ when the profile is active.
   syntax requires it (for example `[profile."work/linux"]`).
 * **Keys and values:** same rules as `[variable]`.
 * **Multiple profiles** can be active simultaneously. Activation is performed
-  by `dotrift profile activate <name>` (see `spec/commands/profile.md`); the
+  by `dotrift profile activate <name>` (see `spec/commands/profile.md §
+  activate <name>`); the
   set of currently-active profiles is persisted in the `active_profiles` table
   (see `spec/core.md § active_profiles Table`). This spec owns the data file
   and the layering rules only; the storage schema and the activation command
@@ -66,7 +67,7 @@ coerced.
 When a template is evaluated — whether `dotrift.toml` or a deployed template —
 the variable context is built once per run by layering profiles over the base
 variables. `profile show` resolves the same context the same way (see
-`spec/commands/profile.md`):
+`spec/commands/profile.md § show`):
 
 1. The base variables from `[variable]` form the initial context.
 2. Each active profile overlays its bindings onto the context.

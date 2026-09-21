@@ -2,7 +2,7 @@
 
 An optional, per-user TOML file that configures dotrift across all source
 directories. It is distinct from the *control files* (see `spec/CONTEXT.md §
-Control file`), which live in the source directory and configure a single
+Language`), which live in the source directory and configure a single
 deployment; the global config configures dotrift itself.
 
 Unlike `dotrift.toml`, the file is never evaluated as a template: no

@@ -7,7 +7,7 @@ database and the target filesystem but never writes either, and it does not
 read the control files or resolve a desired deployment. The managed check is
 defined in `spec/core.md § Managed check`; the storage schema is defined in
 `spec/core.md § managed_paths Table`; the global CLI conventions are defined
-in `spec/commands/global.md`.
+in `spec/commands/global.md § CLI conventions`.
 
 **Usage:** `dotrift status`
 

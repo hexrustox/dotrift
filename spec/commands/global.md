@@ -37,6 +37,10 @@ No other global options are defined. There is no `--version`.
 The commands that read the control files — `apply`, `profile list`,
 `profile activate`, and `profile show` — consume `-s`. `status` and
 `profile deactivate` read no control files and accept `-s` as a no-op.
+`init` consumes `-s` as the source directory to initialize: it creates the
+directory and writes the control files into it (see
+`spec/commands/init.md § Pipeline`), so `§ Source directory requirement`
+does not apply.
 `-t` is accepted by every subcommand and consumed only by `apply`.
 
 ## CLI conventions
@@ -70,7 +74,7 @@ When the target directory is needed, it is resolved in order:
 
 1. `--target` CLI option, if provided.
 2. `target-directory` in `dotrift.toml`, if provided (must be absolute; see
-   `spec/dotrift-toml.md`).
+   `spec/dotrift-toml.md § target-directory`).
 3. the user's home directory.
 
 When `--target` is provided, the CLI override wins outright: the config-side
@@ -89,7 +93,7 @@ Which commands those are is pinned in [Per-command use](#per-command-use).
 
 Beyond the CLI surface, dotrift reads an optional per-user config file. Its
 location, schema, strictness, and failure semantics are specified in
-`spec/global-config.md`. It is currently consumed by `apply` only.
+`spec/global-config.md § Global config`. It is currently consumed by `apply` only.
 
 ## Output conventions
 
@@ -111,7 +115,8 @@ terminal and not disabled by the standard environment variables (for example
 stdout is not a terminal. Every command gates all of its output coloring on
 that single decision — there is no per-command or per-line opt-out, and no
 color-detection after startup for command output. The interactive prompt's
-styling is specified in `tui/spec/prompt.md` and is not governed by this rule.
+styling is specified in `tui/spec/prompt.md § Prompt Specification` and is not
+governed by this rule.
 
 Coloring never changes text content or layout: with colors disabled, the
 output is byte-identical plain text with the same words in the same order;

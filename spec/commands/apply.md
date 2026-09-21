@@ -16,9 +16,9 @@ stale entries are removed only under `--clean-up` (see
    - `dotrift.toml`, rendered as a template and parsed (see
      `spec/dotrift-toml.md § Rendering before parsing`, ADR-0001).
    - `dotrift_data.toml`, parsed as plain TOML (see
-     `spec/dotrift-data-toml.md`).
+     `spec/dotrift-data-toml.md § dotrift_data.toml`).
    - `.dotriftignore`, parsed as plain text (see
-     `spec/dotriftignore.md`).
+     `spec/dotriftignore.md § .dotriftignore`).
 4. Resolve the portal entries.
 5. Apply the ignore file's filtering stage (see
    `spec/dotriftignore.md § Filtering stage`).
@@ -155,7 +155,7 @@ reflects only the actions already completed.
 
 When the global config's `replace-identical` is enabled (see
 `spec/global-config.md § [apply]`; ADR-0019), an *identical obstruction* (see
-`spec/CONTEXT.md`) is replaced without prompting: it is removed exactly as a
+`spec/CONTEXT.md § Language`) is replaced without prompting: it is removed exactly as a
 `replace` decision would remove it, and the entry deploys. The check runs
 wherever a prompt would otherwise be raised for the entry's own target path —
 never for a parent obstruction (see
