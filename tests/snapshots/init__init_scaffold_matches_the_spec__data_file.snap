@@ -1,0 +1,13 @@
+---
+source: tests/init.rs
+assertion_line: 59
+expression: contents
+---
+# Base variables and profiles for template rendering.
+
+# [variable]
+# str = "str"
+# num = 1
+
+# [profile.profile1]
+# str = "profile1"

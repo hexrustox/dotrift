@@ -16,6 +16,12 @@ fn main() -> Result<(), Error> {
     let mut status = ExitStatus::Success;
     match command {
         Command::Status => dotrift::commands::status::run(&env, color)?,
+        Command::Init => {
+            let Some(source) = source else {
+                return Err(miette!("init requires a source directory"));
+            };
+            dotrift::commands::init::run(&source, &env, color)?
+        }
         Command::Apply {
             clean_up,
             prune_empty_dirs,

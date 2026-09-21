@@ -1,0 +1,18 @@
+---
+source: tests/init.rs
+assertion_line: 59
+expression: contents
+---
+# Maps source paths to target paths. Rendered as a template before
+# parsing: template tags in this file are evaluated, so keep examples
+# commented out unless you want them rendered.
+
+# target-directory = "/absolute/path"
+
+# [portal]
+# "config/**/*.toml" = ".config"
+# "file1" = ".file1"
+
+# [rule]
+# ".config/**" = { type = "copy" }
+# ".config/secrets/**" = { mode = "600" }

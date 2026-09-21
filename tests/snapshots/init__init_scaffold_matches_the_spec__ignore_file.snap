@@ -1,0 +1,12 @@
+---
+source: tests/init.rs
+assertion_line: 59
+expression: contents
+---
+# Excludes resolved target paths from deployment. Gitignore-style
+# patterns: a pattern containing no slash matches a file name at any
+# depth; a pattern containing a slash is anchored to the
+# target-directory root.
+
+# file1
+# dir1/**
