@@ -198,7 +198,8 @@ _Avoid_: scope, environment (overloaded terms in the templater spec)
 The dotrift-provided set of named functions filling the templater's
 host-provided *Function registry*, identical for `dotrift.toml` rendering
 and deployed templates. Most are pure functions of their arguments; some
-reach the process environment.
+reach the process environment. The set is enumerated with per-function
+rules in `spec/builtin-functions.md § Builtin functions`.
 _Avoid_: built-ins, stdlib
 
 **Template hash**:

@@ -1,4 +1,4 @@
-//! The builtin template functions (ADR-0021): the fixed function set filling
+//! The builtin template functions (ADR-0017): the fixed function set filling
 //! the templater's host-provided registry, identical for `dotrift.toml`
 //! rendering and deployed templates.
 
@@ -58,24 +58,38 @@ fn arg(args: &[Value], index: usize, expected: ValueType) -> Result<&Value, Regi
 }
 
 fn str_arg(args: &[Value], index: usize) -> Result<&str, RegistryError> {
-    let Value::Str(s) = arg(args, index, ValueType::Str)? else {
-        unreachable!("arg already checked the value type")
-    };
-    Ok(s)
+    match arg(args, index, ValueType::Str)? {
+        Value::Str(s) => Ok(s),
+        _ => unreachable!("arg already checked the value type"),
+    }
 }
 
 fn int_arg(args: &[Value], index: usize) -> Result<i64, RegistryError> {
-    let Value::Int(n) = arg(args, index, ValueType::Int)? else {
-        unreachable!("arg already checked the value type")
-    };
-    Ok(*n)
+    match arg(args, index, ValueType::Int)? {
+        Value::Int(n) => Ok(*n),
+        _ => unreachable!("arg already checked the value type"),
+    }
 }
 
 fn bool_arg(args: &[Value], index: usize) -> Result<bool, RegistryError> {
-    let Value::Bool(b) = arg(args, index, ValueType::Bool)? else {
-        unreachable!("arg already checked the value type")
-    };
-    Ok(*b)
+    match arg(args, index, ValueType::Bool)? {
+        Value::Bool(b) => Ok(*b),
+        _ => unreachable!("arg already checked the value type"),
+    }
+}
+
+fn list_arg(args: &[Value], index: usize) -> Result<&[Value], RegistryError> {
+    match arg(args, index, ValueType::List)? {
+        Value::List(items) => Ok(items),
+        _ => unreachable!("arg already checked the value type"),
+    }
+}
+
+fn map_arg(args: &[Value], index: usize) -> Result<&BTreeMap<String, Value>, RegistryError> {
+    match arg(args, index, ValueType::Map)? {
+        Value::Map(map) => Ok(map),
+        _ => unreachable!("arg already checked the value type"),
+    }
 }
 
 fn int_args(args: &[Value]) -> Result<Vec<i64>, RegistryError> {
@@ -91,6 +105,15 @@ fn custom(msg: impl Into<String>, indexes: &[usize]) -> RegistryError {
 
 fn receiver(msg: impl Into<String>) -> RegistryError {
     custom(msg, &[0])
+}
+
+fn fold_bools(args: &[Value], start: bool, stop: bool) -> Result<Value, RegistryError> {
+    for index in 0..args.len() {
+        if bool_arg(args, index)? == stop {
+            return Ok(Value::Bool(stop));
+        }
+    }
+    Ok(Value::Bool(start))
 }
 
 fn to_int(value: &Value) -> Result<i64, RegistryError> {
@@ -148,6 +171,34 @@ fn contains(args: &[Value]) -> Result<bool, RegistryError> {
     }
 }
 
+fn env_var(args: &[Value]) -> Result<Value, RegistryError> {
+    arg_count(args, 2)?;
+    let var = str_arg(args, 0)?;
+    let fallback = str_arg(args, 1)?;
+    Ok(Value::Str(
+        env::var(var).unwrap_or_else(|_| fallback.to_string()),
+    ))
+}
+
+fn home_dir(args: &[Value]) -> Result<Value, RegistryError> {
+    arg_count(args, 0)?;
+    let home = env::var("HOME")
+        .ok()
+        .filter(|home| !home.is_empty())
+        .or_else(|| dirs::home_dir().map(|path| path.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+    Ok(Value::Str(home))
+}
+
+fn join(args: &[Value]) -> Result<Value, RegistryError> {
+    min_arg_count(args, 2)?;
+    let sep = str_arg(args, 0)?;
+    let parts = (1..args.len())
+        .map(|index| str_arg(args, index))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Value::Str(parts.join(sep)))
+}
+
 fn enumerate(items: &[Value]) -> Vec<Value> {
     items
         .iter()
@@ -161,95 +212,11 @@ fn enumerate(items: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-impl Builtins {
-    fn env(&self, args: &[Value]) -> Result<Value, RegistryError> {
-        arg_count(args, 2)?;
-        let var = str_arg(args, 0)?;
-        let fallback = str_arg(args, 1)?;
-        Ok(Value::Str(
-            env::var(var).unwrap_or_else(|_| fallback.to_string()),
-        ))
-    }
-
-    fn home(&self, args: &[Value]) -> Result<Value, RegistryError> {
-        arg_count(args, 0)?;
-        let home = env::var("HOME")
-            .ok()
-            .filter(|home| !home.is_empty())
-            .or_else(|| dirs::home_dir().map(|path| path.to_string_lossy().into_owned()))
-            .unwrap_or_default();
-        Ok(Value::Str(home))
-    }
-
-    fn join(&self, args: &[Value]) -> Result<Value, RegistryError> {
-        min_arg_count(args, 2)?;
-        let sep = str_arg(args, 0)?;
-        let parts = (1..args.len())
-            .map(|index| str_arg(args, index))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Value::Str(parts.join(sep)))
-    }
-
-    fn add(&self, args: &[Value]) -> Result<Value, RegistryError> {
-        min_arg_count(args, 2)?;
-        Ok(Value::Int(int_args(args)?.into_iter().sum()))
-    }
-
-    fn mul(&self, args: &[Value]) -> Result<Value, RegistryError> {
-        min_arg_count(args, 2)?;
-        Ok(Value::Int(int_args(args)?.into_iter().product()))
-    }
-
-    fn sub(&self, args: &[Value]) -> Result<Value, RegistryError> {
-        arg_count(args, 2)?;
-        Ok(Value::Int(int_arg(args, 0)? - int_arg(args, 1)?))
-    }
-
-    fn div(&self, args: &[Value]) -> Result<Value, RegistryError> {
-        arg_count(args, 2)?;
-        let a = int_arg(args, 0)?;
-        let b = int_arg(args, 1)?;
-        if b == 0 {
-            return Err(custom("division by zero", &[]));
-        }
-        Ok(Value::Int(a / b))
-    }
-
-    fn and(&self, args: &[Value]) -> Result<Value, RegistryError> {
-        min_arg_count(args, 2)?;
-        for index in 0..args.len() {
-            if !bool_arg(args, index)? {
-                return Ok(Value::Bool(false));
-            }
-        }
-        Ok(Value::Bool(true))
-    }
-
-    fn or(&self, args: &[Value]) -> Result<Value, RegistryError> {
-        min_arg_count(args, 2)?;
-        for index in 0..args.len() {
-            if bool_arg(args, index)? {
-                return Ok(Value::Bool(true));
-            }
-        }
-        Ok(Value::Bool(false))
-    }
-
-    fn coalesce(&self, args: &[Value]) -> Result<Value, RegistryError> {
-        min_arg_count(args, 1)?;
-        Ok(args
-            .iter()
-            .find(|value| truthy(value))
-            .unwrap_or_else(|| args.last().expect("checked non-empty"))
-            .clone())
-    }
-}
-
 impl FunctionRegistry for Builtins {
     fn call(&self, name: &str, args: &[Value]) -> Result<Value, RegistryError> {
         match name {
-            "env" => self.env(args),
-            "home" => self.home(args),
+            "env" => env_var(args),
+            "home" => home_dir(args),
             "os" => {
                 arg_count(args, 0)?;
                 Ok(Value::Str(OS.to_string()))
@@ -287,7 +254,7 @@ impl FunctionRegistry for Builtins {
                         .collect(),
                 ))
             }
-            "join" => self.join(args),
+            "join" => join(args),
             "starts_with" => {
                 arg_count(args, 2)?;
                 let s = str_arg(args, 0)?;
@@ -324,21 +291,50 @@ impl FunctionRegistry for Builtins {
                 arg_count(args, 2)?;
                 Ok(Value::Bool(int_arg(args, 0)? <= int_arg(args, 1)?))
             }
-            "add" => self.add(args),
-            "sub" => self.sub(args),
-            "mul" => self.mul(args),
-            "div" => self.div(args),
+            "add" => {
+                min_arg_count(args, 2)?;
+                Ok(Value::Int(int_args(args)?.into_iter().sum()))
+            }
+            "sub" => {
+                arg_count(args, 2)?;
+                Ok(Value::Int(int_arg(args, 0)? - int_arg(args, 1)?))
+            }
+            "mul" => {
+                min_arg_count(args, 2)?;
+                Ok(Value::Int(int_args(args)?.into_iter().product()))
+            }
+            "div" => {
+                arg_count(args, 2)?;
+                let b = int_arg(args, 1)?;
+                if b == 0 {
+                    return Err(custom("division by zero", &[]));
+                }
+                Ok(Value::Int(int_arg(args, 0)? / b))
+            }
             "neg" => {
                 arg_count(args, 1)?;
                 Ok(Value::Int(-int_arg(args, 0)?))
             }
-            "and" => self.and(args),
-            "or" => self.or(args),
+            "and" => {
+                min_arg_count(args, 2)?;
+                fold_bools(args, true, false)
+            }
+            "or" => {
+                min_arg_count(args, 2)?;
+                fold_bools(args, false, true)
+            }
             "not" => {
                 arg_count(args, 1)?;
                 Ok(Value::Bool(!bool_arg(args, 0)?))
             }
-            "coalesce" => self.coalesce(args),
+            "coalesce" => {
+                min_arg_count(args, 1)?;
+                Ok(args
+                    .iter()
+                    .find(|value| truthy(value))
+                    .unwrap_or_else(|| args.last().expect("checked non-empty"))
+                    .clone())
+            }
             "is_truthy" => {
                 arg_count(args, 1)?;
                 Ok(Value::Bool(truthy(&args[0])))
@@ -361,46 +357,34 @@ impl FunctionRegistry for Builtins {
             }
             "first" => {
                 arg_count(args, 1)?;
-                let Value::List(items) = arg(args, 0, ValueType::List)? else {
-                    unreachable!("arg already checked the value type")
-                };
-                items
+                list_arg(args, 0)?
                     .first()
                     .cloned()
                     .ok_or_else(|| custom("first of an empty list", &[]))
             }
             "last" => {
                 arg_count(args, 1)?;
-                let Value::List(items) = arg(args, 0, ValueType::List)? else {
-                    unreachable!("arg already checked the value type")
-                };
-                items
+                list_arg(args, 0)?
                     .last()
                     .cloned()
                     .ok_or_else(|| custom("last of an empty list", &[]))
             }
             "keys" => {
                 arg_count(args, 1)?;
-                let Value::Map(map) = arg(args, 0, ValueType::Map)? else {
-                    unreachable!("arg already checked the value type")
-                };
                 Ok(Value::List(
-                    map.keys().map(|key| Value::Str(key.clone())).collect(),
+                    map_arg(args, 0)?
+                        .keys()
+                        .map(|key| Value::Str(key.clone()))
+                        .collect(),
                 ))
             }
             "values" => {
                 arg_count(args, 1)?;
-                let Value::Map(map) = arg(args, 0, ValueType::Map)? else {
-                    unreachable!("arg already checked the value type")
-                };
-                Ok(Value::List(map.values().cloned().collect()))
+                Ok(Value::List(map_arg(args, 0)?.values().cloned().collect()))
             }
             "enumerate" => {
                 arg_count(args, 1)?;
-                let Value::List(items) = arg(args, 0, ValueType::List)? else {
-                    unreachable!("arg already checked the value type")
-                };
-                Ok(Value::List(enumerate(items)))
+                Ok(Value::List(enumerate(list_arg(args, 0)?)))
             }
             _ => Err(RegistryError::Undefined { name: name.into() }),
         }

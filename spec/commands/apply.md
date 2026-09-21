@@ -282,8 +282,9 @@ runs too).
 
 The registry is valid only for the run that filled it: rendering is a pure
 function of the template bytes, the run's variable context, and the process
-environment — the latter reached only through builtin calls (ADR-0021) and
-constant for the process's lifetime — so identical inputs
+environment — the latter reached only through builtin calls (ADR-0017,
+`spec/builtin-functions.md § Builtin functions`) and constant for the
+process's lifetime — so identical inputs
 cannot produce different output within a run, but a variable-context or
 environment change between runs can. A run therefore empties
 the registry directory after acquiring the state lock, before reading the
