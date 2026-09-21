@@ -20,9 +20,11 @@ templates receive. The render pipeline, in order:
 2. Read the active-profile selectors from the state database (read-only; a
    missing database contributes no active profiles; a database error halts).
 3. Build the variable context.
-4. Render `dotrift.toml` with it. The templater's function registry is empty:
-   every function call is a template error. No environment variables are
-   injected implicitly.
+4. Render `dotrift.toml` with it. The templater's function registry is
+   dotrift's builtin functions (ADR-0021): builtins are callable, and any
+   other name is a template error. The process environment is reachable only
+   through builtin calls; nothing is injected into the variable context
+   implicitly.
 5. Check that the rendered output is valid UTF-8.
 6. Parse the rendered text as TOML.
 

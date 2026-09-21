@@ -5,19 +5,9 @@ use std::{
 };
 
 use miette::{Report, Result, WrapErr, miette};
-use templater::{Template, function::FunctionRegistry, value::Value};
+use templater::{Template, value::Value};
 
-// TODO impl functions
-struct NoFunctions;
-impl FunctionRegistry for NoFunctions {
-    fn call(
-        &self,
-        name: &str,
-        _: &[Value],
-    ) -> std::result::Result<Value, templater::error::RegistryError> {
-        Err(templater::error::RegistryError::Undefined { name: name.into() })
-    }
-}
+use super::Builtins;
 
 /// Why rendering a template stopped: the template itself, or the sink it was
 /// rendered into.
@@ -40,7 +30,7 @@ pub(crate) fn render_template_into(
         .map_err(|error| miette!(error))
         .wrap_err_with(|| format!("cannot read `{}`", path.display()))
         .map_err(RenderFailure::Template)?;
-    let result = template.render(writer, context, &NoFunctions);
+    let result = template.render(writer, context, &Builtins);
     match result {
         Ok(()) => Ok(()),
         Err(templater::error::Error::Io(error)) => Err(RenderFailure::Sink(error)),
@@ -111,6 +101,23 @@ mod tests {
         let path = template_in(&dir, b"{{ str }}\n");
         let output = render_template(&path, &context()).expect("cannot render template");
         assert_eq!(output, b"str\n");
+    }
+
+    #[test]
+    fn render_template_calls_builtins() {
+        let dir = tempdir().expect("cannot create temp dir");
+        let path = template_in(&dir, b"{{ upper(str) }}-{{ length(str) }}\n");
+        let output = render_template(&path, &context()).expect("cannot render template");
+        assert_eq!(output, b"STR-3\n");
+    }
+
+    #[test]
+    fn an_undefined_builtin_call_fails_as_a_template_failure() {
+        let dir = tempdir().expect("cannot create temp dir");
+        let path = template_in(&dir, b"{{ nope() }}\n");
+        let error =
+            render_template(&path, &context()).expect_err("an undefined function must fail");
+        assert!(error.to_string().contains("cannot render"), "{error}");
     }
 
     #[test]

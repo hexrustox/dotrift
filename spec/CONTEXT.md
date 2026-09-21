@@ -194,6 +194,13 @@ winning, with lexicographic profile-name tie-breaking. Resolved once per run;
 the same context.
 _Avoid_: scope, environment (overloaded terms in the templater spec)
 
+**Builtin functions**:
+The dotrift-provided set of named functions filling the templater's
+host-provided *Function registry*, identical for `dotrift.toml` rendering
+and deployed templates. Most are pure functions of their arguments; some
+reach the process environment.
+_Avoid_: built-ins, stdlib
+
 **Template hash**:
 The digest of a template's source bytes, computed before render and following
 symlinks. Keys the *template render registry* and the run's in-memory memo of

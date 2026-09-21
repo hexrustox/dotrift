@@ -281,10 +281,11 @@ both cases (see [Dry-run](#dry-run); ADR-0017's "per-run" reading covers dry
 runs too).
 
 The registry is valid only for the run that filled it: rendering is a pure
-function of the template bytes and the run's variable context (the
-templater's function registry is always empty, and no environment is
-injected), so identical inputs cannot produce different output within a run —
-but a variable-context change between runs can. A run therefore empties
+function of the template bytes, the run's variable context, and the process
+environment — the latter reached only through builtin calls (ADR-0021) and
+constant for the process's lifetime — so identical inputs
+cannot produce different output within a run, but a variable-context or
+environment change between runs can. A run therefore empties
 the registry directory after acquiring the state lock, before reading the
 control files, and empties it again best-effort before exiting, whatever the
 exit path (success, skips, cancellation, error). A killed run cannot empty
