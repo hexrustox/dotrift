@@ -1,5 +1,6 @@
 mod common;
 
+use std::fs;
 use std::path::Path;
 
 use common::{TestEnv, assert_error_chain, snapshot_settings, test_name};
@@ -63,6 +64,20 @@ fn profile_list_reports_nothing_without_data_file() {
     let source = env.source_dir();
 
     assert_eq!(run_list(&env, &source), "");
+}
+
+#[test]
+fn profile_list_treats_table_less_database_as_empty() {
+    let env = TestEnv::new();
+    let source = env.source_dir();
+    env.write_data_file(
+        "[profile.profile1]\nstr = \"content1\"\n\n[profile.profile2]\nstr = \"content2\"\n",
+    );
+    fs::create_dir_all(env.path("state")).unwrap();
+    // A valid, zero-byte SQLite file: parseable, but holding no tables.
+    fs::write(env.path("state/state.sqlite"), b"").unwrap();
+
+    assert_eq!(run_list(&env, &source), "profile1\nprofile2\n");
 }
 
 #[test]

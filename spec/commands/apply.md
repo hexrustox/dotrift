@@ -205,7 +205,10 @@ run has not yet rendered the template. A render failure shows the error and
 exits, and so does a registry failure: view diff has no direct-render
 fallback. For mixed file/directory kinds,
 symlinks resolving to directories, or special objects, `view diff` is omitted
-because no further useful information can be shown.
+because no further useful information can be shown. For a template entry, the
+labels are the target path and the entry's source path — the same paths any
+deploy diff would label — while the compared source file is the rendered
+output.
 
 By default the diff is produced by the external `diff -u` command, with the
 raw (unprettified) target and source paths as the diff labels. The global
@@ -216,11 +219,12 @@ substituted textually before spawning (see `spec/global-config.md §
 [diff]`), and the target and source paths are appended as the final two
 arguments when `args` names neither of the two files. A configured command
 receives no `-u` flag and no `--label` arguments; a tool that wants the
-display names uses the label placeholders. A `diff` exit status of 1 —
-differences found — is normal; exit status 2 fails the run; failure to
-start the diff command fails the run. The same exit-status semantics apply
-to a configured diff command, which dotrift treats as a diff-compatible
-tool: exit status 1 is normal, exit status 2 is an error. The diff is
+display names uses the label placeholders. A `diff` exit status of 0 or 1 —
+whether or not differences were found — is normal; every other exit status —
+including 2 and above — fails the run, as does the diff process dying by a
+signal; failure to start the diff command fails the run. The same
+exit-status semantics apply to a configured diff command, which dotrift treats
+as a diff-compatible tool: exit status 0 or 1 is normal, all else is an error. The diff is
 displayed through the
 pager named by `$DOTRIFT_PAGER` when set, otherwise the pager configured in
 the global config (see `spec/global-config.md § [pager]`), otherwise `$PAGER`,
@@ -271,16 +275,22 @@ is memoized in memory for the run, and a registry hit reuses the memoized
 digest as the deployed-content fingerprint without re-hashing the copied
 bytes.
 
+Every run — a dry run included — constructs the registry, because the
+identical-obstruction check for a `template` deploy needs rendered bytes in
+both cases (see [Dry-run](#dry-run); ADR-0017's "per-run" reading covers dry
+runs too).
+
 The registry is valid only for the run that filled it: rendering is a pure
 function of the template bytes and the run's variable context (the
 templater's function registry is always empty, and no environment is
 injected), so identical inputs cannot produce different output within a run —
-but a variable-context change between runs can. A real run therefore empties
+but a variable-context change between runs can. A run therefore empties
 the registry directory after acquiring the state lock, before reading the
 control files, and empties it again best-effort before exiting, whatever the
 exit path (success, skips, cancellation, error). A killed run cannot empty
 it; the next real run's start-of-run emptying disposes of its leftovers.
-`--dry-run` neither creates nor empties the registry.
+A dry run leaves nothing behind: the registry is emptied at the start of the
+run and removed again on drop, so a dry run's renders are transient.
 
 Registry infrastructure failures — the directory cannot be created or
 written — are silent for template deploys, which render directly into their
@@ -361,7 +371,11 @@ reporting for each entry what a real run would do — deploy a new target,
 replace a clean managed path, replace an identical obstruction without
 prompting, or require a user choice for any other obstruction — without
 prompting or changing anything under the target directory. Template
-entries are reported like copy entries, without rendering. Dry-run prints no
+entries render like a real run: the identical-obstruction check for a
+`template` deploy is truthful only with rendered bytes, so a dry run renders
+into the template render registry exactly as a real run does, and the
+registry is emptied again when the run drops it (see § Template render
+registry; ADR-0017). Dry-run prints no
 summary, and it conflicts with both `--quiet` and `--verbose`. A dry-run
 acquires the state lock like a real run: it fails when another `apply` holds
 the lock. Opening the state database creates the state artifacts it always
@@ -389,7 +403,11 @@ Each entry prints one line:
 Under `--clean-up`, dry-run additionally reports the stale-path removals the
 real run would perform, one `removed <path>` line per removal, and one
 `pruned <path>` line per directory `--prune-empty-dirs` would remove,
-following the same walk the real run performs. Relinquished records (missing
+following the same walk the real run performs. The prediction mirrors the
+real run's prune time — after deploys — so a directory on the path of any
+entry in the desired deployment counts as non-empty and is never reported as
+pruned, even when the only on-disk content it would hold is that to-be-deployed
+entry. Relinquished records (missing
 or modified stale paths) are reported by neither the real run nor the
 dry-run.
 

@@ -99,4 +99,6 @@ Errors halt execution before any filesystem change.
   empty profile name, is a configuration error.
 * **Unknown structure:** any root table or key other than `[variable]` and
   `[profile.<name>]` is rejected. Typos such as `[variables]` or `[profiles]`
-  fail rather than silently changing the variable context.
+  fail rather than silently changing the variable context. A childless
+  `[profile]` table — no `[profile.<name>]` subsections — is accepted as
+  defining no profiles.

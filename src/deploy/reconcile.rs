@@ -142,7 +142,11 @@ mod tests {
     }
 
     fn dry_registry(anchor: &Path) -> RenderRegistry {
-        RenderRegistry::acquire(&Environment::test_root(anchor), true)
+        // An unavailable registry: its directory cannot be created because a
+        // file occupies the path (`spec/commands/apply.md` ADR-0017).
+        let blocker = anchor.join("registry-dir");
+        fs::write(&blocker, b"").unwrap();
+        RenderRegistry::acquire(&Environment::test_root(anchor).with_registry_dir(blocker))
     }
 
     #[test_case(|t| t.join("file1") => None ; "target_directly_below_root_reports_no_obstruction")]
@@ -215,7 +219,7 @@ mod tests {
             &target.path().join("target1"),
             DeployType::Copy,
         );
-        let mut registry = RenderRegistry::acquire(&env, true);
+        let mut registry = RenderRegistry::acquire(&env);
 
         let decision = decide(
             &database,
@@ -439,7 +443,7 @@ mod tests {
         let mut registry = if dry_registry_setup {
             dry_registry(state.path())
         } else {
-            RenderRegistry::acquire(&env, false)
+            RenderRegistry::acquire(&env)
         };
 
         let decision = decide(

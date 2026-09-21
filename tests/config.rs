@@ -8,6 +8,7 @@ use dotrift::commands::apply::ApplyOptions;
 use dotrift::config::{self, DeployType};
 use dotrift::state::{Kind, hash_bytes};
 use templater::value::Value;
+use test_case::test_case;
 
 #[test]
 fn config_read_assembles_entries_and_variable_context() {
@@ -208,6 +209,47 @@ fn rendered_config_values_validated_like_literals() {
     let error = scenario.try_run().unwrap_err();
 
     assert_error_chain(&error, "invalid portal target path");
+    assert!(fs::symlink_metadata(scenario.target.join("file1")).is_err());
+    assert!(scenario.env.database().managed_paths().unwrap().is_empty());
+}
+
+#[test]
+fn unreadable_ignore_file_fails_as_configuration_error() {
+    // Probing a mode-000 file in a throw-away directory: environments that
+    // bypass permission checks (sandboxed shells, root) cannot express
+    // "unreadable" this way, so the scenario would exercise nothing.
+    let gate = tempfile::TempDir::new().unwrap();
+    let probe = gate.path().join("file1");
+    fs::write(&probe, "content1").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&probe, fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    if fs::File::open(&probe).is_ok() {
+        eprintln!("skipping: ambient permission model ignores mode 000");
+        return;
+    }
+
+    let scenario = ApplyScenario::new(|source, _target| {
+        fs::write(source.join("file1"), "content1").unwrap();
+        fs::write(source.join(".dotriftignore"), "/dir2\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(
+                source.join(".dotriftignore"),
+                fs::Permissions::from_mode(0o000),
+            )
+            .unwrap();
+        }
+        r#"
+[portal]
+"file1" = "file1"
+"#
+    });
+
+    let error = scenario.try_run().unwrap_err();
+
+    assert_error_chain(&error, ".dotriftignore");
     assert!(fs::symlink_metadata(scenario.target.join("file1")).is_err());
     assert!(scenario.env.database().managed_paths().unwrap().is_empty());
 }
@@ -883,6 +925,42 @@ fn target_inside_source_rejected_as_overlapping() {
 
     assert_error_chain(&error, "overlap");
     assert!(scenario.env.database().managed_paths().unwrap().is_empty());
+}
+
+#[test_case("-1" ; "negative_integer_mode_is_invalid")]
+#[test_case("4294967296" ; "integer_mode_above_u32_is_invalid")]
+#[test_case("1000" ; "integer_mode_above_octal_range_is_invalid")]
+fn an_integer_mode_outside_the_octal_range_is_invalid(toml_mode: &str) {
+    let scenario = ApplyScenario::new(|source, _target| {
+        fs::write(source.join("file1"), "content1").unwrap();
+        r#"
+[portal]
+"file1" = "file1"
+
+[rule]
+"file1" = { type = "copy" }
+"#
+    });
+    scenario.write_config(&format!(
+        r#"
+[portal]
+"file1" = "file1"
+
+[rule]
+"file1" = {{ type = "copy", mode = {} }}
+"#,
+        toml_mode
+    ));
+
+    let error = config::read(
+        &scenario.source,
+        Some(scenario.target.clone()),
+        scenario.env.env(),
+        false,
+    )
+    .unwrap_err();
+
+    assert_error_chain(&error, "invalid mode");
 }
 
 #[test]

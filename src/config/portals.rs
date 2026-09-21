@@ -159,8 +159,21 @@ fn resolve_kind(path: &Path) -> Result<ResolvedKind> {
         Ok(metadata) if metadata.is_file() => Ok(ResolvedKind::File),
         Ok(_) => Ok(ResolvedKind::Special),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ResolvedKind::Dangling),
-        Err(error) => Err(miette!(error))
-            .wrap_err_with(|| format!("cannot inspect source path `{}`", path.display())),
+        Err(error) => {
+            let cycle = error.raw_os_error() == Some(libc::ELOOP);
+            let wrapped = Err::<ResolvedKind, miette::Report>(miette!(error))
+                .wrap_err_with(|| format!("cannot inspect source path `{}`", path.display()));
+            if cycle {
+                Err(wrapped.expect_err("miette! is always Err")).wrap_err_with(|| {
+                    format!(
+                        "symlink cycle detected while inspecting `{}`",
+                        path.display()
+                    )
+                })
+            } else {
+                wrapped.map(|_| ResolvedKind::Special)
+            }
+        }
     }
 }
 
@@ -387,7 +400,7 @@ mod tests {
         |t| {
             std::os::unix::fs::symlink(t.join("link1"), t.join("link1")).unwrap();
             portal_map!("link1" => "dir1")
-        } => panics "cannot inspect source path";
+        } => panics "symlink cycle detected";
         "self_referential_symlink_is_rejected"
     )]
     #[test_case(
@@ -395,7 +408,7 @@ mod tests {
             std::os::unix::fs::symlink(t.join("link2"), t.join("link1")).unwrap();
             std::os::unix::fs::symlink(t.join("link1"), t.join("link2")).unwrap();
             portal_map!("link1" => "dir1")
-        } => panics "cannot inspect source path";
+        } => panics "symlink cycle detected";
         "mutual_symlink_cycle_is_rejected"
     )]
     #[test_case(

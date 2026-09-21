@@ -155,7 +155,7 @@ fn dry_run_creates_nothing_in_registry() {
 }
 
 #[test]
-fn dry_run_leaves_preexisting_registry_untouched() {
+fn dry_run_replaces_preexisting_registry_and_leaves_nothing() {
     let scenario = ApplyScenario::new(|source, _target| {
         fs::write(source.join("file1"), "{{ str }}\n").unwrap();
         r#"
@@ -177,10 +177,9 @@ fn dry_run_leaves_preexisting_registry_untouched() {
         ..Default::default()
     });
 
-    assert_eq!(
-        fs::read(registry.join("file1")).unwrap(),
-        b"content1",
-        "dry run must leave a preexisting registry untouched"
+    assert!(
+        !registry.join("file1").exists(),
+        "dry run must empty a preexisting registry like a real run"
     );
     assert!(
         !scenario.target.join("file1").exists(),

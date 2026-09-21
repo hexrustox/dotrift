@@ -74,4 +74,6 @@ deactivated.
 `profile` subcommands exit `0` on success and `1` on error: an undefined
 profile name in `activate`, an inactive profile in `deactivate`, an unreadable
 or malformed data file, or a state-lock or database failure. `list` and `show`
-always succeed: they report state, they do not check it.
+exit `0` whenever the data file and state database are readable — they report
+state, they do not check it — and fail like every other command when those
+inputs are unreadable.

@@ -418,7 +418,27 @@ fn exit_2_from_configured_diff_command_fails_the_run() {
     let error = scenario.try_run_with_prompter(&prompter).unwrap_err();
 
     let rendered = format!("{error}");
-    assert!(rendered.contains("exited with an error"), "{rendered}");
+    assert!(rendered.contains("exited with status"), "{rendered}");
+    assert!(rendered.contains("status 2"), "{rendered}");
+}
+
+#[test]
+fn exit_3_from_configured_diff_command_fails_the_run() {
+    let scenario = ApplyScenario::new(copy_setup);
+    let script = diff_script(&scenario.env, "script3", "exit 3\n");
+    scenario
+        .env
+        .write_global_config(&config_diff_toml(&script, &[]));
+    let _guard = scenario
+        .env
+        .set_vars([("DOTRIFT_PAGER", None), ("PAGER", None)]);
+
+    let prompter = Prompt::sequence(DIFF_PROMPTS);
+    let error = scenario.try_run_with_prompter(&prompter).unwrap_err();
+
+    let rendered = format!("{error}");
+    assert!(rendered.contains("exited with status"), "{rendered}");
+    assert!(rendered.contains("status 3"), "{rendered}");
 }
 
 #[test]

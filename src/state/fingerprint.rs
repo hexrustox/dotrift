@@ -350,7 +350,13 @@ mod tests {
     }
 
     fn dry_registry(anchor: &Path) -> RenderRegistry {
-        RenderRegistry::acquire(&crate::platform::Environment::test_root(anchor), true)
+        // An unavailable registry: its directory cannot be created because a
+        // file occupies the path (`spec/commands/apply.md` ADR-0017).
+        let blocker = anchor.join("registry-dir");
+        fs::write(&blocker, b"").unwrap();
+        RenderRegistry::acquire(
+            &crate::platform::Environment::test_root(anchor).with_registry_dir(blocker),
+        )
     }
 
     #[test_case(
@@ -430,11 +436,11 @@ mod tests {
             DeployType::Template,
         );
         let context = HashMap::from([("str".to_string(), Value::Str("str".into()))]);
-        let env = crate::platform::Environment::test_root(registry_root.path());
         let mut registry = if dry {
             dry_registry(source.path())
         } else {
-            RenderRegistry::acquire(&env, false)
+            let env = crate::platform::Environment::test_root(registry_root.path());
+            RenderRegistry::acquire(&env)
         };
 
         is_identical(&entry, &context, &mut registry)

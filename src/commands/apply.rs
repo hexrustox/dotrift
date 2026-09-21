@@ -78,7 +78,7 @@ pub fn run_with_options_and_prompter(
 ) -> Result<ExitStatus> {
     let _lock = StateLock::acquire(env)?;
     let global_config = GlobalConfig::load(env)?;
-    let mut registry = RenderRegistry::acquire(env, options.dry_run);
+    let mut registry = RenderRegistry::acquire(env);
     let deployment = config::read(source, target_override, env, color)?;
     let target = &deployment.target_directory;
 

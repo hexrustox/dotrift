@@ -41,16 +41,11 @@ pub(crate) struct RenderRegistry {
 }
 
 impl RenderRegistry {
-    /// Prepares the registry for a run. A dry run constructs nothing;
-    /// a real run empties and re-creates the registry directory, falling
-    /// back to no registry when that fails.
-    pub(crate) fn acquire(env: &Environment, dry_run: bool) -> Self {
-        if dry_run {
-            return Self {
-                dir: None,
-                memo: HashMap::new(),
-            };
-        }
+    /// Prepares the registry for a run — dry runs included, which render into
+    /// it for the identical-obstruction check and leave nothing behind on drop.
+    /// A real run empties and re-creates the registry directory, falling back
+    /// to no registry when that fails.
+    pub(crate) fn acquire(env: &Environment) -> Self {
         let dir = env.registry_dir();
         if clear_and_create(&dir) {
             Self {
@@ -166,7 +161,7 @@ mod tests {
 
         let template = root.path().join("file1");
         fs::write(&template, b"{{ str }}\n").expect("cannot write template");
-        let mut registry = RenderRegistry::acquire(&env, false);
+        let mut registry = RenderRegistry::acquire(&env);
 
         assert!(
             registry
@@ -180,7 +175,7 @@ mod tests {
     fn registry_entry_holds_the_render_with_owner_only_permissions() {
         let root = tempdir().expect("cannot create temp dir");
         let env = Environment::test_root(root.path());
-        let mut registry = RenderRegistry::acquire(&env, false);
+        let mut registry = RenderRegistry::acquire(&env);
 
         let template = root.path().join("file1");
         fs::write(&template, b"{{ str }}\n").expect("cannot write template");

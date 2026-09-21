@@ -306,7 +306,7 @@ pub(crate) fn cleanup(
         }
     }
     if dry_run && options.prune_empty_dirs {
-        report_dry_run_pruning(target_root, &planned_removals, report)?;
+        report_dry_run_pruning(target_root, &planned_removals, desired, report)?;
     }
     Ok((removed, pruned))
 }
@@ -314,6 +314,7 @@ pub(crate) fn cleanup(
 fn report_dry_run_pruning(
     target_root: &Path,
     removals: &HashSet<PathBuf>,
+    desired: &HashSet<PathBuf>,
     report: &Reporter,
 ) -> Result<()> {
     let mut planned = removals.clone();
@@ -330,7 +331,7 @@ fn report_dry_run_pruning(
             if directory == target_root || !directory.starts_with(target_root) {
                 break;
             }
-            if !would_be_empty(&directory, &planned)? {
+            if !would_be_empty(&directory, &planned, desired)? {
                 break;
             }
             report.outcome_line(format_args!(
@@ -345,7 +346,17 @@ fn report_dry_run_pruning(
     Ok(())
 }
 
-fn would_be_empty(path: &Path, removals: &HashSet<PathBuf>) -> Result<bool> {
+fn would_be_empty(
+    path: &Path,
+    removals: &HashSet<PathBuf>,
+    desired: &HashSet<PathBuf>,
+) -> Result<bool> {
+    // The real run prunes after deploying, so a directory on the path of an
+    // entry in the desired deployment is non-empty by clean-up time; mirror
+    // that here (`spec/commands/apply.md § Planning the removals`).
+    if desired.iter().any(|entry| entry.starts_with(path)) {
+        return Ok(false);
+    }
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
@@ -489,7 +500,42 @@ mod tests {
     } => true ; "directory_with_subdir_removed_reports_empty")]
     fn reports_would_be_empty_for(setup: impl Fn(&Path) -> Vec<PathBuf>) -> bool {
         let dir = tempdir().expect("cannot create temp dir");
-        would_be_empty(dir.path(), &HashSet::from_iter(setup(dir.path()))).unwrap()
+        would_be_empty(
+            dir.path(),
+            &HashSet::from_iter(setup(dir.path())),
+            &HashSet::new(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn desired_entry_parent_reports_not_empty() {
+        let dir = tempdir().expect("cannot create temp dir");
+        fs::create_dir_all(dir.path().join("dir1")).unwrap();
+        fs::write(dir.path().join("dir1/file1"), b"content1").unwrap();
+
+        assert!(
+            !would_be_empty(
+                &dir.path().join("dir1"),
+                &HashSet::from([dir.path().join("dir1/file1")]),
+                &HashSet::from([dir.path().join("dir1/file2")])
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn desired_entry_for_missing_directory_reports_not_empty() {
+        let dir = tempdir().expect("cannot create temp dir");
+
+        assert!(
+            !would_be_empty(
+                &dir.path().join("dir1"),
+                &HashSet::new(),
+                &HashSet::from([dir.path().join("dir1/file1")])
+            )
+            .unwrap()
+        );
     }
 
     #[test_case(
@@ -652,7 +698,7 @@ mod tests {
                 .unwrap();
         }
         let env = Environment::test_root(registry_root.path());
-        let mut registry = RenderRegistry::acquire(&env, false);
+        let mut registry = RenderRegistry::acquire(&env);
         let global_config = GlobalConfig::default();
         let interaction = PanickingResolver;
         let mut latch = ReplaceLatch::default();
@@ -684,7 +730,7 @@ mod tests {
         fs::write(target.path().join("target1"), "content2").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let env = Environment::test_root(registry_root.path());
-        let mut registry = RenderRegistry::acquire(&env, false);
+        let mut registry = RenderRegistry::acquire(&env);
         let global_config = GlobalConfig::default();
         let interaction = FakeResolver::once(action);
         let mut latch = ReplaceLatch::default();
@@ -716,7 +762,7 @@ mod tests {
         fs::write(target.path().join("file2"), "content4").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let env = Environment::test_root(registry_root.path());
-        let mut registry = RenderRegistry::acquire(&env, false);
+        let mut registry = RenderRegistry::acquire(&env);
         let global_config = GlobalConfig::default();
         let interaction = FakeResolver {
             actions: std::cell::RefCell::new(vec![ResolveAction::Replace { latch_all: true }]),
@@ -755,7 +801,7 @@ mod tests {
         fs::write(source.path().join("file1"), "{{ str1").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
         let env = Environment::test_root(registry_root.path());
-        let mut registry = RenderRegistry::acquire(&env, false);
+        let mut registry = RenderRegistry::acquire(&env);
         let global_config = GlobalConfig::default();
         let interaction = PanickingResolver;
         let mut latch = ReplaceLatch::default();
@@ -806,7 +852,7 @@ mod tests {
     fn a_failed_copy_leaves_the_target_absent() {
         let (source, target, state, registry_root) = test_harness();
         let env = Environment::test_root(registry_root.path());
-        let mut registry = RenderRegistry::acquire(&env, false);
+        let mut registry = RenderRegistry::acquire(&env);
         let entry = copy_entry(
             &source.path().join("missing1"),
             &target.path().join("target1"),

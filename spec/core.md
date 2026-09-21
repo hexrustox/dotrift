@@ -21,10 +21,12 @@ directory and the desired deployment drives `apply`'s decisions.
   and to `$XDG_DATA_HOME/dotrift/state.sqlite` when neither the state
   directory nor a home directory can be resolved. An error is raised only
   when no state location can be resolved at all.
-* **Creation:** opening the database creates the state directory and an empty
-  database file when absent. Every command that opens the state database —
-  including `apply --dry-run` — therefore leaves these artifacts. Creation is
-  not a deployment action and touches nothing under the target directory.
+* **Creation:** opening for mutation creates the state directory and an empty
+  database file when absent, and completes a missing expected table
+  (`CREATE TABLE IF NOT EXISTS`). This happens on the open path `apply` uses
+  (dry runs included) and the mutating profile commands use; read-only opens
+  (`status`, `profile list`, `profile show`) create nothing. Creation is not
+  a deployment action and touches nothing under the target directory.
 * **Scope:** one database per user, shared across every source directory.
   Records are keyed by absolute target path, so the managed check never needs
   to know which source tree produced a record.
@@ -35,9 +37,12 @@ directory and the desired deployment drives `apply`'s decisions.
   cannot be opened or parsed as SQLite is a hard error in every command that
   touches it: no quarantine, no recreate, no repair. An existing database
   missing an expected table is completed on open (`CREATE TABLE IF NOT
-  EXISTS`) rather than rejected; only a file that cannot be opened or parsed
-  fails (see the amendment to ADR-0015). There is no schema version and no
-  migration path; the user deletes the file by hand to start fresh.
+  EXISTS`) rather than rejected — on the open path that can write; a
+  read-only open cannot write the schema, so it treats a database holding
+  none of the expected tables as the empty state. Only a file that cannot be
+  opened or parsed fails (see the amendment to ADR-0015). There is no schema
+  version and no migration path; the user deletes the file by hand to start
+  fresh.
 
 ## managed_paths Table
 

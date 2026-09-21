@@ -367,13 +367,21 @@ fn run_diff_into<W: std::io::Write>(
         .ok_or_else(|| miette!("diff stdout is unavailable"))?;
     std::io::copy(&mut stdout, dest).map_err(|error| miette!(error))?;
     let status = child.wait().map_err(|error| miette!(error))?;
-    if status.code() == Some(2) {
-        return Err(match diff {
-            Some(diff) => miette!(
-                "the configured diff command `{}` exited with an error",
+    // Exit 0 and 1 are success (1 = differences found, the normal finding);
+    // everything else — any other code, or death by a signal — fails the run
+    // so a truncated view is never mistaken for "no differences".
+    if !matches!(status.code(), Some(0) | Some(1)) {
+        return Err(match (diff, status.code()) {
+            (Some(diff), Some(code)) => miette!(
+                "the configured diff command `{}` exited with status {code}",
                 diff.command
             ),
-            None => miette!("diff exited with an error"),
+            (Some(diff), None) => miette!(
+                "the configured diff command `{}` terminated by a signal",
+                diff.command
+            ),
+            (None, Some(code)) => miette!("diff exited with status {code}"),
+            (None, None) => miette!("diff terminated by a signal"),
         });
     }
     Ok(())
@@ -606,7 +614,7 @@ mod tests {
     fn fixture() -> (TempDir, GlobalConfig, RenderRegistry) {
         let state = tempdir().expect("cannot create temp dir");
         let env = Environment::test_root(state.path());
-        let registry = RenderRegistry::acquire(&env, true);
+        let registry = RenderRegistry::acquire(&env);
         (state, GlobalConfig::default(), registry)
     }
 

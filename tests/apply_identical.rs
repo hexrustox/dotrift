@@ -238,7 +238,7 @@ fn dry_run_reports_identical_obstruction_as_replaced_without_changing_it() {
 }
 
 #[test]
-fn dry_run_reports_template_obstruction_without_rendering_it() {
+fn dry_run_reports_identical_template_obstruction_as_replaced() {
     let scenario = ApplyScenario::new(|source, target| {
         fs::write(
             source.join("dotrift_data.toml"),
@@ -259,5 +259,5 @@ fn dry_run_reports_template_obstruction_without_rendering_it() {
 
     let line = dry_run_line(&scenario, &scenario.target.join("file1"));
 
-    assert!(line.starts_with("obstruction "), "{line}");
+    assert!(line.starts_with("replaced "), "{line}");
 }

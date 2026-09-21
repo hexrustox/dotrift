@@ -32,6 +32,46 @@ fn dry_run_prune_options() -> ApplyOptions {
 }
 
 #[test]
+fn dry_run_cleanup_prune_keeps_directory_with_to_be_deployed_entry() {
+    let scenario = ApplyScenario::new(|source, _target| {
+        fs::write(source.join("file1"), "content1").unwrap();
+        r#"
+[portal]
+"file1" = "dir1/file1"
+"#
+    });
+
+    scenario.run();
+    fs::write(scenario.source.join("file2"), "content2").unwrap();
+    scenario.write_config(
+        r#"
+[portal]
+"file2" = "dir1/file2"
+"#,
+    );
+
+    let output = {
+        dotrift::report::clear();
+        let prompter = Prompt::never();
+        let status = scenario
+            .try_run_with(dry_run_prune_options(), &prompter)
+            .expect("apply failed");
+        assert_eq!(status, ExitStatus::Success);
+        dotrift::report::take_output()
+    };
+
+    assert!(
+        output.contains("removed") && output.contains("dir1/file1"),
+        "{output}"
+    );
+    assert!(
+        !output.contains("pruned"),
+        "dir1 gains a to-be-deployed entry; expected no prune line:\n{output}"
+    );
+    assert!(fs::symlink_metadata(scenario.target.join("dir1/file1")).is_ok());
+}
+
+#[test]
 fn dry_run_fresh_deployment_changes_nothing() {
     let scenario = ApplyScenario::new(|source, _target| {
         fs::write(source.join("file1"), "content1").unwrap();

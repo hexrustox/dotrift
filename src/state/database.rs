@@ -122,6 +122,22 @@ impl StateDatabase {
         let connection = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|error| miette!(error))
             .wrap_err_with(|| format!("cannot open state database `{}`", path.display()))?;
+        // A read-only connection cannot complete a missing schema
+        // (`spec/core.md § State database`), so a database holding none of
+        // the expected tables is read as the empty state instead.
+        let expected_tables = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table'
+                   AND name IN ('managed_paths', 'active_profiles')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot inspect state database `{}`", path.display()))?;
+        if expected_tables == 0 {
+            return Ok(None);
+        }
         Ok(Some(Self { connection, path }))
     }
 

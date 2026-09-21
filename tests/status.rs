@@ -58,6 +58,18 @@ fn status_reports_nothing_without_database() {
 }
 
 #[test]
+fn status_treats_table_less_database_as_empty() {
+    let env = TestEnv::new();
+    fs::create_dir_all(env.path("state")).unwrap();
+    // A valid, zero-byte SQLite file: parseable, but holding no tables.
+    fs::write(env.path("state/state.sqlite"), b"").unwrap();
+
+    let output = status_output(&env, false);
+
+    assert_eq!(output, "");
+}
+
+#[test]
 fn status_reports_nothing_for_empty_database() {
     let env = TestEnv::new();
     assert!(

@@ -204,8 +204,8 @@ A file at `config/secrets/x` resolves to `copy` with mode `600`.
 Applies to portal keys and values and rule keys:
 
 * Paths are root-relative.
-* A leading `./` prefix is valid and cosmetic; `./foo` and `foo` are
-  equivalent.
+* A single leading `./` prefix is valid and cosmetic; `./foo` and `foo` are
+  equivalent. Repeated prefixes (`././foo`) are not valid.
 * Absolute paths are invalid.
 * Embedded `.` or `..` components are invalid, including `/./` and `/../`.
 * Empty path components are invalid: `a//b` and a trailing `/` are rejected.
@@ -234,7 +234,8 @@ literal values, with no template-specific exceptions.
 * **Structural conflict:** two desired target paths where one is an ancestor
   of the other (for example `config` and `config/editor`) (ADR-0009).
 * **Path rule violations:** absolute paths, embedded `.`/`..` components,
-  empty components, or empty strings in portal keys/values or rule keys.
+  empty components, repeated `./` prefixes, or empty strings in portal
+  keys/values or rule keys.
 * **Missing literal source:** a literal portal key naming a source path that
   does not exist.
 * **Unknown fields:** unknown top-level keys, unknown sections, or unknown

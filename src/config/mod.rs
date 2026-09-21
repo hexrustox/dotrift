@@ -57,7 +57,7 @@ impl From<DeployMode> for u32 {
 #[serde(untagged)]
 enum DeployModeRepr {
     Str(String),
-    Uint(u32),
+    Int(i64),
 }
 
 impl TryFrom<DeployModeRepr> for DeployMode {
@@ -66,7 +66,7 @@ impl TryFrom<DeployModeRepr> for DeployMode {
     fn try_from(value: DeployModeRepr) -> Result<Self, Self::Error> {
         match value {
             DeployModeRepr::Str(value) => Self::try_from(value),
-            DeployModeRepr::Uint(value) => Self::try_from(value),
+            DeployModeRepr::Int(value) => Self::try_from(value),
         }
     }
 }
@@ -82,6 +82,24 @@ impl TryFrom<String> for DeployMode {
             .bytes()
             .fold(0u32, |mode, byte| (mode << 3) | u32::from(byte - b'0'));
         Ok(Self(mode))
+    }
+}
+
+impl TryFrom<i64> for DeployMode {
+    type Error = miette::Report;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        if !matches!(value, 0..=0o777) {
+            return Err(miette!(
+                "invalid mode `{}`",
+                if value < 0 {
+                    value.to_string()
+                } else {
+                    format!("{value:o}")
+                }
+            ));
+        }
+        Ok(Self(value as u32))
     }
 }
 
@@ -249,11 +267,18 @@ fn read_ignore(source: &Path) -> Result<Gitignore> {
         .add_line(None, "/.dotriftignore")
         .map_err(|error| miette!(error))?;
     let path = source.join(".dotriftignore");
-    if path.exists() {
-        match builder.add(path) {
+    match fs::File::open(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            // Missing, or a dangling symlink: "no ignore patterns".
+        }
+        Err(error) => {
+            return Err(miette!(error))
+                .wrap_err_with(|| format!("cannot read `{}`", path.display()));
+        }
+        Ok(_) => match builder.add(path) {
             None => {}
             Some(error) => return Err(miette!(error)),
-        }
+        },
     }
     builder.build().map_err(|error| miette!(error))
 }
