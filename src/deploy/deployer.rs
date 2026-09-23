@@ -21,6 +21,7 @@ use super::reconcile::{Decision, decide};
 use crate::{
     commands::apply::ApplyOptions,
     config::{self, DeployType, GlobalConfig},
+    internal_error,
     platform::prettify_path,
     render::{RenderRegistry, render_template_to},
     report::{Outcome, Reporter},
@@ -100,13 +101,19 @@ impl<'a> Deployer<'a> {
         context: &HashMap<String, Value>,
     ) -> Result<DeployOutcome> {
         if !fs::metadata(&entry.source_path)
-            .map_err(|error| miette!(error))?
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| {
+                format!(
+                    "cannot inspect source path `{}`",
+                    entry.source_path.display()
+                )
+            })?
             .is_file()
         {
-            return Err(miette!(
-                "source path `{}` is no longer a regular file",
+            return Err(miette! {
+                "source path `{}` is not a regular file",
                 entry.source_path.display()
-            ));
+            });
         }
 
         let mut replaced = false;
@@ -147,13 +154,23 @@ impl<'a> Deployer<'a> {
             .ok_or_else(|| miette!("target path has no parent"))?;
         fs::create_dir_all(parent)
             .map_err(|error| miette!(error))
-            .wrap_err("cannot create target parent directories")?;
+            .wrap_err_with(|| {
+                format!(
+                    "cannot create target parent directories `{}`",
+                    parent.display()
+                )
+            })?;
 
         let record = match entry.deploy_type {
             DeployType::Symlink => {
                 symlink(&entry.source_path, &entry.target_path)
                     .map_err(|error| miette!(error))
-                    .wrap_err("cannot create target symlink")?;
+                    .wrap_err_with(|| {
+                        format!(
+                            "cannot create target symlink `{}`",
+                            entry.target_path.display()
+                        )
+                    })?;
                 StateRecord {
                     target_path: entry.target_path.clone(),
                     source_path: entry.source_path.clone(),
@@ -175,7 +192,12 @@ impl<'a> Deployer<'a> {
         if let Some(mode) = entry.mode {
             fs::set_permissions(&entry.target_path, fs::Permissions::from_mode(mode.into()))
                 .map_err(|error| miette!(error))
-                .wrap_err("cannot apply target mode")?;
+                .wrap_err_with(|| {
+                    format!(
+                        "cannot apply target mode to `{}`",
+                        entry.target_path.display()
+                    )
+                })?;
         }
         Ok(if replaced {
             DeployOutcome::Replaced
@@ -205,14 +227,25 @@ fn write_deployed_file(
     {
         let mut file = fs::File::create(&entry.target_path)
             .map_err(|error| miette!(error))
-            .wrap_err("cannot write target file")?;
-        let outcome = match fs::File::open(&rendered.path) {
-            Ok(mut source) => io::copy(&mut source, &mut file)
-                .map(|_| ())
-                .map_err(|error| miette!(error))
-                .wrap_err("cannot write target file"),
-            Err(error) => Err(miette!(error).wrap_err("cannot read template render registry")),
-        };
+            .wrap_err_with(|| {
+                format!("cannot write target file `{}`", entry.target_path.display())
+            })?;
+        let outcome = fs::File::open(&rendered.path)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| {
+                format!(
+                    "cannot read template render registry entry `{}`",
+                    rendered.path.display()
+                )
+            })
+            .and_then(|mut source| {
+                io::copy(&mut source, &mut file)
+                    .map(|_| ())
+                    .map_err(|error| miette!(error))
+                    .wrap_err_with(|| {
+                        format!("cannot write target file `{}`", entry.target_path.display())
+                    })
+            });
         if let Err(error) = outcome {
             let _ = fs::remove_file(&entry.target_path);
             return Err(error);
@@ -221,18 +254,22 @@ fn write_deployed_file(
     }
     let file = fs::File::create(&entry.target_path)
         .map_err(|error| miette!(error))
-        .wrap_err("cannot write target file")?;
+        .wrap_err_with(|| format!("cannot write target file `{}`", entry.target_path.display()))?;
     let mut writer = HashWriter::new(BufWriter::new(file));
     let outcome = match entry.deploy_type {
         DeployType::Template => render_template_to(&entry.source_path, context, &mut writer),
-        DeployType::Copy => match fs::File::open(&entry.source_path) {
-            Ok(mut source) => io::copy(&mut source, &mut writer)
-                .map(|_| ())
-                .map_err(|error| miette!(error))
-                .wrap_err("cannot write target file"),
-            Err(error) => Err(miette!(error).wrap_err("cannot read copy source")),
-        },
-        DeployType::Symlink => Err(miette!("symlink entries do not deploy as files")),
+        DeployType::Copy => fs::File::open(&entry.source_path)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot read source file `{}`", entry.source_path.display()))
+            .and_then(|mut source| {
+                io::copy(&mut source, &mut writer)
+                    .map(|_| ())
+                    .map_err(|error| miette!(error))
+                    .wrap_err_with(|| {
+                        format!("cannot write target file `{}`", entry.target_path.display())
+                    })
+            }),
+        DeployType::Symlink => Err(internal_error("symlink entries do not deploy as files")),
     };
     let content_hash = writer.into_digest();
     if let Err(error) = outcome {
@@ -271,7 +308,12 @@ pub(crate) fn cleanup(
             {
                 false
             }
-            Err(error) => return Err(miette!(error).wrap_err("cannot inspect stale target")),
+            Err(error) => {
+                Err::<(), _>(miette!(error)).wrap_err_with(|| {
+                    format!("cannot inspect stale target `{}`", path.display())
+                })?;
+                unreachable!()
+            }
         };
         if !exists {
             if !dry_run {
@@ -360,16 +402,22 @@ fn would_be_empty(
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
-        Err(error) => return Err(miette!(error).wrap_err("cannot inspect prune directory")),
+        Err(error) => {
+            Err::<(), _>(miette!(error))
+                .wrap_err_with(|| format!("cannot inspect prune directory `{}`", path.display()))?;
+            unreachable!()
+        }
     };
     if !metadata.file_type().is_dir() {
         return Ok(false);
     }
     for child in fs::read_dir(path)
-        .map_err(|error| miette!(error).wrap_err("cannot inspect prune directory"))?
+        .map_err(|error| miette!(error))
+        .wrap_err_with(|| format!("cannot inspect prune directory `{}`", path.display()))?
     {
         let child = child
-            .map_err(|error| miette!(error).wrap_err("cannot inspect prune directory"))?
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot inspect prune directory `{}`", path.display()))?
             .path();
         if removals.contains(&child) {
             continue;
@@ -389,18 +437,25 @@ fn prune_parents(target_root: &Path, removed_path: &Path, report: &Reporter) -> 
         let metadata = match fs::symlink_metadata(parent) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
-            Err(error) => return Err(miette!(error).wrap_err("cannot inspect prune directory")),
+            Err(error) => {
+                Err::<(), _>(miette!(error)).wrap_err_with(|| {
+                    format!("cannot inspect prune directory `{}`", parent.display())
+                })?;
+                unreachable!()
+            }
         };
         if !metadata.file_type().is_dir() {
             break;
         }
         let mut children = fs::read_dir(parent)
-            .map_err(|error| miette!(error).wrap_err("cannot inspect prune directory"))?;
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot inspect prune directory `{}`", parent.display()))?;
         if children.next().is_some() {
             break;
         }
         fs::remove_dir(parent)
-            .map_err(|error| miette!(error).wrap_err("cannot prune empty directory"))?;
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot prune empty directory `{}`", parent.display()))?;
         count += 1;
         report.outcome_line(format_args!(
             "{} {}",
@@ -418,23 +473,31 @@ fn prune_parents(target_root: &Path, removed_path: &Path, report: &Reporter) -> 
 /// stopping at the first error. Symlinks are unlinked as links, never
 /// followed. The state record is deleted after each completed removal.
 pub(crate) fn remove_path(database: &StateDatabase, path: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(path).map_err(|error| miette!(error))?;
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| miette!(error))
+        .wrap_err_with(|| format!("cannot inspect managed path `{}`", path.display()))?;
     if metadata.file_type().is_dir() {
         let mut children = fs::read_dir(path)
-            .map_err(|error| miette!(error))?
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot read directory `{}`", path.display()))?
             .map(|entry| {
                 entry
                     .map(|entry| entry.path())
                     .map_err(|error| miette!(error))
+                    .wrap_err_with(|| format!("cannot read directory `{}`", path.display()))
             })
             .collect::<Result<Vec<_>>>()?;
         children.sort();
         for child in children {
             remove_path(database, &child)?;
         }
-        fs::remove_dir(path).map_err(|error| miette!(error))?;
+        fs::remove_dir(path)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot remove managed path `{}`", path.display()))?;
     } else {
-        fs::remove_file(path).map_err(|error| miette!(error))?;
+        fs::remove_file(path)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot remove managed path `{}`", path.display()))?;
     }
     database.remove(path)?;
     Ok(())
@@ -860,10 +923,7 @@ mod tests {
 
         let error = write_deployed_file(&entry, &HashMap::new(), &mut registry)
             .expect_err("the missing copy source must fail");
-        assert!(
-            error.to_string().contains("cannot read copy source"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("cannot read"), "{error}");
         assert!(!target.path().join("target1").exists());
         let _ = &state;
     }

@@ -112,7 +112,10 @@ fn failing_dotrift_pager_raises_error() {
     let error = scenario.try_run_with_prompter(&prompter).unwrap_err();
 
     let rendered = format!("{error}");
-    assert!(rendered.contains("cannot run DOTRIFT_PAGER"), "{rendered}");
+    assert!(
+        rendered.contains("cannot run `DOTRIFT_PAGER`"),
+        "{rendered}"
+    );
 }
 
 #[test]

@@ -204,15 +204,20 @@ fn xxhash_hex(bytes: &[u8]) -> String {
 fn xxhash_file_hex(path: &Path) -> Result<String> {
     let file = File::open(path)
         .map_err(|error| miette!(error))
-        .wrap_err_with(|| format!("cannot read `{}` for hashing", path.display()))?;
+        .wrap_err_with(|| format!("cannot read file `{}` for hashing", path.display()))?;
     let mut reader = BufReader::new(file);
     let mut hasher = XxHash64::with_seed(SEED);
     let mut buffer = vec![0u8; CHUNK_SIZE];
     loop {
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|error| miette!(error))
-            .wrap_err_with(|| format!("cannot read `{}` for hashing", path.display()))?;
+        let read = match reader.read(&mut buffer) {
+            Ok(read) => read,
+            Err(error) => {
+                Err::<(), _>(miette!(error)).wrap_err_with(|| {
+                    format!("cannot read file `{}` for hashing", path.display())
+                })?;
+                unreachable!()
+            }
+        };
         if read == 0 {
             break;
         }

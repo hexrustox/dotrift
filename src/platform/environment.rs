@@ -66,7 +66,12 @@ impl Environment {
         dirs::state_dir()
             .or_else(dirs::data_dir)
             .map(|state_home| state_home.join("dotrift"))
-            .ok_or_else(|| miette!("XDG_STATE_HOME and XDG_DATA_HOME are unset"))
+            .ok_or_else(|| {
+                miette!(
+                    help = "set `XDG_STATE_HOME` or `XDG_DATA_HOME`",
+                    "`XDG_STATE_HOME` and `XDG_DATA_HOME` are unset"
+                )
+            })
             .wrap_err("cannot resolve state location")
     }
 
@@ -87,7 +92,12 @@ impl Environment {
         }
         dirs::config_dir()
             .map(|config_home| config_home.join("dotrift").join("config.toml"))
-            .ok_or_else(|| miette!("`HOME` is unset or empty"))
+            .ok_or_else(|| {
+                miette!(
+                    help = "set `XDG_CONFIG_HOME` or `HOME`",
+                    "`HOME` is unset or empty"
+                )
+            })
             .wrap_err("cannot resolve the global config location")
     }
 
@@ -99,7 +109,12 @@ impl Environment {
         }
         dirs::data_dir()
             .map(|data_home| data_home.join("dotfiles"))
-            .ok_or_else(|| miette!("both XDG_DATA_HOME and HOME are unset"))
+            .ok_or_else(|| {
+                miette!(
+                    help = "set `XDG_DATA_HOME` or `HOME`",
+                    "both `XDG_DATA_HOME` and `HOME` are unset"
+                )
+            })
             .wrap_err("cannot resolve source directory")
     }
 
@@ -109,7 +124,9 @@ impl Environment {
         if let Some(dir) = self.default_target_dir.clone() {
             return Ok(dir);
         }
-        dirs::home_dir().ok_or_else(|| miette!("`HOME` is unset or empty"))
+        dirs::home_dir()
+            .ok_or_else(|| miette!(help = "set `HOME`", "`HOME` is unset or empty"))
+            .wrap_err("cannot resolve the home directory")
     }
 }
 

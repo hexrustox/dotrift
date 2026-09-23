@@ -237,7 +237,7 @@ fn profile_list_without_source_errors() {
     dotrift::report::clear();
     let error = profile::run(None, ProfileCommand::List, env.env(), false).unwrap_err();
 
-    assert_error_chain(&error, "source directory is required");
+    assert_error_chain(&error, "missing source directory for `profile`");
 }
 
 #[test]
@@ -255,7 +255,7 @@ fn profile_activate_without_source_errors() {
     )
     .unwrap_err();
 
-    assert_error_chain(&error, "source directory is required");
+    assert_error_chain(&error, "missing source directory for `profile`");
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn profile_show_without_source_errors() {
     dotrift::report::clear();
     let error = profile::run(None, ProfileCommand::Show, env.env(), false).unwrap_err();
 
-    assert_error_chain(&error, "source directory is required");
+    assert_error_chain(&error, "missing source directory for `profile`");
 }
 
 #[test]

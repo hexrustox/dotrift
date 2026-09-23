@@ -122,10 +122,9 @@ fn to_int(value: &Value) -> Result<i64, RegistryError> {
         Value::Bool(b) => Ok(i64::from(*b)),
         Value::Str(s) => s
             .parse()
-            .map_err(|_| custom(format!("cannot convert \"{s}\" to Int"), &[0])),
-        Value::List(_) | Value::Map(_) => Err(receiver(
-            "provide an Int, a Bool, or a String containing an integer",
-        )),
+            .map_err(|_| custom(format!("cannot convert {s:?} to an integer"), &[0])),
+        Value::List(_) => Err(receiver("cannot convert a list to an integer")),
+        Value::Map(_) => Err(receiver("cannot convert a map to an integer")),
     }
 }
 
@@ -155,7 +154,7 @@ fn length(value: &Value) -> Result<i64, RegistryError> {
         Value::List(items) => Ok(items.len() as i64),
         Value::Map(map) => Ok(map.len() as i64),
         Value::Int(_) | Value::Bool(_) => Err(receiver(
-            "provide a String, a List, or a Map to take the length of",
+            "cannot take the length of a non-string, non-list, non-map value",
         )),
     }
 }
@@ -165,9 +164,9 @@ fn contains(args: &[Value]) -> Result<bool, RegistryError> {
         Value::Str(s) => Ok(s.contains(str_arg(args, 1)?)),
         Value::List(items) => Ok(items.contains(&args[1])),
         Value::Map(map) => Ok(map.contains_key(str_arg(args, 1)?)),
-        Value::Int(_) | Value::Bool(_) => {
-            Err(receiver("provide a String, a List, or a Map to search in"))
-        }
+        Value::Int(_) | Value::Bool(_) => Err(receiver(
+            "cannot search in a non-string, non-list, non-map value",
+        )),
     }
 }
 
@@ -360,14 +359,14 @@ impl FunctionRegistry for Builtins {
                 list_arg(args, 0)?
                     .first()
                     .cloned()
-                    .ok_or_else(|| custom("first of an empty list", &[]))
+                    .ok_or_else(|| custom("cannot take `first` of an empty list", &[]))
             }
             "last" => {
                 arg_count(args, 1)?;
                 list_arg(args, 0)?
                     .last()
                     .cloned()
-                    .ok_or_else(|| custom("last of an empty list", &[]))
+                    .ok_or_else(|| custom("cannot take `last` of an empty list", &[]))
             }
             "keys" => {
                 arg_count(args, 1)?;
@@ -527,7 +526,7 @@ mod tests {
         assert_eq!(
             error,
             RegistryError::Custom {
-                msg: "cannot convert \"12x\" to Int".into(),
+                msg: "cannot convert \"12x\" to an integer".into(),
                 indexes: vec![0]
             }
         );
@@ -546,14 +545,14 @@ mod tests {
         assert_eq!(
             first,
             RegistryError::Custom {
-                msg: "first of an empty list".into(),
+                msg: "cannot take `first` of an empty list".into(),
                 indexes: vec![]
             }
         );
         assert_eq!(
             last,
             RegistryError::Custom {
-                msg: "last of an empty list".into(),
+                msg: "cannot take `last` of an empty list".into(),
                 indexes: vec![]
             }
         );

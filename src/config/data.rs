@@ -22,10 +22,20 @@ impl DataFile {
             }
             Err(error) => {
                 return Err(miette!(error))
-                    .wrap_err_with(|| format!("cannot read `{}`", path.display()));
+                    .wrap_err_with(|| format!("cannot read data file `{}`", path.display()));
             }
         };
-        parse_data_file(&text).wrap_err_with(|| format!("cannot parse `{}`", path.display()))
+        let data = toml::from_str::<Self>(&text)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot parse data file `{}`", path.display()))?;
+        ensure_no_empty_keys(&data.variable, "[variable]")?;
+        for (name, bindings) in &data.profile {
+            if name.is_empty() {
+                return Err(miette!("empty profile name"));
+            }
+            ensure_no_empty_keys(bindings, &format!("[profile.{name}]"))?;
+        }
+        Ok(data)
     }
 
     pub(crate) fn context(&self, active: &[(String, i64)]) -> BTreeMap<String, Value> {
@@ -39,18 +49,6 @@ impl DataFile {
         }
         context
     }
-}
-
-fn parse_data_file(text: &str) -> Result<DataFile> {
-    let data: DataFile = toml::from_str(text).map_err(|error| miette!(error))?;
-    ensure_no_empty_keys(&data.variable, "[variable]")?;
-    for (name, bindings) in &data.profile {
-        if name.is_empty() {
-            return Err(miette!("empty profile name"));
-        }
-        ensure_no_empty_keys(bindings, &format!("[profile.{name}]"))?;
-    }
-    Ok(data)
 }
 
 fn ensure_no_empty_keys(bindings: &BTreeMap<String, Value>, table: &str) -> Result<()> {

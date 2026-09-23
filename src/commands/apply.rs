@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use miette::{Result, miette};
+use miette::{Result, WrapErr, miette};
 use templater::value::Value;
 
 use crate::{
@@ -86,13 +86,14 @@ pub fn run_with_options_and_prompter(
         && !fs::metadata(target).is_ok_and(|metadata| metadata.is_dir())
     {
         return Err(miette!(
-            "target directory `{}` is not a directory",
+            "target path `{}` is not a directory",
             target.display()
         ));
     }
     if !deployment.entries.is_empty() && fs::symlink_metadata(target).is_err() && !options.dry_run {
         fs::create_dir_all(target)
-            .map_err(|error| miette!(error).wrap_err("cannot create target directory"))?;
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot create target directory `{}`", target.display()))?;
     }
 
     let database = StateDatabase::open(env)?;

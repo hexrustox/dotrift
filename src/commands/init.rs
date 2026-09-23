@@ -70,25 +70,27 @@ pub fn run(source: &Path, _env: &Environment, color: bool) -> Result<()> {
                 })?;
         }
         Err(error) => {
-            return Err(miette!(error).wrap_err(format!(
-                "cannot access source directory `{}`",
-                source.display()
-            )));
+            Err(miette!(error)).wrap_err_with(|| {
+                format!("cannot access source directory `{}`", source.display())
+            })?;
+            unreachable!()
         }
     }
 
     if entry_exists(&source.join("dotrift.toml")) {
-        return Err(miette!(
-            "source directory `{}` is already initialized: `dotrift.toml` exists",
-            source.display()
-        ));
+        return Err(miette!("`dotrift.toml` exists")).wrap_err_with(|| {
+            format!(
+                "source directory `{}` is already initialized",
+                source.display()
+            )
+        });
     }
 
     let mut created = Vec::new();
-    for (name, scaffold) in [
-        ("dotrift.toml", SCAFFOLD_DOTRIFT_TOML),
-        ("dotrift_data.toml", SCAFFOLD_DATA_FILE),
-        (".dotriftignore", SCAFFOLD_IGNORE_FILE),
+    for (name, noun, scaffold) in [
+        ("dotrift.toml", "control file", SCAFFOLD_DOTRIFT_TOML),
+        ("dotrift_data.toml", "data file", SCAFFOLD_DATA_FILE),
+        (".dotriftignore", "ignore file", SCAFFOLD_IGNORE_FILE),
     ] {
         let path = source.join(name);
         if entry_exists(&path) {
@@ -102,10 +104,10 @@ pub fn run(source: &Path, _env: &Environment, color: bool) -> Result<()> {
             .create_new(true)
             .open(&path)
             .map_err(|error| miette!(error))
-            .wrap_err_with(|| format!("cannot create `{}`", path.display()))?
+            .wrap_err_with(|| format!("cannot create {noun} `{}`", path.display()))?
             .write_all(scaffold.as_bytes())
             .map_err(|error| miette!(error))
-            .wrap_err_with(|| format!("cannot write `{}`", path.display()))?;
+            .wrap_err_with(|| format!("cannot write {noun} `{}`", path.display()))?;
         created.push(path);
     }
     // Errors print nothing to standard output, so the listing is held back

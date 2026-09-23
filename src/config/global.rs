@@ -31,12 +31,14 @@ impl GlobalConfig {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
             Err(error) => {
-                return Err(miette!(error).wrap_err(format!("cannot read `{}`", path.display())));
+                Err::<(), _>(miette!(error))
+                    .wrap_err_with(|| format!("cannot read global config `{}`", path.display()))?;
+                unreachable!()
             }
         };
         let file = toml::from_slice::<FileConfig>(&bytes)
             .map_err(|error| miette!(error))
-            .wrap_err_with(|| format!("cannot parse `{}`", path.display()))?;
+            .wrap_err_with(|| format!("cannot parse global config `{}`", path.display()))?;
         Self::from_file(file)
     }
 
@@ -136,7 +138,8 @@ fn validate_placeholders(args: &[String]) -> Result<()> {
         while let Some(start) = rest.find("${") {
             let Some(end) = rest[start + 2..].find('}') else {
                 return Err(miette!(
-                    "unterminated placeholder in diff args `{arg}`: expected `${{target}}`, `${{source}}`, `${{target-label}}`, or `${{source-label}}`"
+                    help = "close `${` with a matching `}`",
+                    "unterminated placeholder in `[diff]` `args` element `{arg}`"
                 ));
             };
             let name = &rest[start + 2..start + 2 + end];
@@ -146,7 +149,8 @@ fn validate_placeholders(args: &[String]) -> Result<()> {
                 Some(_) => {}
                 None => {
                     return Err(miette!(
-                        "unknown placeholder `${{{name}}}` in diff args `{arg}`: expected `${{target}}`, `${{source}}`, `${{target-label}}`, or `${{source-label}}`"
+                        help = "the known placeholders are `${target}`, `${source}`, `${target-label}`, and `${source-label}`",
+                        "unknown placeholder `${{{name}}}` in `[diff]` `args`"
                     ));
                 }
             }
@@ -155,7 +159,8 @@ fn validate_placeholders(args: &[String]) -> Result<()> {
     }
     if has_target != has_source {
         return Err(miette!(
-            "diff args must reference `${{target}}` and `${{source}}` together, not just one of them"
+            help = "remove the unpaired placeholder or add its counterpart",
+            "`[diff]` `args` must reference `${{target}}` and `${{source}}` together"
         ));
     }
     Ok(())

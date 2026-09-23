@@ -13,13 +13,14 @@ use std::{
     process::{Child, Command, Stdio},
 };
 
-use miette::{Result, miette};
+use miette::{Result, WrapErr, miette};
 use strum::EnumIter;
 use templater::value::Value;
 use tui::prompt::{PromptError, PromptOption};
 
 use crate::{
     config::{self, DeployType, DiffCommand, GlobalConfig, PagerCommand},
+    internal_error,
     render::RenderRegistry,
     report::diff_sink,
 };
@@ -170,7 +171,7 @@ impl<P: Prompter, D: Differ> ObstructionResolver for Interaction<'_, P, D> {
                 }
                 Err(PromptError::Cancelled) => return Ok(ResolveAction::Cancel),
                 Err(error) => {
-                    return Err(miette!(error).wrap_err("cannot display obstruction prompt"));
+                    return Err(miette!(error).wrap_err("cannot show the obstruction prompt"));
                 }
             }
         }
@@ -194,7 +195,7 @@ pub(crate) fn prompt_for_obstruction(
     use crate::platform::prettify_path;
 
     let question = format!(
-        "Cannot deploy {} {} because {} {} is already present.\nHow would you like to proceed?",
+        "cannot deploy {} {} because {} {} is already present\nhow would you like to proceed?",
         path_kind(&entry.source_path)?,
         prettify_path(&entry.source_path).display(),
         path_kind(obstruction)?,
@@ -269,7 +270,7 @@ pub(crate) fn view_diff(
         Some(
             registry
                 .ensure_rendered(&entry.source_path, context)?
-                .ok_or_else(|| miette!("template render registry is unavailable"))?
+                .ok_or_else(|| internal_error("template render registry is unavailable"))?
                 .path,
         )
     } else {
@@ -280,7 +281,9 @@ pub(crate) fn view_diff(
         .map_or(entry.source_path.as_path(), |path| path.as_path());
     let diff = global_config.diff();
 
-    std::io::stdout().flush().map_err(|error| miette!(error))?;
+    std::io::stdout()
+        .flush()
+        .map_err(|error| miette!(error).wrap_err("cannot flush stdout"))?;
 
     match pager_chain(
         nonempty_env("DOTRIFT_PAGER"),
@@ -289,7 +292,7 @@ pub(crate) fn view_diff(
     ) {
         PagerSelection::EnvDotrift(command) => {
             let child = spawn_pager(&command)
-                .map_err(|error| miette!(error).wrap_err("cannot run DOTRIFT_PAGER"))?;
+                .map_err(|error| miette!(error).wrap_err("cannot run `DOTRIFT_PAGER`"))?;
             diff_through(child, target, &entry.source_path, source, diff)
         }
         PagerSelection::Config(pager) => {
@@ -321,10 +324,12 @@ fn diff_through(
     let mut stdin = child
         .stdin
         .take()
-        .ok_or_else(|| miette!("pager stdin is unavailable"))?;
+        .ok_or_else(|| internal_error("pager stdin is unavailable"))?;
     run_diff_into(target, source_label, source, diff, &mut stdin)?;
     drop(stdin);
-    child.wait().map_err(|error| miette!(error))?;
+    child
+        .wait()
+        .map_err(|error| miette!(error).wrap_err("cannot wait for the pager"))?;
     Ok(())
 }
 
@@ -342,11 +347,9 @@ fn run_diff_into<W: std::io::Write>(
                 .args(args)
                 .stdout(Stdio::piped())
                 .spawn()
-                .map_err(|error| {
-                    miette!(error).wrap_err(format!(
-                        "cannot run the configured diff command `{}`",
-                        diff.command
-                    ))
+                .map_err(|error| miette!(error))
+                .wrap_err_with(|| {
+                    format!("cannot run the configured diff command `{}`", diff.command)
                 })?
         }
         None => Command::new("diff")
@@ -359,14 +362,17 @@ fn run_diff_into<W: std::io::Write>(
             .arg(source)
             .stdout(Stdio::piped())
             .spawn()
-            .map_err(|error| miette!(error).wrap_err("cannot run diff"))?,
+            .map_err(|error| miette!(error).wrap_err("cannot run `diff`"))?,
     };
     let mut stdout = child
         .stdout
         .take()
-        .ok_or_else(|| miette!("diff stdout is unavailable"))?;
-    std::io::copy(&mut stdout, dest).map_err(|error| miette!(error))?;
-    let status = child.wait().map_err(|error| miette!(error))?;
+        .ok_or_else(|| internal_error("diff stdout is unavailable"))?;
+    std::io::copy(&mut stdout, dest)
+        .map_err(|error| miette!(error).wrap_err("cannot pipe diff output"))?;
+    let status = child
+        .wait()
+        .map_err(|error| miette!(error).wrap_err("cannot wait for the diff command"))?;
     // Exit 0 and 1 are success (1 = differences found, the normal finding);
     // everything else — any other code, or death by a signal — fails the run
     // so a truncated view is never mistaken for "no differences".
@@ -380,8 +386,8 @@ fn run_diff_into<W: std::io::Write>(
                 "the configured diff command `{}` terminated by a signal",
                 diff.command
             ),
-            (None, Some(code)) => miette!("diff exited with status {code}"),
-            (None, None) => miette!("diff terminated by a signal"),
+            (None, Some(code)) => miette!("`diff` exited with status {code}"),
+            (None, None) => miette!("`diff` terminated by a signal"),
         });
     }
     Ok(())
@@ -733,7 +739,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("cannot display obstruction prompt"),
+                .contains("cannot show the obstruction prompt"),
             "{error}"
         );
     }

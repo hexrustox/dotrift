@@ -1,13 +1,14 @@
 use clap::Parser;
-use miette::{Error, miette};
+use miette::Result;
 
 use dotrift::{
     ExitStatus,
     cli::{Cli, Command},
+    commands::require_source,
     platform::Environment,
 };
 
-fn main() -> Result<(), Error> {
+fn main() -> Result<()> {
     let color = tui::color_support();
 
     let env = Environment::resolve();
@@ -17,10 +18,7 @@ fn main() -> Result<(), Error> {
     match command {
         Command::Status => dotrift::commands::status::run(&env, color)?,
         Command::Init => {
-            let Some(source) = source else {
-                return Err(miette!("init requires a source directory"));
-            };
-            dotrift::commands::init::run(&source, &env, color)?
+            dotrift::commands::init::run(require_source("init", source.as_deref())?, &env, color)?
         }
         Command::Apply {
             clean_up,
@@ -29,11 +27,8 @@ fn main() -> Result<(), Error> {
             quiet,
             verbose,
         } => {
-            let Some(source) = source else {
-                return Err(miette!("apply requires a source directory"));
-            };
             status = dotrift::commands::apply::run_with_options(
-                &source,
+                require_source("apply", source.as_deref())?,
                 target,
                 dotrift::commands::apply::ApplyOptions {
                     clean_up,

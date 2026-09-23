@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use miette::{Result, miette};
+use miette::{Result, WrapErr, miette};
 use templater::value::Value;
 
 use crate::{
@@ -60,10 +60,10 @@ pub(crate) fn decide(
         Ok(_) => true,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => {
-            return Err(miette!(error).wrap_err(format!(
-                "cannot inspect target `{}`",
-                entry.target_path.display()
-            )));
+            Err::<(), _>(miette!(error)).wrap_err_with(|| {
+                format!("cannot inspect target `{}`", entry.target_path.display())
+            })?;
+            unreachable!()
         }
     };
     if !existed {
@@ -101,10 +101,10 @@ fn parent_obstruction(target_root: &Path, target_path: &Path) -> Result<Option<P
                 return Ok(None);
             }
             Err(error) => {
-                return Err(miette!(error).wrap_err(format!(
-                    "cannot inspect target parent `{}`",
-                    current.display()
-                )));
+                Err::<(), _>(miette!(error)).wrap_err_with(|| {
+                    format!("cannot inspect target parent `{}`", current.display())
+                })?;
+                unreachable!()
             }
         }
     }

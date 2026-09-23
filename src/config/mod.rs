@@ -157,7 +157,7 @@ pub fn read(
     let rendered = render_config(&config_path, &context)?;
     let config = toml::from_str::<FileConfig>(&rendered)
         .map_err(|error| miette!(error))
-        .wrap_err_with(|| format!("cannot parse `{}`", config_path.display()))?;
+        .wrap_err_with(|| format!("cannot parse config `{}`", config_path.display()))?;
     let target = match target_override.or_else(|| config.target_directory.map(PathBuf::from)) {
         Some(target) => target,
         None => env.default_target_dir()?,
@@ -199,17 +199,19 @@ fn render_config(path: &Path, context: &HashMap<String, Value>) -> Result<String
 }
 
 fn validate_overlap(source: &Path, target: &Path) -> Result<()> {
-    let source = resolve_for_comparison(source)?;
-    let target = resolve_for_comparison(target)?;
+    let source = resolve_for_comparison(source, "source directory")?;
+    let target = resolve_for_comparison(target, "target directory")?;
     if source == target || target.starts_with(&source) {
         return Err(miette!("source and target directories overlap"));
     }
     Ok(())
 }
 
-fn resolve_for_comparison(path: &Path) -> Result<PathBuf> {
+fn resolve_for_comparison(path: &Path, what: &str) -> Result<PathBuf> {
     if path.exists() {
-        return fs::canonicalize(path).map_err(|error| miette!(error));
+        return fs::canonicalize(path)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot resolve {what} `{}`", path.display()));
     }
     let mut missing = Vec::new();
     let mut existing = path.to_path_buf();
@@ -222,7 +224,9 @@ fn resolve_for_comparison(path: &Path) -> Result<PathBuf> {
         );
         existing.pop();
     }
-    let mut resolved = fs::canonicalize(existing).map_err(|error| miette!(error))?;
+    let mut resolved = fs::canonicalize(existing)
+        .map_err(|error| miette!(error))
+        .wrap_err_with(|| format!("cannot resolve {what} `{}`", path.display()))?;
     for component in missing.iter().rev() {
         resolved.push(component);
     }
@@ -248,9 +252,9 @@ fn validate_relative(value: &str, what: &str) -> Result<()> {
 
 fn reject_brace_expansion(value: &str, what: &str) -> Result<()> {
     if value.bytes().any(|byte| byte == b'{' || byte == b'}') {
-        return Err(miette!(
-            "unsupported pattern syntax in {what} `{value}`: brace expansion is not supported"
-        ));
+        return Err(Err::<(), _>(miette!("brace expansion is not supported"))
+            .wrap_err_with(|| format!("unsupported pattern syntax in {what} `{value}`"))
+            .unwrap_err());
     }
     Ok(())
 }
@@ -259,13 +263,16 @@ fn read_ignore(source: &Path) -> Result<Gitignore> {
     let mut builder = GitignoreBuilder::new(source);
     builder
         .add_line(None, "/dotrift.toml")
-        .map_err(|error| miette!(error))?;
+        .map_err(|error| miette!(error))
+        .wrap_err("cannot add ignore pattern `/dotrift.toml`")?;
     builder
         .add_line(None, "/dotrift_data.toml")
-        .map_err(|error| miette!(error))?;
+        .map_err(|error| miette!(error))
+        .wrap_err("cannot add ignore pattern `/dotrift_data.toml`")?;
     builder
         .add_line(None, "/.dotriftignore")
-        .map_err(|error| miette!(error))?;
+        .map_err(|error| miette!(error))
+        .wrap_err("cannot add ignore pattern `/.dotriftignore`")?;
     let path = source.join(".dotriftignore");
     match fs::File::open(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -273,14 +280,24 @@ fn read_ignore(source: &Path) -> Result<Gitignore> {
         }
         Err(error) => {
             return Err(miette!(error))
-                .wrap_err_with(|| format!("cannot read `{}`", path.display()));
+                .wrap_err_with(|| format!("cannot read ignore file `{}`", path.display()));
         }
-        Ok(_) => match builder.add(path) {
+        Ok(_) => match builder.add(&path) {
             None => {}
-            Some(error) => return Err(miette!(error)),
+            Some(error) => {
+                return Err(miette!(error)).wrap_err_with(|| {
+                    format!(
+                        "cannot add ignore patterns from ignore file `{}`",
+                        path.display()
+                    )
+                });
+            }
         },
     }
-    builder.build().map_err(|error| miette!(error))
+    builder
+        .build()
+        .map_err(|error| miette!(error))
+        .wrap_err("cannot build ignore patterns")
 }
 
 fn validate_targets(entries: &[ResolvedPortal]) -> Result<()> {
@@ -397,8 +414,14 @@ fn compile_rules(
     for (pattern, rule) in rules {
         validate_relative(pattern, "rule")?;
         reject_brace_expansion(pattern, "rule")?;
-        let pattern = Pattern::new(pattern.strip_prefix("./").unwrap_or(pattern))
-            .map_err(|error| miette!("invalid rule pattern `{pattern}` because {error}"))?;
+        let pattern = match Pattern::new(pattern.strip_prefix("./").unwrap_or(pattern)) {
+            Ok(pattern) => pattern,
+            Err(error) => {
+                Err::<(), _>(miette!(error))
+                    .wrap_err_with(|| format!("invalid rule pattern `{pattern}`"))?;
+                unreachable!()
+            }
+        };
         compiled.insert(pattern, *rule);
     }
     Ok(compiled)
@@ -425,7 +448,7 @@ fn apply_rules(
     if deploy_type == DeployType::Symlink {
         if mode.is_some() {
             Reporter::always(color).warning(format_args!(
-                "ignoring `mode` for `{}`: effective `type` is `symlink`",
+                "ignoring `mode` for `{}` because effective `type` is `symlink`",
                 entry.target.display()
             ));
         }

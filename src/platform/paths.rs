@@ -30,10 +30,11 @@ pub(crate) fn ensure_source_dir(path: &Path) -> Result<()> {
             "source directory `{}` does not exist",
             path.display()
         )),
-        Err(error) => Err(miette!(error).wrap_err(format!(
-            "cannot access source directory `{}`",
-            path.display()
-        ))),
+        Err(error) => {
+            Err::<(), _>(miette!(error))
+                .wrap_err_with(|| format!("cannot access source directory `{}`", path.display()))?;
+            unreachable!()
+        }
     }
 }
 

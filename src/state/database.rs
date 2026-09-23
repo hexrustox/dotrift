@@ -28,11 +28,9 @@ impl Kind {
         match value {
             "file" => Ok(Self::File),
             "symlink" => Ok(Self::Symlink),
-            other => Err(miette::MietteDiagnostic::new(format!(
+            other => Err(crate::internal_error(format!(
                 "unknown state record kind `{other}`"
-            ))
-            .with_help("this is likely an internal error")
-            .into()),
+            ))),
         }
     }
 }
@@ -283,7 +281,7 @@ impl StateDatabase {
                 params![name, activated_at],
             )
             .map_err(|error| miette!(error))
-            .wrap_err("cannot activate profile")?;
+            .wrap_err_with(|| format!("cannot activate profile `{name}`"))?;
         Ok(())
     }
 
@@ -292,7 +290,7 @@ impl StateDatabase {
             .connection
             .execute("DELETE FROM active_profiles WHERE name = ?1", [name])
             .map_err(|error| miette!(error))
-            .wrap_err("cannot deactivate profile")?;
+            .wrap_err_with(|| format!("cannot deactivate profile `{name}`"))?;
         Ok(count == 1)
     }
 }

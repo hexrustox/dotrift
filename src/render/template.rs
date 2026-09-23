@@ -28,7 +28,7 @@ pub(crate) fn render_template_into(
 ) -> std::result::Result<(), RenderFailure> {
     let template = Template::from_file(path)
         .map_err(|error| miette!(error))
-        .wrap_err_with(|| format!("cannot read `{}`", path.display()))
+        .wrap_err_with(|| format!("cannot read template `{}`", path.display()))
         .map_err(RenderFailure::Template)?;
     let result = template.render(writer, context, &Builtins);
     match result {
@@ -37,7 +37,7 @@ pub(crate) fn render_template_into(
         Err(error) => template
             .report(Err(error))
             .map_err(|error| miette!(error))
-            .wrap_err_with(|| format!("cannot render `{}`", path.display()))
+            .wrap_err_with(|| format!("cannot render template `{}`", path.display()))
             .map_err(RenderFailure::Template),
     }
 }
@@ -53,7 +53,9 @@ pub(crate) fn render_template_to(
         Ok(()) => Ok(()),
         Err(RenderFailure::Template(report)) => Err(report),
         Err(RenderFailure::Sink(error)) => {
-            Err(miette!(error).wrap_err(format!("cannot render `{}`", path.display())))
+            Err::<(), _>(miette!(error))
+                .wrap_err_with(|| format!("cannot render template `{}`", path.display()))?;
+            unreachable!()
         }
     }
 }

@@ -178,7 +178,9 @@ fn resolve_kind(path: &Path) -> Result<ResolvedKind> {
 }
 
 fn dir_identity(path: &Path) -> Result<DirIdentity> {
-    let metadata = fs::metadata(path).map_err(|error| miette!(error))?;
+    let metadata = fs::metadata(path)
+        .map_err(|error| miette!(error))
+        .wrap_err_with(|| format!("cannot inspect source path `{}`", path.display()))?;
     Ok((metadata.dev(), metadata.ino()))
 }
 
@@ -199,7 +201,12 @@ fn walk_following_links(
         .map_err(|error| miette!(error))
         .wrap_err_with(|| format!("cannot read source directory `{}`", root.display()))?;
     for entry in read_dir {
-        let entry = entry.map_err(|error| miette!(error))?;
+        let entry = entry.map_err(|error| miette!(error)).wrap_err_with(|| {
+            format!(
+                "cannot list entries in source directory `{}`",
+                root.display()
+            )
+        })?;
         let path = entry.path();
         match resolve_kind(&path)? {
             ResolvedKind::Directory => walk_following_links(&path, stack, visit)?,
