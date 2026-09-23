@@ -8,7 +8,7 @@ use std::{
 use miette::{Result, WrapErr, miette};
 use normalize_path::NormalizePath;
 
-pub(crate) fn ensure_absolute(path: &Path) -> Result<std::path::PathBuf> {
+pub(crate) fn ensure_absolute(path: &Path) -> Result<PathBuf> {
     if path.is_absolute() {
         Ok(path.to_path_buf())
     } else {

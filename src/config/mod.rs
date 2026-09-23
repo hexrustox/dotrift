@@ -1,39 +1,26 @@
+pub(crate) mod data;
+pub(crate) mod global;
+mod portals;
+
 use std::{
     collections::{BTreeMap, HashMap},
-    ffi::OsString,
     fs,
     path::{Path, PathBuf},
 };
 
-use glob::{MatchOptions, Pattern};
-use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use glob::Pattern;
 use miette::{Result, WrapErr, miette};
 use serde::Deserialize;
 use templater::value::Value;
 
-use crate::{
-    platform::{Environment, ensure_source_dir},
-    report::Reporter,
-};
-
-pub(crate) mod data;
-pub mod global;
-mod portals;
-
 pub(crate) use data::DataFile;
-pub use global::{DiffCommand, GlobalConfig, PagerCommand};
+pub(crate) use global::{DiffCommand, GlobalConfig, PagerCommand};
 
-const GLOB_MATCH_OPTIONS: MatchOptions = MatchOptions {
+const GLOB_MATCH_OPTIONS: glob::MatchOptions = glob::MatchOptions {
     case_sensitive: true,
     require_literal_separator: true,
     require_literal_leading_dot: false,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ResolvedPortal {
-    source: PathBuf,
-    target: PathBuf,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -129,24 +116,13 @@ pub struct DesiredDeployment {
     pub variable_context: HashMap<String, Value>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FileConfig {
-    #[serde(rename = "target-directory")]
-    target_directory: Option<String>,
-    #[serde(default)]
-    portal: BTreeMap<String, String>,
-    #[serde(default)]
-    rule: indexmap::IndexMap<String, RuleConfig>,
-}
-
 pub fn read(
     source: &Path,
     target_override: Option<PathBuf>,
-    env: &Environment,
+    env: &crate::platform::Environment,
     color: bool,
 ) -> Result<DesiredDeployment> {
-    ensure_source_dir(source)?;
+    crate::platform::ensure_source_dir(source)?;
     let data = DataFile::read(source)?;
     // The variable context is resolved once per run (`spec/CONTEXT.md`); a
     // missing state database contributes no active profiles (`spec/core.md §
@@ -192,6 +168,17 @@ pub fn read(
     })
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileConfig {
+    #[serde(rename = "target-directory")]
+    target_directory: Option<String>,
+    #[serde(default)]
+    portal: BTreeMap<String, String>,
+    #[serde(default)]
+    rule: indexmap::IndexMap<String, RuleConfig>,
+}
+
 fn render_config(path: &Path, context: &HashMap<String, Value>) -> Result<String> {
     String::from_utf8(crate::render::render_template(path, context)?)
         .map_err(|error| miette!(error))
@@ -233,34 +220,8 @@ fn resolve_for_comparison(path: &Path, what: &str) -> Result<PathBuf> {
     Ok(resolved)
 }
 
-fn validate_relative(value: &str, what: &str) -> Result<()> {
-    if value.is_empty() || Path::new(value).is_absolute() {
-        return Err(miette!("invalid {what} path `{value}`"));
-    }
-    for (index, component) in value.split('/').enumerate() {
-        let valid = match component {
-            "" | ".." => false,
-            "." => index == 0,
-            _ => true,
-        };
-        if !valid {
-            return Err(miette!("invalid {what} path `{value}`"));
-        }
-    }
-    Ok(())
-}
-
-fn reject_brace_expansion(value: &str, what: &str) -> Result<()> {
-    if value.bytes().any(|byte| byte == b'{' || byte == b'}') {
-        return Err(Err::<(), _>(miette!("brace expansion is not supported"))
-            .wrap_err_with(|| format!("unsupported pattern syntax in {what} `{value}`"))
-            .unwrap_err());
-    }
-    Ok(())
-}
-
-fn read_ignore(source: &Path) -> Result<Gitignore> {
-    let mut builder = GitignoreBuilder::new(source);
+fn read_ignore(source: &Path) -> Result<ignore::gitignore::Gitignore> {
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(source);
     builder
         .add_line(None, "/dotrift.toml")
         .map_err(|error| miette!(error))
@@ -300,6 +261,12 @@ fn read_ignore(source: &Path) -> Result<Gitignore> {
         .wrap_err("cannot build ignore patterns")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedPortal {
+    source: PathBuf,
+    target: PathBuf,
+}
+
 fn validate_targets(entries: &[ResolvedPortal]) -> Result<()> {
     let mut tree = Node::Dir(BTreeMap::new());
     for entry in entries {
@@ -309,7 +276,7 @@ fn validate_targets(entries: &[ResolvedPortal]) -> Result<()> {
 }
 
 enum Node {
-    Dir(BTreeMap<OsString, Node>),
+    Dir(BTreeMap<std::ffi::OsString, Node>),
     File(PathBuf),
 }
 
@@ -383,7 +350,7 @@ struct RuleConfig {
     mode: Option<DeployMode>,
 }
 
-impl<'de> serde::Deserialize<'de> for RuleConfig {
+impl<'de> Deserialize<'de> for RuleConfig {
     fn deserialize<D: serde::Deserializer<'de>>(
         deserializer: D,
     ) -> std::result::Result<Self, D::Error> {
@@ -394,16 +361,13 @@ impl<'de> serde::Deserialize<'de> for RuleConfig {
             deploy_type: Option<DeployType>,
             mode: Option<DeployMode>,
         }
-        let raw = Raw::deserialize(deserializer)?;
-        if raw.mode.is_some() && raw.deploy_type == Some(DeployType::Symlink) {
+        let Raw { deploy_type, mode } = Raw::deserialize(deserializer)?;
+        if mode.is_some() && deploy_type == Some(DeployType::Symlink) {
             return Err(serde::de::Error::custom(
                 "`mode` cannot be used with `type` `symlink`",
             ));
         }
-        Ok(RuleConfig {
-            deploy_type: raw.deploy_type,
-            mode: raw.mode,
-        })
+        Ok(RuleConfig { deploy_type, mode })
     }
 }
 
@@ -427,6 +391,32 @@ fn compile_rules(
     Ok(compiled)
 }
 
+fn validate_relative(value: &str, what: &str) -> Result<()> {
+    if value.is_empty() || Path::new(value).is_absolute() {
+        return Err(miette!("invalid {what} path `{value}`"));
+    }
+    for (index, component) in value.split('/').enumerate() {
+        let valid = match component {
+            "" | ".." => false,
+            "." => index == 0,
+            _ => true,
+        };
+        if !valid {
+            return Err(miette!("invalid {what} path `{value}`"));
+        }
+    }
+    Ok(())
+}
+
+fn reject_brace_expansion(value: &str, what: &str) -> Result<()> {
+    if value.bytes().any(|byte| byte == b'{' || byte == b'}') {
+        return Err(Err::<(), _>(miette!("brace expansion is not supported"))
+            .wrap_err_with(|| format!("unsupported pattern syntax in {what} `{value}`"))
+            .unwrap_err());
+    }
+    Ok(())
+}
+
 fn apply_rules(
     entry: ResolvedPortal,
     rules: &indexmap::IndexMap<Pattern, RuleConfig>,
@@ -447,7 +437,7 @@ fn apply_rules(
     }
     if deploy_type == DeployType::Symlink {
         if mode.is_some() {
-            Reporter::always(color).warning(format_args!(
+            crate::report::Reporter::always(color).warning(format_args!(
                 "ignoring `mode` for `{}` because effective `type` is `symlink`",
                 entry.target.display()
             ));
@@ -486,7 +476,6 @@ macro_rules! deploy_entry {
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
-    use tempfile::tempdir;
     use test_case::test_case;
 
     use super::*;
@@ -589,7 +578,7 @@ mod tests {
         "target_symlink_pointing_into_source_overlaps"
     )]
     fn roots_satisfy_overlap_rule(setup: impl Fn(&Path) -> (PathBuf, PathBuf)) -> bool {
-        let dir = tempdir().expect("cannot create temp dir");
+        let dir = tempfile::tempdir().expect("cannot create temp dir");
         let (source, target) = setup(dir.path());
         validate_overlap(&source, &target).is_ok()
     }

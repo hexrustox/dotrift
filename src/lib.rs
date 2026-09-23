@@ -7,15 +7,16 @@ mod render;
 pub mod report;
 pub mod state;
 
-pub(crate) fn internal_error(message: impl Into<String>) -> miette::Report {
-    miette::MietteDiagnostic::new(message.into())
-        .with_help("this is likely an internal error")
-        .into()
-}
-
+/// The process exit code `main` exits with, carried back from a command run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitStatus {
     Success = 0,
     Cancelled = 1,
     Skipped = 2,
+}
+
+pub(crate) fn internal_error(message: impl Into<String>) -> miette::Report {
+    miette::MietteDiagnostic::new(message.into())
+        .with_help("this is likely an internal error")
+        .into()
 }

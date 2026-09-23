@@ -8,7 +8,7 @@ use templater::value::Value;
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct DataFile {
     variable: BTreeMap<String, Value>,
-    pub profile: BTreeMap<String, BTreeMap<String, Value>>,
+    pub(crate) profile: BTreeMap<String, BTreeMap<String, Value>>,
 }
 
 impl DataFile {

@@ -1,20 +1,14 @@
 use clap::Parser;
-use miette::Result;
 
-use dotrift::{
-    ExitStatus,
-    cli::{Cli, Command},
-    commands::require_source,
-    platform::Environment,
-};
+use dotrift::{cli::Command, commands::require_source};
 
-fn main() -> Result<()> {
+fn main() -> miette::Result<()> {
     let color = tui::color_support();
 
-    let env = Environment::resolve();
-    let cli = Cli::parse();
+    let env = dotrift::platform::Environment::resolve();
+    let cli = dotrift::cli::Cli::parse();
     let (source, target, command) = cli.resolve(&env)?;
-    let mut status = ExitStatus::Success;
+    let mut status = dotrift::ExitStatus::Success;
     match command {
         Command::Status => dotrift::commands::status::run(&env, color)?,
         Command::Init => {

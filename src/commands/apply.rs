@@ -1,21 +1,19 @@
 use std::{
-    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
 
 use miette::{Result, WrapErr, miette};
-use templater::value::Value;
 
 use crate::{
     ExitStatus,
     config::{self, DeployType, GlobalConfig},
-    deploy::obstruction::{Interaction, Prompter, RealDiffer, RealPrompter},
-    deploy::{DeployOutcome, Deployer, ReplaceLatch, cleanup, decide, describe_decision},
+    deploy::obstruction::Prompter,
+    deploy::{DeployOutcome, cleanup},
     platform::{Environment, prettify_path},
     render::RenderRegistry,
     report::{Outcome, Reporter},
-    state::{StateDatabase, StateLock},
+    state::StateDatabase,
 };
 
 /// Reconciles the desired deployment with the target directory.
@@ -63,7 +61,14 @@ pub fn run_with_options(
     env: &Environment,
     color: bool,
 ) -> Result<ExitStatus> {
-    run_with_options_and_prompter(source, target_override, options, env, color, &RealPrompter)
+    run_with_options_and_prompter(
+        source,
+        target_override,
+        options,
+        env,
+        color,
+        &crate::deploy::obstruction::RealPrompter,
+    )
 }
 
 /// Reconciles the desired deployment, answering obstruction prompts from
@@ -76,7 +81,7 @@ pub fn run_with_options_and_prompter(
     color: bool,
     prompter: &dyn Prompter,
 ) -> Result<ExitStatus> {
-    let _lock = StateLock::acquire(env)?;
+    let _lock = crate::state::StateLock::acquire(env)?;
     let global_config = GlobalConfig::load(env)?;
     let mut registry = RenderRegistry::acquire(env);
     let deployment = config::read(source, target_override, env, color)?;
@@ -124,9 +129,13 @@ pub fn run_with_options_and_prompter(
         return Ok(ExitStatus::Success);
     }
 
-    let interaction = Interaction::from_parts(&global_config, prompter, RealDiffer);
-    let mut latch = ReplaceLatch::default();
-    let mut deployer = Deployer::new(
+    let interaction = crate::deploy::obstruction::Interaction::from_parts(
+        &global_config,
+        prompter,
+        crate::deploy::obstruction::RealDiffer,
+    );
+    let mut latch = crate::deploy::ReplaceLatch::default();
+    let mut deployer = crate::deploy::Deployer::new(
         &database,
         target,
         &mut registry,
@@ -195,13 +204,13 @@ fn report_dry_run_entry(
     database: &StateDatabase,
     target_root: &Path,
     entry: &config::DeploymentEntry,
-    context: &HashMap<String, Value>,
+    context: &std::collections::HashMap<String, templater::value::Value>,
     registry: &mut RenderRegistry,
     global_config: &GlobalConfig,
     report: &Reporter,
 ) -> Result<()> {
     // Preview-only: the latch never engages in dry-run (ADR-0014).
-    let decision = decide(
+    let decision = crate::deploy::decide(
         database,
         target_root,
         entry,
@@ -210,7 +219,7 @@ fn report_dry_run_entry(
         false,
         global_config.replace_identical(),
     )?;
-    let (outcome, word) = describe_decision(&decision);
+    let (outcome, word) = crate::deploy::describe_decision(&decision);
     let suffix = format_deploy_suffix(entry);
     report.outcome_line(format_args!(
         "{} {} {suffix}",

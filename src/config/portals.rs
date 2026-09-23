@@ -218,34 +218,38 @@ fn walk_following_links(
 }
 
 #[cfg(test)]
-macro_rules! resolved_list {
-    ($($source:literal => $target:literal),* $(,)?) => {
-        {
-            let vec: Vec<ResolvedPortal> = vec![
-                $(ResolvedPortal {
-                    source: PathBuf::from($source),
-                    target: PathBuf::from($target),
-                }),*
-            ];
-            vec
-        }
-    };
-}
-
-#[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{
+        collections::BTreeMap,
+        fs,
+        os::unix::fs::symlink,
+        path::{Path, PathBuf},
+    };
 
     use tempfile::tempdir;
     use test_case::test_case;
 
-    use super::*;
+    use super::{ResolvedPortal, resolve_portals};
 
     macro_rules! portal_map {
         ($($source:literal => $target:literal),* $(,)?) => {
             BTreeMap::from([
                 $(($source.to_string(), $target.to_string())),*
             ])
+        };
+    }
+
+    macro_rules! resolved_list {
+        ($($source:literal => $target:literal),* $(,)?) => {
+            {
+                let vec: Vec<ResolvedPortal> = vec![
+                    $(ResolvedPortal {
+                        source: PathBuf::from($source),
+                        target: PathBuf::from($target),
+                    }),*
+                ];
+                vec
+            }
         };
     }
 
@@ -320,7 +324,7 @@ mod tests {
     #[test_case(
         |t| {
             fs::write(t.join("file1"), b"content1").unwrap();
-            std::os::unix::fs::symlink(t.join("file1"), t.join("link1")).unwrap();
+            symlink(t.join("file1"), t.join("link1")).unwrap();
             portal_map!("link1" => "target1")
         } => resolved_list!("link1" => "target1");
         "symlink_to_file_maps_to_exact_target"
@@ -330,7 +334,7 @@ mod tests {
             fs::create_dir(t.join("dir1")).unwrap();
             fs::write(t.join("dir1/file1"), b"content1").unwrap();
             fs::write(t.join("dir1/file2"), b"content2").unwrap();
-            std::os::unix::fs::symlink(t.join("dir1"), t.join("link1")).unwrap();
+            symlink(t.join("dir1"), t.join("link1")).unwrap();
             portal_map!("link1" => "dir2")
         } => resolved_list!(
             "link1/file1" => "dir2/file1",
@@ -341,7 +345,7 @@ mod tests {
     #[test_case(
         |t| {
             fs::write(t.join("file1"), b"content1").unwrap();
-            std::os::unix::fs::symlink(t.join("file1"), t.join("link1.lnk")).unwrap();
+            symlink(t.join("file1"), t.join("link1.lnk")).unwrap();
             portal_map!("*.lnk" => "dir2")
         } => resolved_list!("link1.lnk" => "dir2/link1.lnk");
         "symlink_file_matched_by_wildcard"
@@ -381,7 +385,7 @@ mod tests {
     #[test_case(|_t| portal_map!("file1" => "target1") => panics "does not exist"; "missing_literal_source_is_rejected")]
     #[test_case(
         |t| {
-            std::os::unix::fs::symlink(t.join("link2"), t.join("link1")).unwrap();
+            symlink(t.join("link2"), t.join("link1")).unwrap();
             portal_map!("link1" => "link1")
         } => panics "dangling symlink";
         "dangling_literal_source_is_rejected"
@@ -390,7 +394,7 @@ mod tests {
         |t| {
             fs::create_dir(t.join("dir1")).unwrap();
             fs::write(t.join("dir1/file1"), b"content1").unwrap();
-            std::os::unix::fs::symlink(t.join("link2"), t.join("dir1/link1")).unwrap();
+            symlink(t.join("link2"), t.join("dir1/link1")).unwrap();
             portal_map!("dir1" => "dir2")
         } => panics "dangling symlink";
         "dangling_symlink_within_directory_is_rejected"
@@ -398,22 +402,22 @@ mod tests {
     #[test_case(
         |t| {
             fs::write(t.join("file1"), b"content1").unwrap();
-            std::os::unix::fs::symlink(t.join("link2"), t.join("link1")).unwrap();
+            symlink(t.join("link2"), t.join("link1")).unwrap();
             portal_map!("*" => "dir1")
         } => panics "dangling symlink";
         "dangling_symlink_matched_by_wildcard_is_rejected"
     )]
     #[test_case(
         |t| {
-            std::os::unix::fs::symlink(t.join("link1"), t.join("link1")).unwrap();
+            symlink(t.join("link1"), t.join("link1")).unwrap();
             portal_map!("link1" => "dir1")
         } => panics "symlink cycle detected";
         "self_referential_symlink_is_rejected"
     )]
     #[test_case(
         |t| {
-            std::os::unix::fs::symlink(t.join("link2"), t.join("link1")).unwrap();
-            std::os::unix::fs::symlink(t.join("link1"), t.join("link2")).unwrap();
+            symlink(t.join("link2"), t.join("link1")).unwrap();
+            symlink(t.join("link1"), t.join("link2")).unwrap();
             portal_map!("link1" => "dir1")
         } => panics "symlink cycle detected";
         "mutual_symlink_cycle_is_rejected"
@@ -422,7 +426,7 @@ mod tests {
         |t| {
             fs::create_dir(t.join("dir1")).unwrap();
             fs::write(t.join("dir1/file1"), b"content1").unwrap();
-            std::os::unix::fs::symlink(t.join("dir1"), t.join("dir1/link1")).unwrap();
+            symlink(t.join("dir1"), t.join("dir1/link1")).unwrap();
             portal_map!("dir1" => "dir2")
         } => panics "symlink cycle detected";
         "symlink_cycle_within_directory_is_rejected"

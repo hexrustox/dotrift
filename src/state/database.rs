@@ -1,12 +1,11 @@
 use std::{
-    fs::{self, File, OpenOptions},
+    fmt, fs,
     os::fd::AsRawFd,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use miette::{Result, WrapErr, miette};
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Result as SqliteResult, params};
 
 use crate::platform::Environment;
 
@@ -35,8 +34,8 @@ impl Kind {
     }
 }
 
-impl std::fmt::Display for Kind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Kind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str((*self).as_str())
     }
 }
@@ -47,27 +46,6 @@ pub struct StateRecord {
     pub source_path: PathBuf,
     pub kind: Kind,
     pub content_hash: Option<String>,
-}
-
-#[cfg(any(test, feature = "testing"))]
-#[macro_export]
-macro_rules! record {
-    (f, $target:expr, $hash:expr) => {
-        $crate::state::StateRecord {
-            target_path: std::path::PathBuf::from($target),
-            source_path: std::path::PathBuf::new(),
-            kind: $crate::state::Kind::File,
-            content_hash: Some($hash.into()),
-        }
-    };
-    (s, $target:expr, $source:expr) => {
-        $crate::state::StateRecord {
-            target_path: std::path::PathBuf::from($target),
-            source_path: std::path::PathBuf::from($source),
-            kind: $crate::state::Kind::Symlink,
-            content_hash: None,
-        }
-    };
 }
 
 pub struct StateDatabase {
@@ -108,7 +86,7 @@ impl StateDatabase {
         Ok(Self { connection, path })
     }
 
-    pub fn open_read_only(env: &Environment) -> Result<Option<Self>> {
+    pub(crate) fn open_read_only(env: &Environment) -> Result<Option<Self>> {
         Self::open_read_only_at(&env.state_dir()?)
     }
 
@@ -117,9 +95,10 @@ impl StateDatabase {
         if !path.exists() {
             return Ok(None);
         }
-        let connection = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|error| miette!(error))
-            .wrap_err_with(|| format!("cannot open state database `{}`", path.display()))?;
+        let connection =
+            Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|error| miette!(error))
+                .wrap_err_with(|| format!("cannot open state database `{}`", path.display()))?;
         // A read-only connection cannot complete a missing schema
         // (`spec/core.md § State database`), so a database holding none of
         // the expected tables is read as the empty state instead.
@@ -160,7 +139,7 @@ impl StateDatabase {
             .map_err(|error| miette!(error))
             .wrap_err("cannot read managed paths")?;
         let tuples = rows
-            .collect::<rusqlite::Result<Vec<_>>>()
+            .collect::<SqliteResult<Vec<_>>>()
             .map_err(|error| miette!(error))
             .wrap_err("cannot read managed paths")?;
         let mut records = Vec::with_capacity(tuples.len());
@@ -198,7 +177,6 @@ impl StateDatabase {
         Ok(())
     }
 
-    /// Returns the state record for an absolute target path, if one exists.
     pub fn record(&self, target_path: &Path) -> Result<Option<StateRecord>> {
         let record = self
             .connection
@@ -232,8 +210,7 @@ impl StateDatabase {
             .transpose()
     }
 
-    /// Removes the state record for a target path, if present.
-    pub fn remove(&self, target_path: &Path) -> Result<()> {
+    pub(crate) fn remove(&self, target_path: &Path) -> Result<()> {
         self.connection
             .execute(
                 "DELETE FROM managed_paths WHERE target_path = ?1",
@@ -256,7 +233,7 @@ impl StateDatabase {
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
             .map_err(|error| miette!(error))
             .wrap_err("cannot read active profiles")?
-            .collect::<rusqlite::Result<Vec<_>>>()
+            .collect::<SqliteResult<Vec<_>>>()
             .map_err(|error| miette!(error))
             .wrap_err("cannot read active profiles")
     }
@@ -269,8 +246,8 @@ impl StateDatabase {
             })
             .map_err(|error| miette!(error))
             .wrap_err("cannot read profile activation timestamps")?;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
             .map_err(|error| miette!(error))
             .wrap_err("system clock is before the Unix epoch")?
             .as_millis() as i64;
@@ -285,7 +262,7 @@ impl StateDatabase {
         Ok(())
     }
 
-    pub fn deactivate_profile(&self, name: &str) -> Result<bool> {
+    pub(crate) fn deactivate_profile(&self, name: &str) -> Result<bool> {
         let count = self
             .connection
             .execute("DELETE FROM active_profiles WHERE name = ?1", [name])
@@ -295,14 +272,13 @@ impl StateDatabase {
     }
 }
 
-/// Active-profile selectors, or an empty list when no state database exists
-/// yet (`spec/core.md § State database`).
+/// An empty list when no state database exists yet (`spec/core.md § State database`).
 pub fn load_active_profiles(env: &Environment) -> Result<Vec<(String, i64)>> {
     StateDatabase::open_read_only(env)?.map_or_else(|| Ok(Vec::new()), |db| db.active_profiles())
 }
 
 pub(crate) struct StateLock {
-    file: File,
+    file: fs::File,
 }
 
 impl StateLock {
@@ -315,7 +291,7 @@ impl StateLock {
             .map_err(|error| miette!(error))
             .wrap_err_with(|| format!("cannot create state directory `{}`", root.display()))?;
         let lock_path = root.join("state.lock");
-        let file = OpenOptions::new()
+        let file = fs::OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
@@ -341,6 +317,27 @@ impl Drop for StateLock {
         // SAFETY: the descriptor came from the lock's still-open file.
         unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) };
     }
+}
+
+#[cfg(any(test, feature = "testing"))]
+#[macro_export]
+macro_rules! record {
+    (f, $target:expr, $hash:expr) => {
+        $crate::state::StateRecord {
+            target_path: std::path::PathBuf::from($target),
+            source_path: std::path::PathBuf::new(),
+            kind: $crate::state::Kind::File,
+            content_hash: Some($hash.into()),
+        }
+    };
+    (s, $target:expr, $source:expr) => {
+        $crate::state::StateRecord {
+            target_path: std::path::PathBuf::from($target),
+            source_path: std::path::PathBuf::from($source),
+            kind: $crate::state::Kind::Symlink,
+            content_hash: None,
+        }
+    };
 }
 
 #[cfg(test)]
@@ -539,7 +536,7 @@ mod tests {
     }
 
     #[test]
-    fn activate_profile_updates_timestamp_without_duplicate_row() {
+    fn activate_profile_keeps_a_single_row_per_profile() {
         let (_dir, database) = database();
         database
             .activate_profile("profile1")
@@ -554,7 +551,7 @@ mod tests {
 
     #[test_case(true => true ; "active_profile_deactivates")]
     #[test_case(false => false ; "absent_profile_returns_false")]
-    fn deactivate_profile_returns_expected_result(activate_first: bool) -> bool {
+    fn deactivate_profile_reports_whether_it_removed_the_profile(activate_first: bool) -> bool {
         let (_dir, database) = database();
         if activate_first {
             database

@@ -7,42 +7,6 @@ use miette::{Result, WrapErr, miette};
 use crate::platform::{Environment, prettify_path};
 use crate::report::Reporter;
 
-const SCAFFOLD_DOTRIFT_TOML: &str = r#"# Maps source paths to target paths. Rendered as a template before
-# parsing: template tags in this file are evaluated, so keep examples
-# commented out unless you want them rendered.
-
-# target-directory = "/absolute/path"
-
-# [portal]
-# "config/**/*.toml" = ".config"
-# "file1" = ".file1"
-
-# [rule]
-# ".config/**" = { type = "copy" }
-# ".config/secrets/**" = { mode = "600" }
-"#;
-
-const SCAFFOLD_DATA_FILE: &str = r#"# Base variables and profiles for template rendering.
-
-# [variable]
-# str = "str"
-# num = 1
-
-# [profile.profile1]
-# str = "profile1"
-"#;
-
-const SCAFFOLD_IGNORE_FILE: &str = r#"# Excludes resolved target paths from deployment. Gitignore-style
-# patterns: a pattern containing no slash matches a file name at any
-# depth; a pattern containing a slash is anchored to the
-# target-directory root.
-
-# file1
-# dir1/**
-"#;
-
-/// Creates the missing control files in the source directory, scaffolding a
-/// fresh one when the directory itself does not exist (`spec/commands/init.md`).
 pub fn run(source: &Path, _env: &Environment, color: bool) -> Result<()> {
     let report = Reporter::always(color);
 
@@ -123,3 +87,37 @@ pub fn run(source: &Path, _env: &Environment, color: bool) -> Result<()> {
 fn entry_exists(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok()
 }
+
+const SCAFFOLD_DOTRIFT_TOML: &str = r#"# Maps source paths to target paths. Rendered as a template before
+# parsing: template tags in this file are evaluated, so keep examples
+# commented out unless you want them rendered.
+
+# target-directory = "/absolute/path"
+
+# [portal]
+# "config/**/*.toml" = ".config"
+# "file1" = ".file1"
+
+# [rule]
+# ".config/**" = { type = "copy" }
+# ".config/secrets/**" = { mode = "600" }
+"#;
+
+const SCAFFOLD_DATA_FILE: &str = r#"# Base variables and profiles for template rendering.
+
+# [variable]
+# str = "str"
+# num = 1
+
+# [profile.profile1]
+# str = "profile1"
+"#;
+
+const SCAFFOLD_IGNORE_FILE: &str = r#"# Excludes resolved target paths from deployment. Gitignore-style
+# patterns: a pattern containing no slash matches a file name at any
+# depth; a pattern containing a slash is anchored to the
+# target-directory root.
+
+# file1
+# dir1/**
+"#;

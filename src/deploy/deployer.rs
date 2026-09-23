@@ -7,9 +7,8 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs,
-    io::{self, BufWriter},
-    os::unix::fs::{PermissionsExt, symlink},
+    fs, io,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
 
@@ -17,38 +16,36 @@ use miette::{Result, WrapErr, miette};
 use templater::value::Value;
 
 use super::obstruction::{ObstructionResolver, ResolveAction};
-use super::reconcile::{Decision, decide};
+use super::reconcile::Decision;
 use crate::{
-    commands::apply::ApplyOptions,
     config::{self, DeployType, GlobalConfig},
-    internal_error,
     platform::prettify_path,
-    render::{RenderRegistry, render_template_to},
+    render::RenderRegistry,
     report::{Outcome, Reporter},
-    state::{Fingerprint, HashWriter, Kind, StateDatabase, StateRecord, is_managed},
+    state::{Kind, StateDatabase, StateRecord},
 };
 
 /// Latch for the `replace all` obstruction choice: once enabled, every
 /// upcoming obstruction is replaced without prompting.
 ///
-/// Documented as preview-only in dry-run (ADR-0014): dry-run never enables it.
+/// Dry-run never enables it (ADR-0014).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ReplaceLatch {
     replace_all: bool,
 }
 
 impl ReplaceLatch {
-    pub(crate) fn is_enabled(&self) -> bool {
+    fn is_enabled(&self) -> bool {
         self.replace_all
     }
 
-    pub(crate) fn enable(&mut self) {
+    fn enable(&mut self) {
         self.replace_all = true;
     }
 }
 
-/// Single word table mapping a reconcile `Decision` to its report
-/// `(Outcome, word)`, shared by dry-run and real-run rendering.
+/// Shared by dry-run and real-run rendering: maps a reconcile `Decision`
+/// to the `(Outcome, word)` pair the report line renders.
 pub(crate) fn describe_decision(decision: &Decision) -> (Outcome, &'static str) {
     match decision {
         Decision::Deployed => (Outcome::Deployed, "deployed"),
@@ -57,7 +54,6 @@ pub(crate) fn describe_decision(decision: &Decision) -> (Outcome, &'static str) 
     }
 }
 
-/// Outcome of a single `deploy_one` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeployOutcome {
     Deployed,
@@ -66,7 +62,6 @@ pub(crate) enum DeployOutcome {
     Cancelled,
 }
 
-/// Performs decided deployments. Single owner of `remove_path`.
 pub(crate) struct Deployer<'a> {
     database: &'a StateDatabase,
     target_root: &'a Path,
@@ -117,7 +112,7 @@ impl<'a> Deployer<'a> {
         }
 
         let mut replaced = false;
-        match decide(
+        match super::reconcile::decide(
             self.database,
             self.target_root,
             entry,
@@ -163,7 +158,7 @@ impl<'a> Deployer<'a> {
 
         let record = match entry.deploy_type {
             DeployType::Symlink => {
-                symlink(&entry.source_path, &entry.target_path)
+                std::os::unix::fs::symlink(&entry.source_path, &entry.target_path)
                     .map_err(|error| miette!(error))
                     .wrap_err_with(|| {
                         format!(
@@ -207,86 +202,18 @@ impl<'a> Deployer<'a> {
     }
 }
 
-/// Writes a copy or template entry straight to its target file, returning the
-/// digest of the deployed bytes.
+/// Cleans up stale paths, leaving only `desired` managed under `target_root`.
 ///
-/// A template entry takes its rendered bytes from the render registry when it
-/// is usable, copying them into the freshly created target; otherwise it
-/// renders directly as the target is written. The file is created before
-/// writing, so a failed copy or write leaves a partial target behind; it is
-/// removed to keep the failure contract that the target is absent after a
-/// failed deploy action. A render failure happens before the target is
-/// created and leaves it absent.
-fn write_deployed_file(
-    entry: &config::DeploymentEntry,
-    context: &HashMap<String, Value>,
-    registry: &mut RenderRegistry,
-) -> Result<Fingerprint> {
-    if entry.deploy_type == DeployType::Template
-        && let Some(rendered) = registry.ensure_rendered(&entry.source_path, context)?
-    {
-        let mut file = fs::File::create(&entry.target_path)
-            .map_err(|error| miette!(error))
-            .wrap_err_with(|| {
-                format!("cannot write target file `{}`", entry.target_path.display())
-            })?;
-        let outcome = fs::File::open(&rendered.path)
-            .map_err(|error| miette!(error))
-            .wrap_err_with(|| {
-                format!(
-                    "cannot read template render registry entry `{}`",
-                    rendered.path.display()
-                )
-            })
-            .and_then(|mut source| {
-                io::copy(&mut source, &mut file)
-                    .map(|_| ())
-                    .map_err(|error| miette!(error))
-                    .wrap_err_with(|| {
-                        format!("cannot write target file `{}`", entry.target_path.display())
-                    })
-            });
-        if let Err(error) = outcome {
-            let _ = fs::remove_file(&entry.target_path);
-            return Err(error);
-        }
-        return Ok(rendered.digest);
-    }
-    let file = fs::File::create(&entry.target_path)
-        .map_err(|error| miette!(error))
-        .wrap_err_with(|| format!("cannot write target file `{}`", entry.target_path.display()))?;
-    let mut writer = HashWriter::new(BufWriter::new(file));
-    let outcome = match entry.deploy_type {
-        DeployType::Template => render_template_to(&entry.source_path, context, &mut writer),
-        DeployType::Copy => fs::File::open(&entry.source_path)
-            .map_err(|error| miette!(error))
-            .wrap_err_with(|| format!("cannot read source file `{}`", entry.source_path.display()))
-            .and_then(|mut source| {
-                io::copy(&mut source, &mut writer)
-                    .map(|_| ())
-                    .map_err(|error| miette!(error))
-                    .wrap_err_with(|| {
-                        format!("cannot write target file `{}`", entry.target_path.display())
-                    })
-            }),
-        DeployType::Symlink => Err(internal_error("symlink entries do not deploy as files")),
-    };
-    let content_hash = writer.into_digest();
-    if let Err(error) = outcome {
-        let _ = fs::remove_file(&entry.target_path);
-        return Err(error);
-    }
-    Ok(content_hash)
-}
-
-/// Removes stale paths: managed paths under the target root that are not part
-/// of the desired deployment. Single owner of `remove_path` for the Relinquish
-/// + prune-empty-dirs scan.
+/// A stale path is one managed under the target root that the desired
+/// deployment omits: it is removed on disk along with its record; a record
+/// whose target no longer matches its record (or is missing) is relinquished
+/// instead, dropping only the record. Empty directories left behind are
+/// pruned.
 pub(crate) fn cleanup(
     database: &StateDatabase,
     target_root: &Path,
     desired: &HashSet<PathBuf>,
-    options: ApplyOptions,
+    options: crate::commands::apply::ApplyOptions,
     report: &Reporter,
 ) -> Result<(usize, usize)> {
     let dry_run = options.dry_run;
@@ -303,8 +230,8 @@ pub(crate) fn cleanup(
         let exists = match fs::symlink_metadata(path) {
             Ok(_) => true,
             Err(error)
-                if error.kind() == std::io::ErrorKind::NotFound
-                    || error.kind() == std::io::ErrorKind::NotADirectory =>
+                if error.kind() == io::ErrorKind::NotFound
+                    || error.kind() == io::ErrorKind::NotADirectory =>
             {
                 false
             }
@@ -321,7 +248,7 @@ pub(crate) fn cleanup(
             }
             continue;
         }
-        if !is_managed(&record)? {
+        if !crate::state::is_managed(&record)? {
             if !dry_run {
                 database.remove(path)?;
             }
@@ -401,7 +328,7 @@ fn would_be_empty(
     }
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(true),
         Err(error) => {
             Err::<(), _>(miette!(error))
                 .wrap_err_with(|| format!("cannot inspect prune directory `{}`", path.display()))?;
@@ -436,7 +363,7 @@ fn prune_parents(target_root: &Path, removed_path: &Path, report: &Reporter) -> 
         }
         let metadata = match fs::symlink_metadata(parent) {
             Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => break,
             Err(error) => {
                 Err::<(), _>(miette!(error)).wrap_err_with(|| {
                     format!("cannot inspect prune directory `{}`", parent.display())
@@ -467,12 +394,87 @@ fn prune_parents(target_root: &Path, removed_path: &Path, report: &Reporter) -> 
     Ok(count)
 }
 
+/// Writes a copy or template entry straight to its target file.
+///
+/// A template entry takes its rendered bytes from the render registry when it
+/// is usable, copying them into the freshly created target; otherwise it
+/// renders directly as the target is written. The file is created before
+/// writing, so a failed copy or write leaves a partial target behind; it is
+/// removed to keep the failure contract that the target is absent after a
+/// failed deploy action. A render failure happens before the target is
+/// created and leaves it absent.
+fn write_deployed_file(
+    entry: &config::DeploymentEntry,
+    context: &HashMap<String, Value>,
+    registry: &mut RenderRegistry,
+) -> Result<crate::state::Fingerprint> {
+    if entry.deploy_type == DeployType::Template
+        && let Some(rendered) = registry.ensure_rendered(&entry.source_path, context)?
+    {
+        let mut file = fs::File::create(&entry.target_path)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| {
+                format!("cannot write target file `{}`", entry.target_path.display())
+            })?;
+        let outcome = fs::File::open(&rendered.path)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| {
+                format!(
+                    "cannot read template render registry entry `{}`",
+                    rendered.path.display()
+                )
+            })
+            .and_then(|mut source| {
+                io::copy(&mut source, &mut file)
+                    .map(|_| ())
+                    .map_err(|error| miette!(error))
+                    .wrap_err_with(|| {
+                        format!("cannot write target file `{}`", entry.target_path.display())
+                    })
+            });
+        if let Err(error) = outcome {
+            let _ = fs::remove_file(&entry.target_path);
+            return Err(error);
+        }
+        return Ok(rendered.digest);
+    }
+    let file = fs::File::create(&entry.target_path)
+        .map_err(|error| miette!(error))
+        .wrap_err_with(|| format!("cannot write target file `{}`", entry.target_path.display()))?;
+    let mut writer = crate::state::HashWriter::new(io::BufWriter::new(file));
+    let outcome = match entry.deploy_type {
+        DeployType::Template => {
+            crate::render::render_template_to(&entry.source_path, context, &mut writer)
+        }
+        DeployType::Copy => fs::File::open(&entry.source_path)
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot read source file `{}`", entry.source_path.display()))
+            .and_then(|mut source| {
+                io::copy(&mut source, &mut writer)
+                    .map(|_| ())
+                    .map_err(|error| miette!(error))
+                    .wrap_err_with(|| {
+                        format!("cannot write target file `{}`", entry.target_path.display())
+                    })
+            }),
+        DeployType::Symlink => Err(crate::internal_error(
+            "symlink entries do not deploy as files",
+        )),
+    };
+    let content_hash = writer.into_digest();
+    if let Err(error) = outcome {
+        let _ = fs::remove_file(&entry.target_path);
+        return Err(error);
+    }
+    Ok(content_hash)
+}
+
 /// Removes `path` from the filesystem and drops its state record.
 ///
 /// Directories are removed recursively, deepest-first in component order,
 /// stopping at the first error. Symlinks are unlinked as links, never
 /// followed. The state record is deleted after each completed removal.
-pub(crate) fn remove_path(database: &StateDatabase, path: &Path) -> Result<()> {
+fn remove_path(database: &StateDatabase, path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| miette!(error))
         .wrap_err_with(|| format!("cannot inspect managed path `{}`", path.display()))?;
@@ -505,13 +507,13 @@ pub(crate) fn remove_path(database: &StateDatabase, path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::cell::RefCell;
 
-    use crate::{platform::Environment, state::hash_bytes};
+    use tempfile::{TempDir, tempdir};
+    use test_case::test_case;
 
     use super::*;
-    use tempfile::tempdir;
-    use test_case::test_case;
+    use crate::{platform::Environment, state::hash_bytes};
 
     #[test]
     fn latch_enable_stays_enabled() {
@@ -668,15 +670,15 @@ mod tests {
     }
 
     struct FakeResolver {
-        actions: std::cell::RefCell<Vec<ResolveAction>>,
-        calls: std::cell::RefCell<usize>,
+        actions: RefCell<Vec<ResolveAction>>,
+        calls: RefCell<usize>,
     }
 
     impl FakeResolver {
         fn once(action: ResolveAction) -> Self {
             Self {
-                actions: std::cell::RefCell::new(vec![action]),
-                calls: std::cell::RefCell::new(0),
+                actions: RefCell::new(vec![action]),
+                calls: RefCell::new(0),
             }
         }
 
@@ -716,12 +718,7 @@ mod tests {
         }
     }
 
-    fn test_harness() -> (
-        tempfile::TempDir,
-        tempfile::TempDir,
-        tempfile::TempDir,
-        tempfile::TempDir,
-    ) {
+    fn test_harness() -> (TempDir, TempDir, TempDir, TempDir) {
         (
             tempdir().expect("source temp dir"),
             tempdir().expect("target temp dir"),
@@ -828,8 +825,8 @@ mod tests {
         let mut registry = RenderRegistry::acquire(&env);
         let global_config = GlobalConfig::default();
         let interaction = FakeResolver {
-            actions: std::cell::RefCell::new(vec![ResolveAction::Replace { latch_all: true }]),
-            calls: std::cell::RefCell::new(0),
+            actions: RefCell::new(vec![ResolveAction::Replace { latch_all: true }]),
+            calls: RefCell::new(0),
         };
         let mut latch = ReplaceLatch::default();
         let first = copy_entry(&source.path().join("file1"), &target.path().join("file1"));
@@ -858,8 +855,6 @@ mod tests {
 
     #[test]
     fn deploy_one_template_failure_leaves_target_absent() {
-        use crate::platform::Environment;
-
         let (source, target, state, registry_root) = test_harness();
         fs::write(source.path().join("file1"), "{{ str1").unwrap();
         let database = StateDatabase::open_at(state.path()).unwrap();
@@ -913,7 +908,7 @@ mod tests {
 
     #[test]
     fn a_failed_copy_leaves_the_target_absent() {
-        let (source, target, state, registry_root) = test_harness();
+        let (source, target, _state, registry_root) = test_harness();
         let env = Environment::test_root(registry_root.path());
         let mut registry = RenderRegistry::acquire(&env);
         let entry = copy_entry(
@@ -925,6 +920,5 @@ mod tests {
             .expect_err("the missing copy source must fail");
         assert!(error.to_string().contains("cannot read"), "{error}");
         assert!(!target.path().join("target1").exists());
-        let _ = &state;
     }
 }

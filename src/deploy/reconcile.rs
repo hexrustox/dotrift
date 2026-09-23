@@ -1,5 +1,4 @@
-//! The reconcile decision: what `apply` does with one desired entry before
-//! any filesystem effect.
+//! The reconcile decision: what `apply` does with one desired entry before any filesystem effect.
 
 use std::{
     collections::HashMap,
@@ -16,12 +15,9 @@ use crate::{
     state::{StateDatabase, is_identical, is_managed},
 };
 
-/// What `apply` does with one entry before any filesystem effect: a missing
-/// target deploys, an auto-replaceable occupant is removed and then deployed,
-/// and anything else occupying the target path needs a user decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Decision {
-    /// The target path is free; deploy the entry.
+    /// The target path is free.
     Deployed,
     /// `remove` occupies the target path and is replaced without prompting;
     /// remove it, then deploy.
@@ -113,7 +109,6 @@ fn parent_obstruction(target_root: &Path, target_path: &Path) -> Result<Option<P
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::os::unix::fs::symlink;
 
     use tempfile::tempdir;
@@ -143,7 +138,7 @@ mod tests {
 
     fn dry_registry(anchor: &Path) -> RenderRegistry {
         // An unavailable registry: its directory cannot be created because a
-        // file occupies the path (`spec/commands/apply.md` ADR-0017).
+        // file occupies the path (ADR-0017).
         let blocker = anchor.join("registry-dir");
         fs::write(&blocker, b"").unwrap();
         RenderRegistry::acquire(&Environment::test_root(anchor).with_registry_dir(blocker))

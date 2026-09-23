@@ -7,43 +7,23 @@ use std::{
 use miette::{Report, Result, WrapErr, miette};
 use templater::{Template, value::Value};
 
-use super::Builtins;
-
 /// Why rendering a template stopped: the template itself, or the sink it was
 /// rendered into.
-pub(crate) enum RenderFailure {
+pub(super) enum RenderFailure {
     /// Reading the source, parsing, or rendering failed; the run must report
-    /// this. Carries the final diagnostic.
+    /// this.
     Template(Report),
     /// Writing the rendered bytes failed; infrastructure, not the template.
     Sink(io::Error),
 }
 
-/// Renders the template at `path` into `writer`, reporting whether the
-/// template or the sink failed.
-pub(crate) fn render_template_into(
-    path: &Path,
-    context: &HashMap<String, Value>,
-    writer: impl Write,
-) -> std::result::Result<(), RenderFailure> {
-    let template = Template::from_file(path)
-        .map_err(|error| miette!(error))
-        .wrap_err_with(|| format!("cannot read template `{}`", path.display()))
-        .map_err(RenderFailure::Template)?;
-    let result = template.render(writer, context, &Builtins);
-    match result {
-        Ok(()) => Ok(()),
-        Err(templater::error::Error::Io(error)) => Err(RenderFailure::Sink(error)),
-        Err(error) => template
-            .report(Err(error))
-            .map_err(|error| miette!(error))
-            .wrap_err_with(|| format!("cannot render template `{}`", path.display()))
-            .map_err(RenderFailure::Template),
-    }
+pub(crate) fn render_template(path: &Path, context: &HashMap<String, Value>) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    render_template_to(path, context, &mut output)?;
+    Ok(output)
 }
 
-/// Renders the template at `path` into `writer`, treating a sink failure as
-/// fatal like any other rendering failure.
+/// A sink failure is fatal here, like any other rendering failure.
 pub(crate) fn render_template_to(
     path: &Path,
     context: &HashMap<String, Value>,
@@ -60,16 +40,30 @@ pub(crate) fn render_template_to(
     }
 }
 
-pub(crate) fn render_template(path: &Path, context: &HashMap<String, Value>) -> Result<Vec<u8>> {
-    let mut output = Vec::new();
-    render_template_to(path, context, &mut output)?;
-    Ok(output)
+pub(super) fn render_template_into(
+    path: &Path,
+    context: &HashMap<String, Value>,
+    writer: impl Write,
+) -> Result<(), RenderFailure> {
+    let template = Template::from_file(path)
+        .map_err(|error| miette!(error))
+        .wrap_err_with(|| format!("cannot read template `{}`", path.display()))
+        .map_err(RenderFailure::Template)?;
+    let result = template.render(writer, context, &super::Builtins);
+    match result {
+        Ok(()) => Ok(()),
+        Err(templater::error::Error::Io(error)) => Err(RenderFailure::Sink(error)),
+        Err(error) => template
+            .report(Err(error))
+            .map_err(|error| miette!(error))
+            .wrap_err_with(|| format!("cannot render template `{}`", path.display()))
+            .map_err(RenderFailure::Template),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::io;
+    use std::{fs, io};
 
     use tempfile::tempdir;
 

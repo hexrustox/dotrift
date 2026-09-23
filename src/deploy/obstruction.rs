@@ -8,9 +8,11 @@
 use std::{
     collections::HashMap,
     ffi::OsStr,
+    fs,
     io::Write,
     path::Path,
     process::{Child, Command, Stdio},
+    result::Result as StdResult,
 };
 
 use miette::{Result, WrapErr, miette};
@@ -58,7 +60,7 @@ pub trait Prompter {
         &self,
         entry: &config::DeploymentEntry,
         obstruction: &Path,
-    ) -> std::result::Result<ObstructionChoice, PromptError>;
+    ) -> StdResult<ObstructionChoice, PromptError>;
 }
 
 impl<P: Prompter + ?Sized> Prompter for &P {
@@ -66,7 +68,7 @@ impl<P: Prompter + ?Sized> Prompter for &P {
         &self,
         entry: &config::DeploymentEntry,
         obstruction: &Path,
-    ) -> std::result::Result<ObstructionChoice, PromptError> {
+    ) -> StdResult<ObstructionChoice, PromptError> {
         (**self).prompt(entry, obstruction)
     }
 }
@@ -103,7 +105,7 @@ impl Prompter for RealPrompter {
         &self,
         entry: &config::DeploymentEntry,
         obstruction: &Path,
-    ) -> std::result::Result<ObstructionChoice, PromptError> {
+    ) -> StdResult<ObstructionChoice, PromptError> {
         prompt_for_obstruction(entry, obstruction)
     }
 }
@@ -178,18 +180,10 @@ impl<P: Prompter, D: Differ> ObstructionResolver for Interaction<'_, P, D> {
     }
 }
 
-/// Whether the diff choice makes sense: only for two present regular files.
-fn offers_diff(source: &Path, obstruction: &Path) -> bool {
-    use std::fs;
-
-    fs::metadata(source).is_ok_and(|metadata| metadata.is_file())
-        && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file())
-}
-
 pub(crate) fn prompt_for_obstruction(
     entry: &config::DeploymentEntry,
     obstruction: &Path,
-) -> std::result::Result<ObstructionChoice, PromptError> {
+) -> StdResult<ObstructionChoice, PromptError> {
     use crossterm::style::Color;
 
     use crate::platform::prettify_path;
@@ -211,6 +205,12 @@ pub(crate) fn prompt_for_obstruction(
         .style(style)
         .filter(move |choice| should_show_diff || *choice != ObstructionChoice::ViewDiff)
         .interact()
+}
+
+/// Whether the diff choice makes sense: only for two present regular files.
+fn offers_diff(source: &Path, obstruction: &Path) -> bool {
+    fs::metadata(source).is_ok_and(|metadata| metadata.is_file())
+        && fs::metadata(obstruction).is_ok_and(|metadata| metadata.is_file())
 }
 
 fn path_kind(path: &Path) -> std::io::Result<&'static str> {
@@ -576,7 +576,7 @@ mod tests {
             &self,
             _entry: &config::DeploymentEntry,
             _obstruction: &Path,
-        ) -> std::result::Result<ObstructionChoice, PromptError> {
+        ) -> StdResult<ObstructionChoice, PromptError> {
             *self.calls.borrow_mut() += 1;
             self.choices
                 .borrow_mut()
@@ -592,7 +592,7 @@ mod tests {
             &self,
             _: &config::DeploymentEntry,
             _: &Path,
-        ) -> std::result::Result<ObstructionChoice, PromptError> {
+        ) -> StdResult<ObstructionChoice, PromptError> {
             Err(PromptError::Io(std::io::Error::from(
                 std::io::ErrorKind::NotFound,
             )))

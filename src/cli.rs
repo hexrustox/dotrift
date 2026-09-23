@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use miette::Result;
 
 use crate::platform::{Environment, ensure_absolute};
 
@@ -14,17 +13,17 @@ pub struct Cli {
     /// Defaults to `$XDG_DATA_HOME/dotfiles` (or `$HOME/.local/share/dotfiles`).
     /// Relative paths resolve against the current directory.
     #[arg(short, long)]
-    pub source: Option<PathBuf>,
+    source: Option<PathBuf>,
 
     /// Directory to deploy into.
     ///
     /// Overrides `target-directory` in `dotrift.toml`.
     /// Relative paths resolve against the current directory.
     #[arg(short, long)]
-    pub target: Option<PathBuf>,
+    target: Option<PathBuf>,
 
     #[command(subcommand)]
-    pub command: Command,
+    command: Command,
 }
 
 #[derive(Debug, Subcommand)]
@@ -87,7 +86,10 @@ pub enum ProfileCommand {
 }
 
 impl Cli {
-    pub fn resolve(self, env: &Environment) -> Result<(Option<PathBuf>, Option<PathBuf>, Command)> {
+    pub fn resolve(
+        self,
+        env: &Environment,
+    ) -> miette::Result<(Option<PathBuf>, Option<PathBuf>, Command)> {
         let Cli {
             command,
             source,

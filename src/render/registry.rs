@@ -4,28 +4,12 @@
 use std::{
     collections::HashMap,
     fs,
-    io::{self, BufWriter},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
 
-use miette::Result;
-use templater::value::Value;
-
 use super::template;
-use crate::{
-    platform::Environment,
-    state::{Fingerprint, HashWriter, TemplateHash},
-};
-
-/// The rendered output of one template for this run.
-#[derive(Debug)]
-pub(crate) struct Rendered {
-    /// The registry entry holding the rendered bytes.
-    pub(crate) path: PathBuf,
-    /// The fingerprint of the rendered bytes.
-    pub(crate) digest: Fingerprint,
-}
+use crate::state::{Fingerprint, TemplateHash};
 
 /// A per-run, content-addressed store of rendered template output.
 ///
@@ -40,12 +24,19 @@ pub(crate) struct RenderRegistry {
     memo: HashMap<TemplateHash, Fingerprint>,
 }
 
+/// The rendered output of one template for this run.
+#[derive(Debug)]
+pub(crate) struct RegistryEntry {
+    pub(crate) path: PathBuf,
+    pub(crate) digest: Fingerprint,
+}
+
 impl RenderRegistry {
     /// Prepares the registry for a run — dry runs included, which render into
     /// it for the identical-obstruction check and leave nothing behind on drop.
     /// A real run empties and re-creates the registry directory, falling back
     /// to no registry when that fails.
-    pub(crate) fn acquire(env: &Environment) -> Self {
+    pub(crate) fn acquire(env: &crate::platform::Environment) -> Self {
         let dir = env.registry_dir();
         if clear_and_create(&dir) {
             Self {
@@ -60,62 +51,55 @@ impl RenderRegistry {
         }
     }
 
-    /// Returns the registry entry for `source`'s render, rendering into the
-    /// registry on first use and copying from it afterwards.
+    /// Renders into the registry on first use and copies from it afterwards.
     pub(crate) fn ensure_rendered(
         &mut self,
         source: &Path,
-        context: &HashMap<String, Value>,
-    ) -> Result<Option<Rendered>> {
+        context: &HashMap<String, templater::value::Value>,
+    ) -> miette::Result<Option<RegistryEntry>> {
         let Some(dir) = self.dir.clone() else {
             return Ok(None);
         };
         let template_hash = TemplateHash::of_file(source)?;
-        let entry = dir.join(format!("{template_hash}.tmpl"));
-        if fs::symlink_metadata(&entry).is_ok() {
+        let path = dir.join(format!("{template_hash}.tmpl"));
+        if fs::symlink_metadata(&path).is_ok() {
             let digest = match self.memo.get(&template_hash) {
                 Some(digest) => digest.clone(),
                 None => {
-                    let digest = Fingerprint::of_file(&entry)?;
+                    let digest = Fingerprint::of_file(&path)?;
                     self.memo.insert(template_hash.clone(), digest.clone());
                     digest
                 }
             };
-            return Ok(Some(Rendered {
-                path: entry,
-                digest,
-            }));
+            return Ok(Some(RegistryEntry { path, digest }));
         }
         let file = match fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .open(&entry)
+            .open(&path)
         {
             Ok(file) => file,
             Err(_) => {
-                let _ = fs::remove_file(&entry);
+                let _ = fs::remove_file(&path);
                 return Ok(None);
             }
         };
-        let mut writer = HashWriter::new(BufWriter::new(file));
+        let mut writer = crate::state::HashWriter::new(std::io::BufWriter::new(file));
         match template::render_template_into(source, context, &mut writer) {
             Ok(()) => {}
             Err(template::RenderFailure::Sink(_)) => {
-                let _ = fs::remove_file(&entry);
+                let _ = fs::remove_file(&path);
                 return Ok(None);
             }
             Err(template::RenderFailure::Template(report)) => {
-                let _ = fs::remove_file(&entry);
+                let _ = fs::remove_file(&path);
                 return Err(report);
             }
         }
         let digest = writer.into_digest();
         self.memo.insert(template_hash, digest.clone());
-        Ok(Some(Rendered {
-            path: entry,
-            digest,
-        }))
+        Ok(Some(RegistryEntry { path, digest }))
     }
 }
 
@@ -127,12 +111,11 @@ impl Drop for RenderRegistry {
     }
 }
 
-/// Empties and re-creates the registry directory, reporting whether it is
-/// usable. Failure is silent: the registry is an optimization.
+/// Failure is silent: the registry is an optimization.
 fn clear_and_create(dir: &Path) -> bool {
     match fs::remove_dir_all(dir) {
         Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return false,
     }
     fs::create_dir_all(dir).is_ok()
@@ -145,11 +128,13 @@ mod tests {
     use tempfile::tempdir;
 
     use super::RenderRegistry;
-    use crate::{platform::Environment, state::hash_bytes};
-    use templater::value::Value;
+    use crate::platform::Environment;
 
-    fn context() -> HashMap<String, Value> {
-        HashMap::from([("str".to_string(), Value::Str("str".into()))])
+    fn context() -> HashMap<String, templater::value::Value> {
+        HashMap::from([(
+            "str".to_string(),
+            templater::value::Value::Str("str".into()),
+        )])
     }
 
     #[test]
@@ -194,6 +179,6 @@ mod tests {
                 & 0o777,
             0o600
         );
-        assert_eq!(rendered.digest, hash_bytes(&bytes));
+        assert_eq!(rendered.digest, crate::state::hash_bytes(&bytes));
     }
 }

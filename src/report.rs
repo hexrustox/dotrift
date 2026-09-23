@@ -1,10 +1,10 @@
-use std::{fmt, io::Write};
+use std::fmt;
 
-use crossterm::style::{Color, Stylize};
+use crossterm::style::Color;
 use tui::apply_color;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Outcome {
+pub(crate) enum Outcome {
     Deployed,
     Replaced,
     Skipped,
@@ -17,7 +17,7 @@ pub enum Outcome {
 }
 
 impl Outcome {
-    pub fn color(self) -> Color {
+    fn color(self) -> Color {
         match self {
             Outcome::Deployed | Outcome::Managed | Outcome::Active => Color::Green,
             Outcome::Replaced => Color::Cyan,
@@ -32,18 +32,18 @@ impl Outcome {
 /// Owns the run's output policy — color support, outcome gating, and quiet —
 /// so call sites print without deciding any of it themselves.
 #[derive(Debug, Clone, Copy)]
-pub struct Reporter {
+pub(crate) struct Reporter {
     color: bool,
     outcome_enabled: bool,
     quiet: bool,
 }
 
 impl Reporter {
-    pub fn always(color: bool) -> Self {
+    pub(crate) fn always(color: bool) -> Self {
         Self::new(color, true, false)
     }
 
-    pub fn new(color: bool, outcome_enabled: bool, quiet: bool) -> Self {
+    pub(crate) fn new(color: bool, outcome_enabled: bool, quiet: bool) -> Self {
         Self {
             color,
             outcome_enabled,
@@ -51,21 +51,21 @@ impl Reporter {
         }
     }
 
-    pub fn paint<F>(&self, outcome: Outcome, content: F) -> String
+    pub(crate) fn paint<F>(&self, outcome: Outcome, content: F) -> String
     where
-        F: fmt::Display + Stylize,
+        F: fmt::Display + crossterm::style::Stylize,
         F::Styled: fmt::Display,
     {
         apply_color(content, outcome.color(), self.color)
     }
 
-    pub fn line(&self, args: fmt::Arguments) {
-        imp::emit_stdout(&format!("{args}\n"));
+    pub(crate) fn line(&self, args: fmt::Arguments) {
+        stdout_imp::emit_stdout(&format!("{args}\n"));
     }
 
     /// Prints the caller-formatted line when the run's outcome policy
     /// (verbose or dry-run) allows it; nothing is emitted when suppressed.
-    pub fn outcome_line(&self, args: fmt::Arguments) {
+    pub(crate) fn outcome_line(&self, args: fmt::Arguments) {
         if !self.outcome_enabled {
             return;
         }
@@ -73,16 +73,16 @@ impl Reporter {
     }
 
     /// Prints the run summary unless the run is quiet.
-    pub fn summary(&self, args: fmt::Arguments) {
+    pub(crate) fn summary(&self, args: fmt::Arguments) {
         if self.quiet {
             return;
         }
-        imp::emit_stdout(&format!("{args}\n"));
+        stdout_imp::emit_stdout(&format!("{args}\n"));
     }
 
-    /// Prints to standard error, never colored and never suppressed.
-    pub fn warning(&self, args: fmt::Arguments) {
-        imp::emit_stderr(&format!(
+    /// Prints to standard error, never suppressed.
+    pub(crate) fn warning(&self, args: fmt::Arguments) {
+        stdout_imp::emit_stderr(&format!(
             "{} {args}\n",
             apply_color("WARNING", Color::Yellow, self.color)
         ));
@@ -90,15 +90,15 @@ impl Reporter {
 }
 
 /// Where the content diff is written when no pager ran.
-pub fn diff_sink() -> impl Write {
-    imp::diff_sink()
+pub(crate) fn diff_sink() -> impl std::io::Write {
+    stdout_imp::diff_sink()
 }
 
 #[cfg(feature = "testing")]
-pub use imp::{clear, take_errors, take_output};
+pub use stdout_imp::{clear, take_errors, take_output};
 
 #[cfg(not(feature = "testing"))]
-mod imp {
+mod stdout_imp {
     pub(super) fn emit_stdout(line: &str) {
         print!("{line}");
     }
@@ -113,7 +113,7 @@ mod imp {
 }
 
 #[cfg(feature = "testing")]
-mod imp {
+mod stdout_imp {
     use std::cell::RefCell;
 
     thread_local! {
@@ -166,8 +166,11 @@ mod imp {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::io::Write;
+
     use test_case::test_case;
+
+    use super::*;
 
     #[test_case(false, "" ; "suppressed_without_outcome_enabled")]
     #[test_case(true, "hello\n" ; "prints_caller_formatted_args")]

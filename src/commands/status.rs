@@ -1,21 +1,15 @@
-use miette::Result;
+use crate::{platform::prettify_path, report::Outcome};
 
-use crate::{
-    platform::{Environment, prettify_path},
-    report::{Outcome, Reporter},
-    state::{StateDatabase, is_managed},
-};
-
-pub fn run(env: &Environment, color: bool) -> Result<()> {
-    let report = Reporter::always(color);
-    let Some(database) = StateDatabase::open_read_only(env)? else {
+pub fn run(env: &crate::platform::Environment, color: bool) -> miette::Result<()> {
+    let report = crate::report::Reporter::always(color);
+    let Some(database) = crate::state::StateDatabase::open_read_only(env)? else {
         return Ok(());
     };
     let mut records = database.managed_paths()?;
     records.sort_by(|left, right| left.target_path.cmp(&right.target_path));
 
     for record in records {
-        let managed = is_managed(&record)?;
+        let managed = crate::state::is_managed(&record)?;
         let (outcome, verdict) = if managed {
             (Outcome::Managed, "managed")
         } else {

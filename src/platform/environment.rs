@@ -51,7 +51,8 @@ impl Environment {
 
     /// Overrides the template render registry directory, for tests that need
     /// registry infrastructure to fail (e.g. pointing at a regular file).
-    pub fn with_registry_dir(mut self, dir: PathBuf) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_registry_dir(mut self, dir: PathBuf) -> Self {
         self.registry_dir = Some(dir);
         self
     }

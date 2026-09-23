@@ -15,7 +15,8 @@
 
 use std::{
     collections::HashMap,
-    fs::{self, File},
+    fmt::{self, Display, Formatter},
+    fs,
     hash::Hasher,
     io::{BufReader, Read, Write},
     path::Path,
@@ -37,24 +38,22 @@ use crate::{
 pub struct Fingerprint(String);
 
 impl Fingerprint {
-    /// Computes the fingerprint of `bytes`.
     pub fn of_bytes(bytes: &[u8]) -> Self {
         Self(xxhash_hex(bytes))
     }
 
-    /// Computes the fingerprint of the file at `path`, following symlinks.
+    /// Follows symlinks.
     pub(crate) fn of_file(path: &Path) -> Result<Self> {
         Ok(Self(xxhash_file_hex(path)?))
     }
 
-    /// Borrows the hex digest, for comparing against a stored state record.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-impl std::fmt::Display for Fingerprint {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Fingerprint {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
 }
@@ -72,29 +71,31 @@ impl From<Fingerprint> for String {
 pub struct TemplateHash(String);
 
 impl TemplateHash {
-    /// Computes the template hash of `bytes`.
     pub fn of_bytes(bytes: &[u8]) -> Self {
         Self(xxhash_hex(bytes))
     }
 
-    /// Computes the template hash of the file at `path`, following symlinks.
+    /// Follows symlinks.
     pub(crate) fn of_file(path: &Path) -> Result<Self> {
         Ok(Self(xxhash_file_hex(path)?))
     }
 
-    /// Borrows the hex digest, for naming a registry entry.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-impl std::fmt::Display for TemplateHash {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for TemplateHash {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
 }
 
-/// An [`Write`] adapter that fingerprints every accepted byte while
+pub fn hash_bytes(bytes: &[u8]) -> Fingerprint {
+    Fingerprint::of_bytes(bytes)
+}
+
+/// A [`Write`] adapter that fingerprints every accepted byte while
 /// forwarding it, producing the same digest as [`hash_bytes`] for the same
 /// byte stream.
 pub(crate) struct HashWriter<W> {
@@ -110,7 +111,7 @@ impl<W> HashWriter<W> {
         }
     }
 
-    /// Consumes the adapter, returning the fingerprint of everything written.
+    /// Consumes the adapter, returning the digest as a [`Fingerprint`].
     pub(crate) fn into_digest(self) -> Fingerprint {
         Fingerprint(format!("{:016x}", self.hasher.finish()))
     }
@@ -126,11 +127,6 @@ impl<W: Write> Write for HashWriter<W> {
     fn flush(&mut self) -> std::io::Result<()> {
         self.inner.flush()
     }
-}
-
-/// Computes the fingerprint of `bytes`.
-pub fn hash_bytes(bytes: &[u8]) -> Fingerprint {
-    Fingerprint::of_bytes(bytes)
 }
 
 /// Whether the target path is still a managed path: dotrift created it and
@@ -167,12 +163,15 @@ pub(crate) fn is_managed(record: &StateRecord) -> Result<bool> {
     }
 }
 
-/// Whether the entry's own target path is an *identical obstruction*: for a
-/// symlink deploy, a symlink whose link target equals the source path; for a
-/// file deploy, a path resolving to a regular file whose content fingerprint
-/// equals the fingerprint of the bytes that would be deployed. Any failure to
-/// read a path or obtain the rendered bytes means the check cannot establish
-/// identity and the obstruction is treated as not identical.
+/// The obstruction question is boolean at the call site.
+///
+/// A symlink deploy obstructs identically when the target path is a
+/// symlink whose link value equals the source path. A file deploy
+/// obstructs when the target path resolves, following symlinks, to a
+/// regular file whose content fingerprint equals the fingerprint of the
+/// bytes that would be deployed. Any failure to read a path or obtain the
+/// rendered bytes fails the check: the obstruction is treated as not
+/// identical.
 pub(crate) fn is_identical(
     entry: &DeploymentEntry,
     context: &HashMap<String, Value>,
@@ -202,7 +201,7 @@ fn xxhash_hex(bytes: &[u8]) -> String {
 }
 
 fn xxhash_file_hex(path: &Path) -> Result<String> {
-    let file = File::open(path)
+    let file = fs::File::open(path)
         .map_err(|error| miette!(error))
         .wrap_err_with(|| format!("cannot read file `{}` for hashing", path.display()))?;
     let mut reader = BufReader::new(file);
