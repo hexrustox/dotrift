@@ -52,7 +52,8 @@ target-directory = "/absolute/path"
   expansion in TOML).
 * **Description:** Root of the destination tree. The CLI `--target` override
   takes precedence (see `spec/commands/global.md § Target directory
-  precedence`). Must be an absolute path.
+  precedence`). Must be an absolute path; the rule is enforced when no CLI
+  `--target` override is provided (see the same section).
 
 No other root-level keys are defined. Unknown keys and sections are rejected
 as configuration errors. There is no `version` field and no `ignore` field;
@@ -149,7 +150,7 @@ specs reference it rather than restate it.
   the like — are configuration errors for every deploy type.
 
 Every error in this section is a configuration error: it halts execution
-before any filesystem change.
+before any deployment.
 
 ## `[rule]`
 
@@ -227,11 +228,13 @@ Applies to portal keys and values and rule keys:
 
 ## Validation
 
-Errors halt execution before any filesystem change. Validation runs on the
+Errors halt execution before any deployment. Validation runs on the
 rendered configuration; rendered values are subject to the same rules as
 literal values, with no template-specific exceptions.
 
 * **Invalid target directory:** `target-directory` is not an absolute path.
+  Enforced only when no CLI `--target` override is provided (see
+  `spec/commands/global.md § Target directory precedence`).
 * **Collision:** any two resolved portal entries producing the same target
   path, including identical declarations for the same source path. The error
   lists the target and the colliding sources/declarations.

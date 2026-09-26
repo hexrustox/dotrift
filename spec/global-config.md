@@ -103,8 +103,8 @@ empty-by-`command` table counts as unset and is not validated.
 * `${target}` and `${source}` must appear together: `args` referencing
   exactly one of the two fails validation. Label placeholders are
   unconstrained.
-* A violation fails the run at global-config load, before any filesystem
-  change, like any other validation error.
+* A violation fails the run at global-config load, before any deployment,
+  like any other validation error.
 
 ## `[apply]`
 
@@ -121,13 +121,13 @@ leaves every property at its default.
   acquiring the state lock and before reading the control files. No other
   command reads it today.
 * **Failure timing:** any discovery or validation error fails the run before
-  any filesystem change, including under `--dry-run`. The config is read
+  any deployment, including under `--dry-run`. The config is read
   eagerly (ADR-0018): a broken global config fails every `apply` run, even
   one whose settings would not have been consulted.
 
 ## Validation
 
-Errors halt execution before any filesystem change.
+Errors halt execution before any deployment.
 
 * **Malformed TOML:** a parse error halts execution.
 * **Unknown structure:** any root table or key other than `[pager]`,

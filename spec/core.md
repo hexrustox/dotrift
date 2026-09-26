@@ -37,12 +37,13 @@ directory and the desired deployment drives `apply`'s decisions.
   cannot be opened or parsed as SQLite is a hard error in every command that
   touches it: no quarantine, no recreate, no repair. An existing database
   missing an expected table is completed on open (`CREATE TABLE IF NOT
-  EXISTS`) rather than rejected — on the open path that can write; a
-  read-only open cannot write the schema, so it treats a database holding
-  none of the expected tables as the empty state. Only a file that cannot be
-  opened or parsed fails (see the amendment to ADR-0015). There is no schema
-  version and no migration path; the user deletes the file by hand to start
-  fresh.
+  EXISTS`) rather than rejected — on the open path that can write. A
+  read-only open cannot write the schema, so a database holding none of the
+  expected tables reads as the empty state; one holding some but not all of
+  them opens, and reading a missing table is a hard error like any other
+  read failure. Only a file that cannot be opened or parsed fails at open
+  (see the amendment to ADR-0015). There is no schema version and no
+  migration path; the user deletes the file by hand to start fresh.
 
 ## managed_paths Table
 

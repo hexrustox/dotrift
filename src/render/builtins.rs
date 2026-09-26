@@ -106,11 +106,12 @@ impl FunctionRegistry for Builtins {
             }
             "div" => {
                 arg_count(args, 2)?;
+                let a = int_arg(args, 0)?;
                 let b = int_arg(args, 1)?;
                 if b == 0 {
                     return Err(custom("division by zero", &[]));
                 }
-                Ok(Value::Int(int_arg(args, 0)? / b))
+                Ok(Value::Int(a / b))
             }
             "neg" => {
                 arg_count(args, 1)?;
@@ -278,12 +279,14 @@ fn receiver(msg: impl Into<String>) -> RegistryError {
 }
 
 fn fold_bools(args: &[Value], start: bool, stop: bool) -> Result<Value, RegistryError> {
-    for index in 0..args.len() {
-        if bool_arg(args, index)? == stop {
-            return Ok(Value::Bool(stop));
-        }
+    let values = (0..args.len())
+        .map(|index| bool_arg(args, index))
+        .collect::<Result<Vec<_>, _>>()?;
+    if values.contains(&stop) {
+        Ok(Value::Bool(stop))
+    } else {
+        Ok(Value::Bool(start))
     }
-    Ok(Value::Bool(start))
 }
 
 fn env_var(args: &[Value]) -> Result<Value, RegistryError> {
@@ -493,6 +496,10 @@ mod tests {
     #[test_case("gt", vec![str_value("1"), Value::Int(2)]; "gt rejects a string")]
     #[test_case("add", vec![Value::Int(1), str_value("2")]; "add rejects a string operand")]
     #[test_case("div", vec![str_value("1"), Value::Int(2)]; "div rejects a string operand")]
+    #[test_case("div", vec![str_value("x"), Value::Int(0)]; "div checks the zero divisor last")]
+    #[test_case("div", vec![str_value("x"), str_value("y")]; "div reports the first bad operand")]
+    #[test_case("and", vec![Value::Bool(false), Value::Int(1)]; "and checks later args on early false")]
+    #[test_case("or", vec![Value::Bool(true), str_value("x")]; "or checks later args on early true")]
     #[test_case("neg", vec![str_value("1")]; "neg rejects a string")]
     #[test_case("not", vec![Value::Int(1)]; "not rejects an int")]
     #[test_case("and", vec![Value::Bool(true), Value::Int(1)]; "and rejects an int")]

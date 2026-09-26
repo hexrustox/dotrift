@@ -81,7 +81,10 @@ two Ints. String arguments are argument errors.
 
 ## Math
 
-All operands must be Ints.
+All operands must be Ints. Arithmetic overflow — any result outside the Int
+range, including negating the smallest Int and dividing it by `-1` — is not
+an error and is not a defined value: the operations are Rust `i64` arithmetic
+with no overflow checks, and dotrift pins no wrapped result beyond that.
 
 **`add(a, b, ...)` → Int.** The sum of two or more Ints.
 

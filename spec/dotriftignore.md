@@ -16,13 +16,15 @@ expansion are available. Patterns use standard gitignore syntax (ADR-0002).
 * **Optional:** a missing file contributes no patterns. An empty file is
   valid. A dangling symlink at `.dotriftignore` counts as missing.
 * **Errors:** an unreadable file — an I/O error, or the path being a
-  directory — halts execution before any filesystem change. Missing is the
+  directory — halts execution before any deployment. Missing is the
   only absence treated as "no ignore patterns".
 
 ## Pattern syntax
 
 Each line is one ignore pattern. Blank lines and lines whose first character
-is `#` are ignored.
+is `#` are ignored. Trailing whitespace is stripped from each line before it
+is treated as a pattern; a space survives only when escaped with a backslash
+(a line ending in `\ `), matching gitignore behavior.
 
 The standard gitignore pattern forms are supported:
 
@@ -37,6 +39,8 @@ The standard gitignore pattern forms are supported:
   (or `**/dir/**` to match at any depth).
 * Leading `!` — negation; re-includes a target path previously ignored by an
   earlier pattern.
+* A leading `\#` or `\!` is not a comment or a negation: the backslash escapes
+  the character, is dropped, and the pattern begins with a literal `#` or `!`.
 * A slash anywhere else in the pattern anchors it relative to the
   target-directory root (gitignore behavior).
 
@@ -103,8 +107,7 @@ files and remain deployable.
 
 ## Validation
 
-* **Unreadable file:** an I/O error halts execution before any filesystem
-  change.
+* **Unreadable file:** an I/O error halts execution before any deployment.
 * **Non-compilable pattern:** a configuration error, halting before any
-  filesystem change.
+  deployment.
 * **Missing file:** valid; no user-defined patterns.

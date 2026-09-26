@@ -78,10 +78,10 @@ When the target directory is needed, it is resolved in order:
 3. the user's home directory.
 
 When `--target` is provided, the CLI override wins outright: the config-side
-`target-directory` value is unused and its absolute-path rule is not enforced.
-The config file is still parsed in full for its other content, so a malformed
-file — including a structurally invalid `target-directory` — fails regardless
-of the override.
+`target-directory` value is unused and is neither enforced nor validated — a
+relative or otherwise invalid `target-directory` does not fail the run. The
+config file is still parsed in full, so a malformed file fails regardless of
+the override.
 
 ## Source directory requirement
 

@@ -89,7 +89,7 @@ list, or a scalar — is replaced entirely.
 
 ## Validation
 
-Errors halt execution before any filesystem change.
+Errors halt execution before any deployment.
 
 * **Unreadable file:** an I/O error halts execution. Missing is the only
   absence treated as "no data defined".

@@ -25,6 +25,16 @@ _Avoid_: destination, target-dir (only as CLI/config token)
 Per-entry path on disk that dotrift writes to.
 _Avoid_: computed target
 
+**Deployment**:
+The `apply` pipeline stage that changes the target directory, running the
+per-entry deploy actions (see `spec/commands/apply.md § Deploy action`). The
+filesystem writes a run performs earlier — the state lock and its directory
+(`spec/core.md § State lock`) and the template render registry
+(`spec/commands/apply.md § Template render registry`) — are run
+infrastructure, not deployment. Validation and preflight errors halt before
+any deployment.
+_Avoid_: filesystem change (infrastructure writes are filesystem changes too)
+
 **Desired deployment**:
 The complete set of resolved portal entries `apply` intends to deploy for a
 given run: *portal resolution*, filtered by the ignore file and validated for
@@ -103,14 +113,14 @@ _Avoid_: (none)
 
 **Collision**:
 Config-time condition where two different portal resolutions produce the same
-target path. Halts the program before any filesystem change. Distinct from
+target path. Halts the program before any deployment. Distinct from
 *obstruction*.
 _Avoid_: (none — distinct from obstruction)
 
 **Structural conflict**:
 Config-time condition where two desired target paths place one as an ancestor
 of the other (for example `config` and `config/editor`), so they cannot both
-exist as deployment targets. Halts the program before any filesystem change,
+exist as deployment targets. Halts the program before any deployment,
 like a *collision*.
 _Avoid_: path conflict, overlap
 

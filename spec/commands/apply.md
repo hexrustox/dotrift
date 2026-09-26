@@ -34,7 +34,7 @@ in `dotrift.toml`, defaulting to the home directory (see
 
 ## Preflight
 
-Before any filesystem change, `apply` verifies:
+Before any deployment, `apply` verifies:
 
 - The control files are readable and well-formed, and the rendered
   `dotrift.toml` is valid (see `spec/dotrift-toml.md § Validation`): literal
@@ -115,8 +115,8 @@ absolute location and its kind, and reports that the obstructing path is
 already present:
 
 ```
-Cannot deploy {kind} {source} because {kind} {obstruction} is already present.
-How would you like to proceed?
+cannot deploy {kind} {source} because {kind} {obstruction} is already present
+how would you like to proceed?
 ```
 
 The kind is reported from the path's own non-following metadata, one of

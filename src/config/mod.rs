@@ -436,6 +436,7 @@ fn apply_rules(
         }
     }
     if deploy_type == DeployType::Symlink {
+        // TODO
         if mode.is_some() {
             crate::report::Reporter::always(color).warning(format_args!(
                 "ignoring `mode` for `{}` because effective `type` is `symlink`",
